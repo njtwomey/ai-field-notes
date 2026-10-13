@@ -1,0 +1,186 @@
+---
+title: 'Implicit regularisation'
+kind: concept
+summary: 'Implicit regularisation is the bias an optimiser adds without a penalty term. Gradient descent from zero on underdetermined least squares converges to the minimum-norm solution; on logistic loss with separable data its direction converges to the maximum-margin separator.'
+tags: [learning-theory, regularisation, optimisation, interpolation, worked-example]
+aliases: [implicit bias, implicit bias of gradient descent, algorithmic regularisation, implicit regularization]
+requires: [gradient-descent, pseudoinverse, support-vector-machine]
+related: [double-descent, benign-overfitting, neural-tangent-kernel, early-stopping, ridge-regression, mirror-descent, flat-minima-and-sharpness, margin-bounds, norm-based-bounds-for-neural-networks]
+references: [soudry2018, neyshabur2015b, zhang2017, gunasekar2017, gunasekar2018, arora2019, woodworth2020, lyu2020, ji2019, smith2021, wilson2017]
+status: draft
+updated: 2026-10-12
+---
+
+import { MinimumNormPath } from './MinimumNormPath'
+
+<Definition>
+**Implicit regularisation** is the preference of an optimisation algorithm for particular solutions of an objective with
+many minimisers, or with none, when no penalty term asks for it. Two results are exact.
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> on underdetermined least squares, started at $\wvec_0$,
+converges to $\Xmat^{+}\yvec + (\eye - \Xmat^{+}\Xmat)\wvec_0$, which is the minimum-norm solution when
+$\wvec_0 = \zeros$. Gradient descent on the <NoteLink to="surrogate-losses">logistic loss</NoteLink> of linearly
+separable data diverges in norm, and its direction converges to that of the hard-margin <Gloss name="svm">support vector
+machine</Gloss> <Cite id="soudry2018" />.
+</Definition>
+
+## Intuition
+
+An overparameterised model has many settings of its parameters that fit the training data exactly. Neural networks can
+even fit random labels <Cite id="zhang2017" />. The training loss cannot tell these solutions apart, yet they predict
+differently on new inputs. Which one is returned is decided by the algorithm: its starting point, its update rule and
+its step size. The algorithm acts as a regulariser that was never written down.
+
+Neyshabur, Tomioka and Srebro made this argument for neural networks. Networks with more hidden units than needed to
+fit the data generalised better, not worse, so the capacity that controlled generalisation was not the number of
+parameters. They proposed that it was a norm, kept small by the optimiser <Cite id="neyshabur2015b" />. The linear
+results below make that proposal exact. They identify the effective class the algorithm searches, a small norm ball or
+a large margin, so that the norm-based and margin-based bounds of the
+<NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink> can be applied to the
+algorithm's output rather than to the whole class.
+
+## Least squares
+
+Let $\Xmat \in \reals^{n \times p}$ hold $n$ examples of $p > n$ features, with full row rank $n$, and let
+$\yvec \in \reals^n$ hold the targets. The loss $L(\wvec) = \frac12\norm{\Xmat\wvec - \yvec}^2$ has a whole affine
+subspace of minimisers with $L = 0$. Gradient descent with step size $\eta$ updates
+
+$$
+\wvec_{t+1} = \wvec_t - \eta\,\Xmat^\top(\Xmat\wvec_t - \yvec).
+$$
+
+The limit follows in three steps.
+
+1. **The updates stay in the row space.** Every update is $\Xmat^\top$ times a vector of length $n$, so it lies in the
+   row space of $\Xmat$. Let $\Pmat = \Xmat^{+}\Xmat$ be the <NoteLink to="orthogonal-projection">orthogonal
+   projection</NoteLink> onto the row space, where $\Xmat^{+}$ is the
+   <NoteLink to="pseudoinverse">pseudoinverse</NoteLink>. Then $(\eye - \Pmat)\wvec_t =
+   (\eye - \Pmat)\wvec_0$ for every $t$: the component of the iterate in the null space of $\Xmat$ never changes.
+2. **The residual vanishes.** The residual $\rvec_t = \Xmat\wvec_t - \yvec$ obeys
+   $\rvec_{t+1} = (\eye - \eta\Xmat\Xmat^\top)\rvec_t$. The eigenvalues of $\Xmat\Xmat^\top$ are the squared singular
+   values $s_1^2 \ge \dots \ge s_n^2 > 0$. For $0 < \eta < 2/s_1^2$ every eigenvalue of $\eye - \eta\Xmat\Xmat^\top$
+   lies in $(-1, 1)$, so $\rvec_t \to \zeros$ and the iterates converge to an interpolating solution.
+3. **Identify the limit.** Every interpolating solution is $\Xmat^{+}\yvec$ plus a vector of the null space, because
+   $\Xmat^{+}\yvec$ is the only interpolant in the row space (see the
+   <NoteLink to="double-descent">double descent</NoteLink> note). By step 1 the limit's null-space component is
+   $(\eye - \Pmat)\wvec_0$. Therefore
+
+   $$
+   \wvec_\infty = \Xmat^{+}\yvec + (\eye - \Xmat^{+}\Xmat)\wvec_0.
+   $$
+
+Started at $\wvec_0 = \zeros$, gradient descent returns the minimum-norm interpolant. Started elsewhere, it returns the
+minimum-norm interpolant plus the component of $\wvec_0$ in the null space of $\Xmat$. The same argument holds for
+<Gloss name="sgd">stochastic gradient descent</Gloss>, whose updates are also multiples of rows of $\Xmat$. It fails for
+adaptive methods such as Adam, which rescale each coordinate and leave the row space; on some underdetermined problems
+they converge to solutions that generalise worse <Cite id="wilson2017" />.
+
+<MinimumNormPath />
+
+**Early stopping is a soft version of the minimum-norm limit.** Write $\Xmat = \Umat\Smat\Vmat^\top$ in its
+<NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink>. From $\wvec_0 = \zeros$, the
+component of $\wvec_t$ along the right singular vector $\vvec_i$ is
+
+$$
+\paren{1 - (1 - \eta s_i^2)^t}\frac{\uvec_i^\top\yvec}{s_i}, \qquad \text{while ridge gives} \qquad
+\frac{s_i^2}{s_i^2 + \lambda}\,\frac{\uvec_i^\top\yvec}{s_i}.
+$$
+
+Both multiply the minimum-norm solution's components by filter factors between 0 and 1 that are small for small
+singular values. Stopping after $t$ steps acts roughly like a ridge penalty $\lambda \approx 1/(\eta t)$
+(<NoteLink to="early-stopping">early stopping</NoteLink>, <NoteLink to="ridge-regression">ridge regression</NoteLink>).
+
+## Worked example: one equation, two unknowns
+
+Take one example $\xvec = (1, 2)$ with target $y = 5$, so the solutions of $\xvec^\top\wvec = 5$ form a line in the
+plane. Take $\eta = 0.1$.
+
+1. **The minimum-norm solution.** $\wvec^* = \xvec\,y/\norm{\xvec}^2 = (1, 2)$, with $\norm{\wvec^*} = 2.236$. It is the
+   point of the line nearest the origin.
+2. **The contraction.** The residual is multiplied by $1 - \eta\norm{\xvec}^2 = 0.5$ at every step. From the origin,
+   $\wvec_t = (1 - 0.5^t)\wvec^*$: the iterates walk straight along $\xvec$ and close half the remaining gap each step.
+3. **A different start.** From $\wvec_0 = (2, 0)$, the component along the line, in the direction
+   $(-2, 1)/\sqrt5$, is $(1.6, -0.8)$. It is kept, so the limit is $(1, 2) + (1.6, -0.8) = (2.6, 1.2)$, with norm
+   2.864. It fits the example exactly and is 1.789 away from $\wvec^*$.
+4. **Early stopping against ridge.** Ridge gives $\wvec_\lambda = \frac{5}{5 + \lambda}\wvec^*$. Gradient descent from
+   the origin matches it exactly when $1 - 0.5^t = 5/(5 + \lambda)$: $\lambda = 5$ after one step, 1.67 after two, 0.71
+   after three and 0.16 after five.
+
+## Logistic loss on separable data
+
+Let the data be linearly separable through the origin, and absorb the labels $y_i \in \set{-1, +1}$ into the inputs,
+$\zvec_i = y_i\xvec_i$, so that a separator has $\wvec^\top\zvec_i > 0$ for all $i$. The logistic loss
+$L(\wvec) = \sum_i\ln(1 + e^{-\wvec^\top\zvec_i})$ is positive everywhere and tends to 0 along every separating
+direction as $\norm{\wvec} \to \infty$. It has no minimiser, and gradient descent sends $\norm{\wvec_t}$ to infinity.
+
+Let $\hat\wvec = \argmin\set{\norm{\wvec}^2 : \wvec^\top\zvec_i \ge 1 \text{ for all } i}$ be the hard-margin
+<NoteLink to="support-vector-machine">support vector machine</NoteLink> without bias. Soudry, Hoffer, Nacson, Gunasekar
+and Srebro proved that, for a small enough constant step size,
+
+$$
+\wvec_t = \hat\wvec\,\ln t + \rhovec_t,
+$$
+
+where $\norm{\rhovec_t}$ grows at most like $\ln\ln t$ <Cite id="soudry2018" />. The direction
+$\wvec_t/\norm{\wvec_t}$ converges to $\hat\wvec/\norm{\hat\wvec}$, but only at the rate $1/\ln t$.
+
+**Why the maximum margin.** Once $\norm{\wvec_t}$ is large, every term of the gradient,
+$-\sum_i\zvec_i/(1 + e^{\wvec_t^\top\zvec_i}) \approx -\sum_i e^{-\wvec_t^\top\zvec_i}\zvec_i$, is weighted by a factor
+exponentially small in the point's margin. The points with the smallest margin dominate, and the gradient becomes a
+non-negative combination of them. The <NoteLink to="karush-kuhn-tucker-conditions">Karush–Kuhn–Tucker
+conditions</NoteLink> of the hard-margin problem say the same of $\hat\wvec$: it is a non-negative combination of the
+support vectors, the points with the smallest margin. A direction that is a fixed point of gradient descent must
+satisfy those conditions.
+
+**Numbers.** Take $\zvec_1 = (1, 2)$, $\zvec_2 = (2, 0.5)$ and $\zvec_3 = (5, -0.5)$. The first two are the support
+vectors, and $\hat\wvec = (3/7, 2/7)$ gives the largest normalised margin, $1/\norm{\hat\wvec} = 1.941$. Gradient
+descent on the mean loss with $\eta = 0.1$, started at the origin, first moves along the mean of the $\zvec_i$, which
+points $19.7°$ away from $\hat\wvec$. Its angle to $\hat\wvec$ is $11.4°$ after 10 steps, $2.2°$ after 100 and $1.0°$
+after 1,000. It then overshoots slightly and is still $1.9°$ away after a million steps. Each tenfold increase in $t$
+adds 1.18 to $\norm{\wvec_t}$, close to $\norm{\hat\wvec}\ln 10 = 1.19$, as the $\hat\wvec\ln t$ term predicts.
+
+{/* figure pending engine (B4 implicitBiasLogistic): the iterate direction against the hard-margin SVM direction on
+draggable separable points, with the angle against t on a log axis and ‖w_t‖ against ln t */}
+
+Training past zero training error keeps moving the classifier towards the maximum margin, even while the validation loss
+rises, so the training loss is a poor stopping signal for classification <Cite id="soudry2018" />.
+
+On non-separable data the iterates converge in direction on the separable part of the data and to a finite solution on
+the rest <Cite id="ji2019" />.
+
+## Beyond linear models
+
+- **Other optimisers, other geometries.** <NoteLink to="mirror-descent">Mirror descent</NoteLink> with a potential
+  $\psi$ converges, on underdetermined <NoteLink to="linear-regression">linear regression</NoteLink>, to the interpolant
+  with the smallest <NoteLink to="bregman-divergences-and-scoring-rules">Bregman divergence</NoteLink> from the start,
+  whatever the step size. On separable classification, steepest descent with respect to a norm tends to the
+  maximum-margin direction in that norm <Cite id="gunasekar2018" />.
+- **Matrix factorisation.** Gradient descent on a factorised matrix $\Umat\Vmat^\top$ from a small start fits observed
+  entries with low-rank solutions. Gunasekar et al. conjectured that it minimises the nuclear norm
+  <Cite id="gunasekar2017" />. For deeper factorisations the bias towards low rank is stronger than any norm
+  <Cite id="arora2019" />.
+- **Initial scale.** For diagonal linear networks $w_j = u_j^2 - v_j^2$, a large initialisation gives the minimum
+  $\ell_2$-norm solution (the kernel regime) and a small one approaches the minimum $\ell_1$-norm solution (the rich
+  regime) <Cite id="woodworth2020" />. The kernel regime is the regime of the
+  <NoteLink to="neural-tangent-kernel">neural tangent kernel</NoteLink>.
+- **Homogeneous networks.** For <Gloss name="relu" /> networks without biases trained on the logistic loss, the
+  normalised margin increases once the training loss is small, and it converges to a Karush–Kuhn–Tucker point of a
+  maximum-margin problem over the parameters <Cite id="lyu2020" />.
+- **Stochasticity and step size.** With a small finite step size, the mean iterate of stochastic gradient descent with
+  random shuffling follows gradient flow on a modified loss: the original loss plus a penalty on the norms of the
+  minibatch gradients. For small batches the penalty scales with the ratio of step size to batch size
+  <Cite id="smith2021" />. It favours regions where the loss is flat (see
+  <NoteLink to="flat-minima-and-sharpness">flat minima and sharpness</NoteLink>).
+
+## Pitfalls
+
+- **The limit depends on the start.** The least-squares limit keeps the null-space part of $\wvec_0$. A large random
+  initialisation is not a small-norm start, and the solution's norm includes it.
+- **The optimiser matters.** Results for gradient descent do not transfer to adaptive methods, momentum variants or
+  <NoteLink to="second-order-methods">second-order methods</NoteLink> without a new argument.
+- **Which solution, not why it generalises.** Implicit regularisation names the solution. A bound still has to show
+  that small-norm or large-margin solutions generalise, for example a <NoteLink to="margin-bounds">margin
+  bound</NoteLink> or a <NoteLink to="norm-based-bounds-for-neural-networks">norm-based bound</NoteLink>. For some
+  overparameterised problems, the minimum-norm interpolant itself generalises poorly
+  (<NoteLink to="benign-overfitting">benign overfitting</NoteLink> describes when it does not).
+- **Limits are slow.** The maximum-margin direction is reached at rate $1/\ln t$. A network trained for a finite number
+  of steps sits far from the limit the theory describes.

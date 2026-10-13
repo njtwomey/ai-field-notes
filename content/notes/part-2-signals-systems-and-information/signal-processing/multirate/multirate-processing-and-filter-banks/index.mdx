@@ -1,0 +1,72 @@
+---
+title: 'Multirate processing and filter banks'
+kind: overview
+summary: 'Changing a signal''s sampling rate and splitting it into subbands: decimation and interpolation with their anti-aliasing and anti-imaging filters, polyphase structures and the noble identities, rational sample-rate conversion, DFT filter banks and perfect-reconstruction designs.'
+tags: [signal-processing, multirate, filter-banks, overview]
+aliases: [multirate signal processing, multirate systems]
+requires: [digital-filters, aliasing]
+related: [digital-filters, wavelets, time-frequency-analysis]
+references: [vaidyanathan1993, crochiere1981]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Multirate processing** handles signals at more than one sampling rate within one system. Its two basic operations
+are downsampling by an integer $M$, which keeps every $M$-th sample, and upsampling by an integer $L$, which inserts
+$L - 1$ zeros between samples. A **filter bank** uses them to split a signal into frequency bands, process each band at
+a reduced rate, and recombine the bands <Cite id="vaidyanathan1993" />.
+</Definition>
+
+## What it is for
+
+Signals often arrive at one rate and are needed at another. Audio recorded at 44.1 kHz is resampled to 48 kHz for
+playback or to 16 kHz for a speech model. A signal whose band of interest is narrow can be processed at a much lower
+rate after filtering, which cuts the computation. Splitting a signal into subbands lets a coder spend bits where the
+ear or the eye notices errors, and lets an analysis examine each band separately <Cite id="crochiere1981" />.
+
+Neural networks change rates too. Strided convolutions and pooling downsample feature maps, and, as noted in
+<NoteLink to="pooling-and-strides" />, striding without a low-pass filter aliases high frequencies. Upsampling layers
+in decoders insert samples and must suppress the resulting spectral images. Resampling audio to the rate a model was
+trained on is a routine preprocessing step for speech and audio models.
+
+## Main ideas
+
+**Rate changes fold or copy the spectrum.** Downsampling by $M$ stretches the spectrum and overlays $M$ shifted copies,
+so content above $\pi/M$ aliases. Upsampling by $L$ compresses the spectrum and creates $L - 1$ images. A decimator
+places a low-pass filter before the downsampler and an interpolator places one after the upsampler.
+<NoteLink to="decimation-and-interpolation" /> derives both spectra and the filters that make the operations safe.
+
+**Filter at the low rate.** A filter followed by a downsampler computes many outputs only to discard them. The
+<NoteLink to="polyphase-decomposition" /> splits a filter into $M$ subfilters of every $M$-th coefficient. With the
+noble identities, which move a filter across a rate changer, the subfilters run at the low rate and the cost falls by a
+factor of $M$.
+
+**Rational conversion needs one filter.** Changing the rate by $L/M$ upsamples by $L$, filters once with cutoff
+$\min(\pi/L, \pi/M)$, and downsamples by $M$. <NoteLink to="sample-rate-conversion" /> shows how a polyphase
+implementation computes only the outputs that are kept, which keeps the conversion from 44.1 kHz to 48 kHz cheap.
+
+**Analysis and synthesis banks.** A <NoteLink to="filter-banks">filter bank</NoteLink> splits a signal with analysis
+filters, usually downsamples each band, and recombines with synthesis filters. A uniform DFT filter bank modulates one
+prototype low-pass filter to $K$ centre frequencies and runs as a polyphase network followed by an <Gloss name="fft" />.
+
+**Aliasing can be cancelled exactly.** Each downsampled band aliases, yet the bank as a whole can reconstruct its input
+exactly up to a delay. <NoteLink to="perfect-reconstruction-filter-banks" /> derives the conditions for two channels:
+synthesis filters that cancel the aliasing, and a remaining transfer function that is a pure delay. Iterated on the
+low band, orthogonal two-channel banks of this kind compute the discrete wavelet transform.
+
+## How the notes fit together
+
+The notes form a chain. <NoteLink to="decimation-and-interpolation" /> comes first, then
+<NoteLink to="polyphase-decomposition" />. <NoteLink to="sample-rate-conversion" /> and
+<NoteLink to="filter-banks" /> both build on these two and can be read in either order.
+<NoteLink to="perfect-reconstruction-filter-banks" /> comes last and leads into <NoteLink to="wavelets" />.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="digital-filters" />, <NoteLink to="aliasing" /> and the <NoteLink to="z-transform" />.
+Two-channel perfect-reconstruction banks, iterated on the low band, give the
+<NoteLink to="discrete-wavelet-transform" />. The <Gloss name="stft">short-time Fourier transform</Gloss> of
+<NoteLink to="time-frequency-analysis" /> is a uniform DFT filter bank, and the <NoteLink to="mel-filter-bank">mel
+filter bank</NoteLink> of <NoteLink to="audio-signal-processing" /> is a non-uniform one. Perceptual audio coders build
+on subband filter banks; see <NoteLink to="perceptual-audio-coding" />.

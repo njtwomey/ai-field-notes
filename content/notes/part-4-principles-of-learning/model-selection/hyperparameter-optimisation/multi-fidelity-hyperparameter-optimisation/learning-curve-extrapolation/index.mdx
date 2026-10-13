@@ -1,0 +1,214 @@
+---
+title: 'Learning-curve extrapolation'
+kind: technique
+summary: 'Learning-curve extrapolation fits a parametric curve, such as $a + bt^{-c}$, to the first epochs of a run and predicts its final validation loss, so runs unlikely to beat the incumbent can be stopped. Freeze-thaw optimisation pauses and resumes runs on such predictions.'
+tags: [model-selection, hyperparameters, early-stopping, bayesian, worked-example]
+aliases: [learning curve prediction, predictive termination, freeze-thaw Bayesian optimisation, freeze-thaw Bayesian optimization, LC-PFN]
+requires: [multi-fidelity-hyperparameter-optimisation, linear-regression]
+related: [successive-halving, hyperband, early-stopping, learning-curves-and-sample-size, gaussian-process, bayesian-optimisation, entropy-search, model-selection-at-scale, nonlinear-regression]
+references: [domhan2015, swersky2014freezethaw, klein2017lcnet, adriaensen2023lcpfn, golovin2017vizier, hutter2019automl]
+status: draft
+updated: 2026-10-13
+---
+
+import { PowerLawExtrapolation } from './PowerLawExtrapolation'
+
+<Definition>
+**Learning-curve extrapolation** predicts the validation loss a training run will reach at its full budget $R$ from the
+losses it has reached so far. A model of the curve, such as $y(t) = a + bt^{-c}$ in the number of epochs $t$, is fitted
+to the first $t_0$ observations and evaluated at $R$. A <NoteLink to="hyperparameter-search">hyperparameter
+search</NoteLink> uses the prediction to stop runs that are unlikely to beat the best configuration found so far
+<Cite id="domhan2015" />, or, in **freeze-thaw** optimisation, to decide which of many paused runs to continue
+<Cite id="swersky2014freezethaw" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="successive-halving">Successive halving</NoteLink> ranks configurations by the loss they have reached at a
+small budget. That ranking ignores the shape of each curve: a run that is behind but still falling steeply is treated
+like a run that is behind and flat. Curves that cross defeat it.
+
+A learning curve carries more information than its last point. Its slope and curvature say how much further it is
+likely to fall. A model of the curve turns the first $t_0$ epochs into a forecast of the final loss, and the forecast,
+not the current loss, can be compared with the incumbent. The question is whether the forecast is accurate enough at
+small $t_0$ to beat the naive rule "the loss at $t_0$ ranks the runs".
+
+This note is about curves over training time within one run. <NoteLink to="learning-curves-and-sample-size">Learning
+curves over training-set size</NoteLink> are a different object with similar mathematics, used to decide whether more
+data would help.
+
+## Mechanism
+
+### Parametric curve models
+
+Validation loss against epochs usually falls fast and then flattens towards an asymptote. Families with that shape
+include
+
+$$
+y(t) = a + bt^{-c} \quad \text{(power law)}, \qquad y(t) = a + be^{-ct} \quad \text{(exponential)},
+$$
+
+with $a$ the asymptote, $b > 0$ the scale and $c > 0$ the rate. Domhan, Springenberg and Hutter combined eleven such
+families, including power laws, exponentials and sigmoid-shaped growth models such as the Janoschek and MMF curves, in a
+weighted ensemble. They fitted it by <Gloss name="mcmc">Markov chain Monte Carlo</Gloss>, which gives a predictive
+distribution for the final value rather than a point <Cite id="domhan2015" />.
+
+### Fitting a power law by variable projection
+
+The power law is linear in $a$ and $b$ and non-linear only in $c$. Least squares can therefore be solved in one
+dimension. Let $(t_1, y_1), \dots, (t_m, y_m)$ be the observed epochs and losses, and fix $c$. Write
+$\phi_i = t_i^{-c}$, and $\bar\phi$, $\bar y$ for the means. Minimising $\sum_i (y_i - a - b\phi_i)^2$ over $a$ and $b$
+is simple <NoteLink to="linear-regression">linear regression</NoteLink> of $y$ on $\phi$, with solution
+
+$$
+\hat b(c) = \frac{\sum_i (\phi_i - \bar\phi)(y_i - \bar y)}{\sum_i (\phi_i - \bar\phi)^2}, \qquad
+\hat a(c) = \bar y - \hat b(c)\,\bar\phi.
+$$
+
+Substituting back, the residual sum of squares at the best $a$ and $b$ is the part of $\sum_i (y_i - \bar y)^2$ that
+the regression does not explain:
+
+$$
+\operatorname{RSS}(c) = \paren{1 - \rho(c)^2}\sum_{i}(y_i - \bar y)^2,
+$$
+
+where $\rho(c)$ is the sample correlation between the losses $y_i$ and $t_i^{-c}$. Minimising over all three parameters
+is therefore the same as choosing the exponent $c$ whose transformed epochs $t^{-c}$ correlate best with the losses,
+then reading $\hat a$ and $\hat b$ from the regression. This is **variable projection**: the linear parameters are
+projected out and only $c$ is searched, on a grid and then by a one-dimensional method. The prediction at the full
+budget is $\hat y(R) = \hat a + \hat b R^{-\hat c}$.
+
+### Stopping on a prediction
+
+Domhan et al. stop a run when the model is confident that it will not beat the incumbent. With $y^\star$ the best final
+loss so far and $Y_R$ the run's final loss under the predictive distribution, the run stops when
+
+$$
+\prob(Y_R < y^\star \mid y_1, \dots, y_m) < \delta,
+$$
+
+with $\delta = 0.05$ in their experiments: training stops when the model is 95% certain the run cannot win. On
+<NoteLink to="image-classification-datasets">image classification benchmarks</NoteLink> this predictive termination sped
+up SMAC and <Gloss name="tpe" /> by a factor of about two <Cite id="domhan2015" />. A rule that compares the point
+prediction $\hat y(R)$ with $y^\star$ is cheaper but ignores how uncertain the prediction is, and early in a run the
+uncertainty is large.
+
+Model-based extrapolation contrasts with model-free rules. The
+**<NoteLink to="multi-fidelity-hyperparameter-optimisation">median stopping rule</NoteLink>** of Google Vizier stops a
+run at step $t$ if its best loss so far is worse than the median of the other runs' running average losses up to $t$
+<Cite id="golovin2017vizier" />. It needs no curve model, and it shares the weakness of successive halving with curves
+that cross.
+
+### Models across configurations
+
+A parametric fit uses one run's curve only. Later methods share information across runs, so that a configuration
+similar to one already trained can be predicted from fewer epochs.
+
+- **Freeze-thaw Bayesian optimisation** places a <NoteLink to="gaussian-process">Gaussian process</NoteLink> over the
+  asymptotes $f(\lambdavec)$ of all configurations, and models each curve as a second Gaussian process centred on its
+  asymptote with an exponential-decay kernel <Cite id="swersky2014freezethaw" />. It keeps a basket of paused ("frozen")
+  runs and new candidates, and uses <NoteLink to="entropy-search">entropy search</NoteLink> to choose which run to
+  resume ("thaw") or start.
+- **LC-Net** predicts curves with a Bayesian neural network that takes the hyperparameters as input and ends in a
+  specialised learning-curve layer built from the parametric families <Cite id="klein2017lcnet" />.
+- **LC-PFN** is a transformer trained on ten million synthetic curves drawn from a parametric prior, which outputs the
+  <NoteLink to="bayesian-inference">posterior predictive distribution</NoteLink> of the curve's continuation in one
+  forward pass. Adriaensen et al. report a closer approximation to the posterior than Markov chain Monte Carlo, over
+  10,000 times faster, and 2 to 6 times speed-ups on 45 of their data sets from a stopping rule built on it
+  <Cite id="adriaensen2023lcpfn" />.
+
+<Derivation title="The exponential-decay kernel of freeze-thaw">
+Freeze-thaw models a curve, after subtracting its asymptote, as a mixture of exponential decays $e^{-\lambda t}$ with
+random weights. Give the decay rates $\lambda \ge 0$ a gamma mixing density $\psi(\lambda) = \frac{\beta^\alpha}{\Gamma(\alpha)}
+\lambda^{\alpha - 1}e^{-\lambda\beta}$ with $\alpha, \beta > 0$. The covariance between the curve at epochs $t$ and $t'$
+is the integral of the product of the basis functions against the mixing density <Cite id="swersky2014freezethaw" />:
+
+$$
+k(t, t') = \int_0^\infty e^{-\lambda t}e^{-\lambda t'}\,\psi(\lambda)\,d\lambda
+= \frac{\beta^\alpha}{\Gamma(\alpha)}\int_0^\infty \lambda^{\alpha - 1}e^{-\lambda(t + t' + \beta)}\,d\lambda.
+$$
+
+The integral is a <NoteLink to="gamma-function">gamma function</NoteLink>: substituting $u = \lambda(t + t' + \beta)$
+gives $\int_0^\infty \lambda^{\alpha-1}e^{-\lambda(t + t' + \beta)}\,d\lambda = \Gamma(\alpha)/(t + t' + \beta)^\alpha$.
+So
+
+$$
+k(t, t') = \frac{\beta^\alpha}{(t + t' + \beta)^\alpha}.
+$$
+
+The variance $k(t, t) = \beta^\alpha/(2t + \beta)^\alpha$ falls to zero as $t$ grows, so samples from the process decay
+towards the asymptote, as training curves do. Being a mixture of positive-definite kernels
+$e^{-\lambda t}e^{-\lambda t'}$ with non-negative weights, $k$ is itself positive definite.
+</Derivation>
+
+<PowerLawExtrapolation />
+
+## Worked example
+
+The engine's seeded family has 27 power-law curves over $R = 81$ epochs, with crossing $\kappa = 0.5$ and observation
+noise of standard deviation $0.01$ (the figure's opening settings).
+
+1. **One curve.** Curve 0 shows losses $0.855, 0.489, 0.369, 0.316, 0.254, 0.211, 0.227, 0.196, 0.190$ in its first nine
+   epochs. Its true form is $0.0822 + 0.766\,t^{-0.916}$, with final loss $0.0959$ at epoch 81.
+2. **The fit.** Variable projection on the nine points gives $\hat c = 0.908$, then $\hat a = 0.0814$ and
+   $\hat b = 0.773$. The residual sum of squares is $0.0010$, of the order of $6 \times 0.01^2 = 0.0006$ that noise of
+   standard deviation $0.01$ leaves on nine points after fitting three parameters.
+3. **The prediction.** $81^{-0.908} = e^{-0.908 \ln 81} = e^{-3.99} = 0.0185$, so
+   $\hat y(81) = 0.0814 + 0.773 \times 0.0185 = 0.0957$. The true final loss is $0.0959$. The loss at epoch 9, $0.190$,
+   is twice the final value.
+4. **A stopping decision.** Suppose curve 3 has already been trained fully, with final loss $y^\star = 0.088$. The
+   point prediction $0.0957$ is above $y^\star$, so curve 0 stops at epoch 9 and saves 72 of its 81 epochs, correctly.
+   The margin $0.0957 - 0.088 = 0.008$ is smaller than the noise in one observed loss. A rule that stops only at 95%
+   confidence needs the uncertainty of the prediction, which a single least-squares fit does not give.
+
+Across all 27 curves, the extrapolation and the naive prediction "final loss equals the loss at $t_0$" compare as
+follows, by the <Gloss name="mean-absolute-error">mean absolute error</Gloss> of the predicted final loss and Kendall's
+$\tau$ between predicted and true final losses:
+
+| epochs seen $t_0$ | power law: error | power law: $\tau$ | loss at $t_0$: error | loss at $t_0$: $\tau$ |
+| --- | --- | --- | --- | --- |
+| 3 | 0.100 | 0.43 | 0.226 | **0.53** |
+| 5 | 0.023 | **0.79** | 0.142 | 0.64 |
+| 9 | 0.017 | **0.85** | 0.076 | 0.78 |
+| 27 | 0.003 | **0.97** | 0.025 | 0.92 |
+
+With three epochs, three noisy points determine three parameters, and the fits rank the curves worse than the raw
+losses do. From five epochs on, the extrapolation ranks better and its error is several times smaller. When the true
+curves are exponential decays instead, the power law is the wrong model: at $t_0 = 9$ its mean error is $0.19$, and it
+still ranks better than the raw loss ($\tau = 0.47$ against $0.26$), but its individual predictions can be far off.
+
+## Cost
+
+Fitting a parametric model is negligible next to an epoch of training: a power-law fit by variable projection takes
+microseconds to milliseconds. Ensembles fitted by Markov chain Monte Carlo cost seconds to minutes per prediction, which
+Domhan et al. ran on spare processor cores alongside training <Cite id="domhan2015" />. Freeze-thaw's Gaussian process
+costs cubically in the number of configurations, with the curves handled by a block structure. A pretrained LC-PFN
+predicts in one forward pass.
+
+## Trade-offs
+
+- **Against successive halving.** Extrapolation can keep a slow starter that successive halving would drop, because it
+  sees the slope. It needs enough epochs to fit the model and a family that matches the curves.
+  <NoteLink to="hyperband">Hyperband</NoteLink> needs no model and hedges by brackets instead.
+- **Point fits against predictive distributions.** A least-squares fit is cheap and transparent but gives no measure of
+  confidence, so a stopping threshold on it is either timid or reckless. Bayesian ensembles and LC-PFN give the
+  probability that a run beats the incumbent directly.
+- **Per-run against shared models.** A per-run fit knows nothing of other configurations. Freeze-thaw and LC-Net learn
+  from all curves, at the cost of a joint model over the <NoteLink to="hyperparameter-search-spaces">search
+  space</NoteLink>.
+- **Relation to early stopping.** <NoteLink to="early-stopping">Early stopping</NoteLink> ends one run when its own
+  validation loss stops improving. Extrapolation ends a run that is still improving but will not improve enough.
+
+## Pitfalls
+
+- **<NoteLink to="learning-rate-schedules">Learning-rate schedules</NoteLink>.** A decaying schedule bends the curve
+  when the rate drops: the loss falls sharply after each decay step. Curves fitted before the decay underestimate the
+  final improvement, and stepwise schedules break the smooth families entirely.
+- **Overfitting curves.** Validation loss can rise late in training as the model overfits. Monotone families cannot
+  represent this, so they predict a lower final loss than the run reaches. Predict the best loss over the run, as early
+  stopping would return, or use a family that allows a rise.
+- **Too few points.** With $t_0$ close to the number of parameters, the fit follows the noise (the first row of the
+  table). Smooth the losses or wait for more epochs before trusting a prediction.
+- **Extrapolating far.** A prediction at 81 epochs from 9 multiplies the budget by 9. Small errors in $\hat c$ change
+  $R^{-\hat c}$ a lot when $R/t_0$ is large. The same caution applies to the scaling-law extrapolations of
+  <NoteLink to="model-selection-at-scale">model selection at scale</NoteLink>.

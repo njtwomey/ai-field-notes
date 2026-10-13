@@ -1,0 +1,243 @@
+---
+title: 'Tikhonov regularisation'
+kind: concept
+summary: 'Tikhonov regularisation solves an ill-posed linear problem $\Amat\xvec \approx \bvec$ by minimising $\norm{\Amat\xvec - \bvec}^2 + \lambda\norm{\Lmat\xvec}^2$. With $\Lmat = \eye$ it damps the SVD component of singular value $s_i$ by the filter factor $s_i^2/(s_i^2 + \lambda)$, so noise is amplified by at most $1/(2\sqrt\lambda)$.'
+tags: [model-selection, regularisation, inverse-problems, worked-example]
+aliases:
+  [Tikhonov regularization, Tikhonov–Phillips regularisation, filter factors, discrete Picard condition, ill-posed problem, general-form Tikhonov regularisation]
+requires: [singular-value-decomposition, penalised-and-constrained-regularisation]
+related:
+  [
+    ridge-regression,
+    iterative-regularisation,
+    choosing-the-regularisation-strength,
+    smoothing-penalties-and-curvature,
+    condition-number,
+    wiener-filter,
+    structured-sparsity-penalties,
+    effective-degrees-of-freedom,
+  ]
+references: [tikhonov1963, phillips1962, hansen1998, hoerl1970, kaipio2005]
+status: draft
+updated: 2026-10-13
+---
+
+import { Deblurring } from './Deblurring'
+
+<Definition>
+Let $\Amat \in \reals^{m \times n}$ be a forward operator, $\bvec \in \reals^m$ noisy data and
+$\Lmat \in \reals^{k \times n}$ a penalty operator. The **Tikhonov solution** with regularisation parameter
+$\lambda > 0$ is
+
+$$
+\xvec_\lambda = \argmin_{\xvec}\ \norm{\Amat\xvec - \bvec}^2 + \lambda\norm{\Lmat\xvec}^2
+= (\Amat^\top\Amat + \lambda\Lmat^\top\Lmat)^{-1}\Amat^\top\bvec,
+$$
+
+unique when the null spaces of $\Amat$ and $\Lmat$ meet only at $\zeros$ <Cite id="tikhonov1963" />
+<Cite id="phillips1962" />. **Standard form** has $\Lmat = \eye$ and penalises the size of $\xvec$; a difference
+operator $\Lmat$ penalises its roughness. With $\Amat$ a design matrix and $\Lmat = \eye$ it is
+<NoteLink to="ridge-regression">ridge regression</NoteLink>.
+</Definition>
+
+## Intuition
+
+Many measurements are blurred versions of what one wants to know. A camera out of focus averages neighbouring pixels.
+A thermometer responds slowly and smooths a temperature history. A tomography scanner records line integrals of a
+density. In each case the data are $\bvec = \Amat\xvec_{\text{true}} + \evec$, with $\Amat$ a smoothing operator and
+$\evec$ noise, and the task is to recover $\xvec_{\text{true}}$.
+
+Smoothing destroys fine detail: two signals that differ only by a rapid wiggle produce almost the same blurred data.
+Undoing the blur must therefore magnify rapid wiggles enormously, and the noise is full of them. The least-squares
+solution fits the data and returns noise magnified by factors of thousands. Tikhonov regularisation adds a cost for
+solutions that are large or rough. The fit then gives up the detail the data cannot support, and keeps the detail they
+can. This is the oldest form of regularisation, introduced for integral equations by Phillips and by Tikhonov in the
+early 1960s, before ridge regression brought the same estimator to statistics <Cite id="hoerl1970" />.
+
+## Ill-posed problems
+
+Hadamard called a problem well posed when a solution exists, is unique and depends continuously on the data. A problem
+that fails the third condition is **ill posed**: arbitrarily small changes in the data make large changes in the
+solution. Discretised, an ill-posed problem becomes a matrix $\Amat$ whose singular values decay gradually towards zero
+with no clear gap, so that its <NoteLink to="condition-number">condition number</NoteLink> is huge
+<Cite id="hansen1998" />.
+
+The <NoteLink to="singular-value-decomposition">singular value decomposition</NoteLink> shows the damage. Write
+$\Amat = \sum_{i} s_i\uvec_i\vvec_i^\top$ with singular values $s_1 \ge s_2 \ge \dots > 0$, left singular vectors
+$\uvec_i$ and right singular vectors $\vvec_i$. The least-squares solution expands $\bvec$ in the left vectors and
+divides by the singular values,
+
+$$
+\xvec_{\text{LS}} = \sum_i \frac{\uvec_i^\top\bvec}{s_i}\vvec_i
+= \xvec_{\text{true}} + \sum_i \frac{\uvec_i^\top\evec}{s_i}\vvec_i.
+$$
+
+For white noise of variance $\sigma^2$, each coefficient $\uvec_i^\top\evec$ has standard deviation $\sigma$, because
+the $\uvec_i$ are orthonormal. The error along $\vvec_i$ therefore has standard deviation $\sigma/s_i$. With singular
+values running down to $10^{-6}$, noise of size $10^{-3}$ produces errors of size $10^3$.
+
+**The discrete Picard condition.** The true coefficients are
+$\vvec_i^\top\xvec_{\text{true}} = \uvec_i^\top\bvec_{\text{true}}/s_i$ with
+$\bvec_{\text{true}} = \Amat\xvec_{\text{true}}$. A solution of reasonable size needs the data coefficients
+$\abs{\uvec_i^\top\bvec_{\text{true}}}$ to decay at least as fast as the $s_i$ <Cite id="hansen1998" />. The noisy
+coefficients $\abs{\uvec_i^\top\bvec}$ follow that decay only until they reach the noise floor $\sigma$, and then level
+off while the $s_i$ keep falling. Plotting $s_i$, $\abs{\uvec_i^\top\bvec}$ and their ratio against $i$, the **Picard
+plot**, shows where the data stop carrying information. Components beyond that index cannot be recovered by any method;
+the question is only how to stop them from swamping the rest.
+
+## Filter factors
+
+For standard form, $\Lmat = \eye$, substitute the SVD into the solution. With
+$\Amat^\top\Amat = \Vmat\Sigmamat^2\Vmat^\top$ and $\Vmat\Vmat^\top = \eye$ (the same algebra as in
+<NoteLink to="ridge-regression">ridge regression</NoteLink>),
+
+$$
+\xvec_\lambda = \sum_i \varphi_i\,\frac{\uvec_i^\top\bvec}{s_i}\vvec_i,
+\qquad
+\varphi_i = \frac{s_i^2}{s_i^2 + \lambda}.
+$$
+
+Here $\Sigmamat$ is the diagonal matrix of singular values. Each component of the least-squares solution is multiplied
+by a **filter factor** $\varphi_i \in (0, 1)$.
+
+- **Large singular values**, $s_i \gg \sqrt\lambda$: $\varphi_i \approx 1$, and the component passes almost unchanged.
+- **Small singular values**, $s_i \ll \sqrt\lambda$: $\varphi_i \approx s_i^2/\lambda$, and the component is suppressed.
+
+So $\sqrt\lambda$ acts as a soft cutoff on the singular values. **Truncated SVD** uses a hard cutoff instead,
+$\varphi_i = 1$ for $i \le k$ and 0 beyond; Tikhonov rolls off smoothly around $s_i = \sqrt\lambda$.
+
+**Stability.** The factor that multiplies the noise coefficient $\uvec_i^\top\evec$ is
+$\varphi_i/s_i = s_i/(s_i^2 + \lambda)$. Since $s_i^2 + \lambda \ge 2s_i\sqrt\lambda$ by the inequality of arithmetic
+and geometric means,
+
+$$
+\frac{\varphi_i}{s_i} = \frac{s_i}{s_i^2 + \lambda} \le \frac{1}{2\sqrt\lambda},
+$$
+
+with equality at $s_i = \sqrt\lambda$. Without regularisation the amplification is $1/s_n$, unbounded as the smallest
+singular value falls. With it, no component amplifies the noise by more than $1/(2\sqrt\lambda)$. The solution depends
+continuously on the data again, which is the sense in which regularisation restores well-posedness.
+
+**Bias and variance.** Write $c_i = \vvec_i^\top\xvec_{\text{true}}$ for the true coefficients. The error splits into a
+regularisation error and a perturbation error,
+
+$$
+\xvec_\lambda - \xvec_{\text{true}} = \sum_i (\varphi_i - 1)\,c_i\,\vvec_i + \sum_i \frac{\varphi_i}{s_i}(\uvec_i^\top\evec)\,\vvec_i,
+$$
+
+and for white noise its expected squared norm is
+
+$$
+\expect\norm{\xvec_\lambda - \xvec_{\text{true}}}^2 = \sum_i (1 - \varphi_i)^2c_i^2 + \sigma^2\sum_i \frac{\varphi_i^2}{s_i^2}.
+$$
+
+The first sum, the squared bias, grows with $\lambda$. The second, the variance, shrinks with it. The best $\lambda$
+balances them, as in the <NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>. The sum
+$\sum_i\varphi_i$ is the number of components effectively kept, the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> of the fitted data
+$\Amat\xvec_\lambda$.
+
+## General penalty operators
+
+Penalising $\norm{\xvec}^2$ pulls the solution towards zero. Often the prior belief is that $\xvec$ is smooth, not that
+it is small. A difference operator encodes that belief:
+
+$$
+\Lmat_1 = \begin{pmatrix} -1 & 1 & & \\ & \ddots & \ddots & \\ & & -1 & 1 \end{pmatrix} \in \reals^{(n-1) \times n},
+\qquad
+(\Lmat_2\xvec)_i = x_i - 2x_{i+1} + x_{i+2}.
+$$
+
+$\norm{\Lmat_1\xvec}^2$ sums squared slopes and $\norm{\Lmat_2\xvec}^2$ sums squared curvatures. Their null spaces are
+unpenalised: constants for $\Lmat_1$, straight lines for $\Lmat_2$. Shrinking towards zero becomes shrinking towards
+the best constant or the best line. With $\Amat = \eye$ and $\Lmat_2$ this is the Whittaker smoother, the discrete
+cousin of the roughness penalty in <NoteLink to="smoothing-penalties-and-curvature">smoothing penalties and
+curvature</NoteLink>.
+
+The SVD no longer diagonalises the problem, because $\Amat$ and $\Lmat$ have different singular vectors. The
+**generalised SVD** of the pair does: it gives generalised singular values $\gamma_i$, and the filter factors become
+$\gamma_i^2/(\gamma_i^2 + \lambda)$, with $\varphi_i = 1$ on the null space of $\Lmat$ <Cite id="hansen1998" />. When
+$\Lmat$ is square and invertible, the substitution $\yvec = \Lmat\xvec$ turns the problem into standard form with
+operator $\Amat\Lmat^{-1}$.
+
+The penalty is also a prior. If $\evec \sim \MvGauss(\zeros, \sigma^2\eye)$ and $\xvec$ has density proportional to
+$\exp(-\lambda\norm{\Lmat\xvec}^2/(2\sigma^2))$, the negative log posterior is $\norm{\Amat\xvec - \bvec}^2 +
+\lambda\norm{\Lmat\xvec}^2$ up to the factor $1/(2\sigma^2)$, and $\xvec_\lambda$ is the posterior mode and mean (see
+<NoteLink to="regularisation">regularisation</NoteLink>). A difference operator makes the prior improper along its null
+space, which leaves those components to the data.
+
+## Choosing λ and the alternatives
+
+$\lambda$ sets the cutoff, and choosing it is the main practical difficulty.
+<NoteLink to="choosing-the-regularisation-strength">Choosing the regularisation strength</NoteLink> compares the
+methods used for Tikhonov problems:
+
+- the **discrepancy principle**, which picks the $\lambda$ whose residual $\norm{\Amat\xvec_\lambda - \bvec}^2$ equals
+  the expected noise energy $m\sigma^2$ (the Morozov form of
+  <NoteLink to="penalised-and-constrained-regularisation">penalised and constrained regularisation</NoteLink>);
+- the **L-curve**, which picks the corner of the curve of $\log\norm{\Lmat\xvec_\lambda}$ against
+  $\log\norm{\Amat\xvec_\lambda - \bvec}$;
+- <NoteLink to="generalised-cross-validation">generalised cross-validation</NoteLink>, which needs no noise level.
+
+Iterative solvers regularise by stopping early. Landweber iteration and <Gloss name="cg">conjugate gradients</Gloss>
+have filter factors of their own, and the number of iterations plays the role of $1/\lambda$ (see
+<NoteLink to="iterative-regularisation">iterative regularisation</NoteLink>). For a convolution, the
+<NoteLink to="fourier-transform">Fourier transform</NoteLink> diagonalises $\Amat$, the filter factors act frequency by
+frequency, and replacing $\lambda$ by a noise-to-signal power ratio at each frequency gives the
+<NoteLink to="wiener-filter">Wiener filter</NoteLink>.
+
+## Worked example
+
+Take $\Amat = \diag(1, 0.1, 0.001)$, so that the SVD is trivial: $\uvec_i = \vvec_i = \evec_i$ and $s = (1, 0.1,
+0.001)$. Any $\Amat$ reduces to this case, because $\Umat$ and $\Vmat$ rotate $\bvec$ and $\xvec$ without changing
+lengths. The condition number is $1000$. Let $\xvec_{\text{true}} = (1, 1, 1)$, and let the noise have standard
+deviation $\sigma = 0.01$, with the draw $\evec = (0.01, -0.01, 0.01)$.
+
+1. **The data.** $\bvec = \Amat\xvec_{\text{true}} + \evec = (1.01, 0.09, 0.011)$. The third true data coefficient,
+   $0.001$, is a tenth of the noise level: the Picard condition fails there, and no method can recover $x_3$.
+2. **Least squares.** Dividing by the singular values gives $\xvec_{\text{LS}} = (1.01, 0.9, 11)$. The noise $0.01$ in
+   the third component is multiplied by $1/0.001 = 1000$, and the error norm is $10.0$.
+3. **Tikhonov with $\lambda = 10^{-4}$**, so $\sqrt\lambda = 0.01$. The filter factors are
+   $\varphi = (1/1.0001,\ 0.01/0.0101,\ 10^{-6}/(1.01 \times 10^{-4})) = (0.9999, 0.990, 0.0099)$. The solution is
+   $\xvec_\lambda = (1.010, 0.891, 0.109)$, with error norm $0.90$. The first two components are kept. The third is
+   suppressed, and its error, almost all bias, is bounded by $\abs{x_3} = 1$.
+4. **The noise bound.** The largest noise amplification is $1/(2\sqrt\lambda) = 50$, against 1000 for least squares.
+5. **Expected error over the noise.** From the bias–variance formula with $c = (1, 1, 1)$ and $\sigma = 0.01$:
+
+| $\lambda$ | squared bias | variance | expected squared error |
+| --- | --- | --- | --- |
+| $10^{-6}$ | 0.250 | 25.0 | 25.3 |
+| $10^{-5}$ | 0.826 | 0.837 | 1.66 |
+| $10^{-4}$ | 0.980 | 0.020 | 1.00 |
+| $10^{-3}$ | 1.006 | 0.008 | 1.02 |
+| $10^{-2}$ | 1.250 | 0.003 | 1.25 |
+
+Least squares has expected squared error $\sigma^2\sum_i 1/s_i^2 = 10^{-4}(1 + 100 + 10^6) = 100$. The best $\lambda$,
+near $10^{-4}$, cuts it to 1.0, and nearly all of what remains is the third component, which the data cannot inform.
+
+The figure applies the same analysis to a blurred one-dimensional signal, on the engine.
+
+<Deblurring />
+
+## Assumptions
+
+- **A linear forward model.** $\Amat$ is known and fixed. Nonlinear inverse problems are regularised the same way but
+  solved iteratively, often by Tikhonov-regularised Gauss–Newton steps.
+- **Gaussian white noise** for the bias–variance formula and the discrepancy principle. Correlated noise with
+  covariance $\Cmat$ is whitened first, by multiplying the problem by $\Cmat^{-1/2}$.
+- **A penalty that matches the solution.** The quadratic penalty suits solutions that are small or smooth in the sense
+  of $\Lmat$.
+
+## Pitfalls
+
+- **Quadratic penalties smear edges.** A jump has a large squared slope, so $\norm{\Lmat_1\xvec}^2$ replaces it by a
+  ramp. For piecewise-constant solutions use the absolute slope, total variation (see
+  <NoteLink to="structured-sparsity-penalties">structured sparsity penalties</NoteLink>).
+- **Do not form $\Amat^\top\Amat$ for an ill-conditioned $\Amat$.** It squares the condition number. Solve the stacked
+  least-squares problem $\begin{pmatrix}\Amat \\ \sqrt\lambda\Lmat\end{pmatrix}\xvec \approx \begin{pmatrix}\bvec \\
+  \zeros\end{pmatrix}$ by <Gloss name="qr" />, or compute one SVD and reuse it for every $\lambda$.
+- **The inverse crime.** Simulating data with the same discretised $\Amat$ that the reconstruction uses hides the model
+  error of the discretisation, and makes a method look better than it will on real data <Cite id="kaipio2005" />. Test
+  on data generated at a finer resolution.
+- **$\lambda$ depends on the scaling.** Rescaling $\Amat$, $\bvec$ or $\Lmat$ changes the $\lambda$ that gives the same
+  solution. Report the residual and penalty norms, or the effective degrees of freedom, alongside $\lambda$.

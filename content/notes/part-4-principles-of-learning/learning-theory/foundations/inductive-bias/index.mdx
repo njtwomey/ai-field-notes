@@ -1,0 +1,144 @@
+---
+title: 'Inductive bias'
+kind: concept
+summary: 'The inductive bias of a learner is the set of assumptions, beyond the data, that decide which hypothesis it picks: a restricted hypothesis class, a preference such as small norm, or a prior. Without one, a learner cannot predict labels it has not seen.'
+tags: [learning-theory, generalisation, worked-example]
+aliases: [learning bias, restriction bias, preference bias, language bias, search bias]
+requires: [empirical-risk-minimisation]
+related: [no-free-lunch-theorem, regularisation, occam-bound, structural-risk-minimisation, implicit-regularisation, meta-learning, bias-variance-decomposition, pac-bayes-bounds]
+references: [mitchell1980, shalevshwartz2014, baxter2000, wolpert1996, mohri2018]
+status: draft
+updated: 2026-10-12
+---
+
+import { SameDataFourLearners } from './SameDataFourLearners'
+
+<Definition>
+The **inductive bias** of a learning algorithm is any basis it uses for choosing one hypothesis over another other than
+agreement with the training data <Cite id="mitchell1980" />. It takes two forms. A **restriction bias** limits the
+hypotheses the learner can return to a class $\Hcal$. A **preference bias** ranks the hypotheses, through a penalty, a
+prior or the order in which a search visits them. Every learner that predicts better than chance on unseen inputs has
+an inductive bias, and it predicts well when the bias matches the target.
+</Definition>
+
+## Intuition
+
+A finite sample fixes the labels of the points it contains and nothing else. Many hypotheses agree with the sample and
+disagree everywhere else. Choosing among them needs a rule that the data do not supply: prefer straight lines, prefer
+smooth functions, prefer short descriptions, copy the nearest example. That rule is the inductive bias.
+
+<SameDataFourLearners />
+
+The figure fits four learners to the same points. Where the data are dense they roughly agree. Between the points and
+near the ends of the interval they disagree, and no amount of looking at the training points says which is right. The
+learner whose bias suits the target (here, the cubic for a sine) predicts best. A learner with a wrong bias is either
+too rigid (the line) or free enough to fit the noise (the high-degree interpolant).
+
+## Why learning needs a bias
+
+Mitchell's argument makes the need exact for classification over a finite set of inputs <Cite id="mitchell1980" />.
+Suppose the learner has no restriction: every subset of the inputs is a possible concept. After seeing labelled
+examples, the concepts consistent with them are those that agree on the seen inputs, with any labels on the rest. For
+each unseen input, exactly half of these consistent concepts label it positive. An unbiased learner therefore has no
+basis to classify any unseen input. It can only memorise the training labels and look them up.
+
+The <NoteLink to="no-free-lunch-theorem">no free lunch theorem</NoteLink> makes the same point on average: over all
+targets, every learner has off-training-set error $\frac12$. Its consequence is that the advantage of any learner on any
+problem comes entirely from its bias.
+
+**Counting the concepts.** Describe inputs by 5 binary features, so there are $2^5 = 32$ distinct inputs and
+$2^{32} \approx 4.3 \times 10^9$ concepts. After the labels of 10 distinct inputs are seen, $2^{22} \approx 4.2 \times
+10^6$ concepts remain consistent, and for each of the 22 unseen inputs exactly half of them, $2^{21}$, label it
+positive. The data have ruled out 99.9% of the concepts and still say nothing about any unseen input.
+
+## Restriction and preference
+
+**Restriction bias** chooses the class. Conjunctions of conditions on the features are a classical example: each feature
+is required to be 1, required to be 0 or ignored, which gives $3^5 = 243$ concepts out of $2^{32}$, about one in
+$1.8 \times 10^7$ <Cite id="mitchell1980" />. Linear classifiers, polynomials of bounded degree and trees of bounded
+depth are restrictions in the same sense. A restriction enters generalisation bounds through the size or capacity of
+$\Hcal$: $\ln\abs{\Hcal}$ for a finite class, the <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>
+or the <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> for an infinite one.
+
+**Preference bias** keeps a large class and ranks its members. <NoteLink to="ridge-regression">Ridge
+regression</NoteLink> prefers small weights; decision-tree learners prefer short trees, through greedy growth and
+pruning; the <NoteLink to="support-vector-machine">support vector machine</NoteLink> prefers a large margin; Bayesian
+methods prefer hypotheses with high prior probability. A preference enters bounds through a weight $\pi(h)$ chosen
+before the data. The <NoteLink to="occam-bound">Occam bound</NoteLink> pays $\ln(1/\pi(h))$ for the hypothesis returned,
+so a hypothesis described in $b$ bits under a prefix code, with $\pi(h) = 2^{-b}$, pays $b\ln 2$ nats. PAC-Bayes bounds
+pay the divergence between a posterior and the prior (see <NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>).
+<NoteLink to="structural-risk-minimisation">Structural risk minimisation</NoteLink> combines the two: a nested sequence
+of restricted classes with a preference for the smaller ones.
+
+Both forms trade the same two errors. A strong bias leaves few hypotheses to choose from, so the choice is reliable and
+the <NoteLink to="approximation-estimation-optimisation-trade-off">estimation error</NoteLink> is small, but the best
+available hypothesis may be far from the target, so the <NoteLink to="empirical-risk-minimisation">approximation
+error</NoteLink> is large. A weak bias reverses the balance. In the language of the
+<NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>, a stronger inductive bias usually
+means more statistical bias and less variance.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, the inductive bias is
+what the "make it uniform" step pays for. A restriction is paid for with a capacity term, and a preference with a prior
+term. An unrestricted learner on an infinite domain has infinite capacity, and no bound of this kind exists for it.
+
+## Worked example: sample size with and without a restriction
+
+A target concept on the 32 inputs above is a conjunction. A learner sees $m$ examples drawn from a distribution
+$\Dcal$ on the inputs and returns a concept consistent with them. The realisable finite-class bound of
+<NoteLink to="realisable-and-agnostic-learning">realisable learning</NoteLink> says that any consistent learner over a
+class $\Hcal$ that contains the target has risk at most $\epsilon$ with probability at least $1 - \delta$ once
+
+$$
+m \ge \frac{\ln\abs{\Hcal} + \ln(1/\delta)}{\epsilon}
+$$
+
+<Cite id="shalevshwartz2014" />. Take $\epsilon = 0.1$ and $\delta = 0.05$, so $\ln(1/\delta) = 3.00$.
+
+1. **Restricted to conjunctions.** $\ln 243 = 5.49$, so $m \ge (5.49 + 3.00)/0.1 = 85$ examples suffice, whatever
+   $\Dcal$ is.
+2. **Unrestricted.** $\ln 2^{32} = 32\ln 2 = 22.18$, so the bound needs $m \ge (22.18 + 3.00)/0.1 = 252$ examples.
+3. **Reading the second number.** Under the uniform distribution, 252 draws leave each of the 32 inputs unseen with
+   probability $(31/32)^{252} \approx 3 \times 10^{-4}$. The unrestricted learner reaches risk 0.1 only by seeing almost
+   every input and memorising its label. Its guarantee comes from coverage, not from generalisation, and on a domain
+   with more inputs than examples it gives nothing.
+
+The restricted learner needs a third of the examples and generalises to inputs it has never seen. It does so only
+because the target is a conjunction. If the target were an arbitrary concept, the conjunction learner would have a
+large approximation error that no sample size removes.
+
+## Inductive bias in common learners
+
+| Learner | Restriction | Preference |
+| --- | --- | --- |
+| <NoteLink to="linear-regression">Linear regression</NoteLink> | Linear functions of the features | Least squares |
+| Ridge and lasso | Linear functions | Small $\ell_2$ or $\ell_1$ norm |
+| <NoteLink to="k-nearest-neighbours">$k$-nearest neighbours</NoteLink> | None beyond the metric | Nearby inputs have similar labels |
+| <NoteLink to="decision-tree">Decision trees</NoteLink> | Axis-aligned splits | Short trees, informative early splits |
+| <NoteLink to="support-vector-machine">Support vector machines</NoteLink> | Linear in a kernel's feature space | Large margin |
+| <NoteLink to="gaussian-process">Gaussian processes</NoteLink> | Set by the kernel | Prior given by the kernel: smoothness and length scale |
+| <NoteLink to="convolutional-layer">Convolutional networks</NoteLink> | Local filters shared across positions | Set by the optimiser and the initialisation |
+| Over-parameterised networks | Very large classes | Implicit: <NoteLink to="implicit-regularisation">small norm or large margin</NoteLink> reached by <NoteLink to="gradient-descent">gradient descent</NoteLink> |
+
+Weight sharing in a convolutional layer restricts the class to functions that commute with translation, an assumption
+about images built into the architecture. <NoteLink to="data-augmentation">Data augmentation</NoteLink> expresses the
+same kind of assumption through the data instead: it asks the learner to give the same label to transformed copies of an
+input. The optimiser is part of the bias as well: among the many networks that fit the data, gradient descent from a
+small initialisation returns particular ones, which is the subject of <NoteLink to="implicit-regularisation">implicit
+regularisation</NoteLink>.
+
+A bias can itself be learned. When many related tasks are available, the class or prior can be fitted to them, so that
+a new task from the same family is learned from fewer examples <Cite id="baxter2000" />. This is the theoretical setting
+of <NoteLink to="meta-learning">meta-learning</NoteLink>.
+
+## Pitfalls
+
+- **Bias here is not the statistical <Gloss name="bias">bias of an estimator</Gloss>.** An inductive bias is an
+  assumption; statistical bias is the difference between an estimator's mean and its target. A stronger inductive bias
+  often increases the statistical bias, but the two words name different things.
+- **"Assumption-free" learners are not.** $k$-nearest neighbours assumes that the metric reflects similarity of labels,
+  and a neural network assumes whatever its architecture, initialisation and optimiser favour.
+- **A bias that fits the benchmark may not fit the task.** A learner chosen because it wins on one family of problems
+  carries a bias suited to that family <Cite id="wolpert1996" />. Its advantage transfers only to tasks with the same
+  structure.
+- **More data weakens a preference but not a restriction.** A preference is overruled when the data are strong enough;
+  a restriction is not, and its approximation error stays at every sample size.

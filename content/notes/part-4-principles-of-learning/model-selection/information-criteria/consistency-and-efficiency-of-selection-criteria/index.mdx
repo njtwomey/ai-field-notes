@@ -1,0 +1,197 @@
+---
+title: 'Consistency and efficiency of selection criteria'
+kind: concept
+summary: 'A selection criterion is consistent if it picks the smallest true candidate with probability tending to one, and efficient if its choice predicts asymptotically as well as the best candidate. BIC is consistent, AIC and leave-one-out are efficient, and no criterion is both.'
+tags: [model-selection, information-criteria, theory, worked-example]
+aliases: [consistent model selection, model selection consistency, asymptotic efficiency of model selection, loss efficiency, AIC–BIC dilemma, generalised information criterion, GIC, Hannan–Quinn criterion, HQC]
+requires: [akaike-information-criterion, bayesian-information-criterion]
+related: [mallows-cp-and-covariance-penalties, leave-one-out-cross-validation, repeated-and-monte-carlo-cross-validation, oracle-inequalities, minimax-lower-bounds, bayesian-model-averaging, information-criteria]
+references: [shibata1980, shibata1981, nishii1984, hannan1979, shao1993, shao1997, li1987, yang2005, leeb2008, claeskens2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { ClosedAndOpen } from './ClosedAndOpen'
+
+<Definition>
+Let $\Mcal_1, \dots, \Mcal_J$ be candidate models fitted to $n$ observations, let $\hat\jmath$ be the candidate a
+criterion selects, and let $L_n(j)$ be the prediction loss of candidate $j$'s fitted model. The criterion is
+**consistent** if, whenever some candidate contains the truth and $j^\ast$ is the smallest such candidate,
+$P(\hat\jmath = j^\ast) \to 1$ as $n \to \infty$. It is **(asymptotically) efficient** if
+$L_n(\hat\jmath)/\min_j L_n(j) \to 1$ in probability, so that its choice predicts as well as the best candidate
+<Cite id="shibata1981" /> <Cite id="shao1997" />.
+</Definition>
+
+## Intuition
+
+The two properties answer two different questions about the same list of candidates.
+
+- **Identification.** Which candidate is the true model? This question assumes one of the candidates is true, and asks
+  for the right one. It matters when the parameters have a meaning, such as which variables have an effect.
+- **Prediction.** Which candidate will predict best? This question makes sense whether or not a candidate is true. It
+  matters when the fitted model will be used to forecast or classify.
+
+The two questions disagree about small effects. Suppose the true model has a coefficient so small that its estimate is
+mostly noise at the current $n$. Identification needs the coefficient kept, because the true model has it. Prediction
+is better without it, because estimating it adds more variance than it removes bias. The converse holds for a spurious
+variable. Keeping it costs only about $\sigma^2/n$ in prediction error, which is negligible, but it makes the
+identification wrong.
+
+A consistent criterion must therefore reject spurious variables ever more strictly as $n$ grows. That strictness makes
+it drop small real effects that prediction would keep. An efficient criterion keeps a fixed tolerance, which lets
+spurious variables through with fixed probability. Neither tolerance serves both questions.
+
+## Two goals, stated precisely
+
+Take regression with fixed inputs, $\yvec = \muvec + \epsilonb$, noise variance $\sigma^2$ and candidates fitted by
+least squares. Let $\hat\muvec_j$ be candidate $j$'s fitted values and $L_n(j) = \frac1n\norm{\hat\muvec_j - \muvec}^2$
+its loss. The best candidate on this sample, $\arg\min_j L_n(j)$, is the **oracle** choice: it needs $\muvec$, which no
+criterion has (see <NoteLink to="oracle-inequalities">oracle inequalities</NoteLink>).
+
+- **The M-closed case.** Some candidate contains $\muvec$. The smallest such candidate $j^\ast$ has a fixed number of
+  parameters. Consistency asks for $j^\ast$.
+- **The M-open case.** No candidate contains $\muvec$, for example when the truth has infinitely many non-zero
+  coefficients and the candidates are truncations. Consistency has no target, and efficiency asks for the oracle's loss.
+
+When a fixed-dimension true model exists, a consistent criterion is also efficient: choosing $j^\ast$ is eventually as
+good as the oracle. A criterion with a fixed penalty is then not efficient. With fixed probability it adds spurious
+parameters, each adding about $\sigma^2/n$ to a loss that is itself of order $\sigma^2/n$, so the loss ratio stays
+above one <Cite id="shao1997" />. The conflict lies in the M-open case, where only the fixed penalty is efficient, and
+in true models with small coefficients.
+
+## Which criteria do which
+
+Most criteria are members of one family, the **generalised information criterion**
+
+$$
+\operatorname{GIC}_{\lambda_n}(j) = -2\log\hat L_j + \lambda_n p_j,
+$$
+
+where $p_j$ is the number of parameters of candidate $j$ and $\lambda_n$ the penalty per parameter. For Gaussian
+regression with $\sigma^2$ estimated once, the equivalent form is
+$\operatorname{RSS}_j/n + \lambda_n\hat\sigma^2 p_j/n$. The behaviour of the criterion depends only on how $\lambda_n$
+grows <Cite id="shao1997" />.
+
+| Criterion | Penalty $\lambda_n$ | Consistent | Efficient (M-open) |
+| --- | --- | --- | --- |
+| <NoteLink to="akaike-information-criterion">AIC</NoteLink>, <NoteLink to="mallows-cp-and-covariance-penalties">$C_p$</NoteLink> | 2 | no | yes |
+| <NoteLink to="leave-one-out-cross-validation">Leave-one-out CV</NoteLink>, <NoteLink to="generalised-cross-validation">GCV</NoteLink> | about 2 | no | yes |
+| Hannan–Quinn | $2c\ln\ln n$, $c > 1$ | yes | no |
+| <NoteLink to="bayesian-information-criterion">BIC</NoteLink> | $\ln n$ | yes | no |
+| Leave-$n_v$-out <NoteLink to="cross-validation">CV</NoteLink>, $n_v/n \to 1$ | grows with $n$ | yes | no |
+
+- **Penalty 2: efficient.** Shibata proved that AIC is efficient for autoregressive order selection and for regression
+  when the truth is infinite-dimensional <Cite id="shibata1980" /> <Cite id="shibata1981" />. Li proved efficiency for
+  $C_p$, leave-one-out and generalised cross-validation under general conditions <Cite id="li1987" />.
+- **Growing penalty: consistent.** A penalty with $\lambda_n \to \infty$ and $\lambda_n/n \to 0$ selects the true
+  regression model with probability tending to one <Cite id="nishii1984" />. The upper limit keeps the criterion from
+  dropping real effects of fixed size; the lower limit keeps out spurious ones. Hannan and Quinn showed that
+  $2c\ln\ln n$ with $c > 1$ is about the slowest-growing penalty that is still strongly consistent for autoregressions
+  <Cite id="hannan1979" />.
+- **Cross-validation follows its held-out fraction.** Leave-one-out behaves like a penalty of 2. Shao showed that
+  leave-$n_v$-out is consistent only when the held-out fraction $n_v/n$ tends to one <Cite id="shao1993" />, so that
+  each fit uses a vanishing fraction of the data (see <NoteLink to="repeated-and-monte-carlo-cross-validation">repeated
+  and Monte Carlo cross-validation</NoteLink>).
+- **Fixed penalties above 2** form Shao's third class, a compromise that is neither consistent nor efficient
+  <Cite id="shao1997" />.
+
+## Why no criterion does both
+
+A single coefficient shows the conflict exactly. Let the estimate of a coefficient, in units of its
+<NoteLink to="standard-error">standard error</NoteLink>, be $z \sim \Gauss(\theta, 1)$, so that $\theta$ is the
+coefficient's true size in standard errors. For a coefficient $\beta$ estimated from $n$ points with noise $\sigma$,
+$\theta$ is about $\sqrt n\beta/\sigma$. A criterion with penalty $\lambda_n$ keeps the coefficient when the
+likelihood-ratio statistic $z^2$ exceeds $\lambda_n$, and sets it to zero otherwise. The selected estimate is
+$\hat\theta = z\,\indicator[z^2 > \lambda_n]$, and its loss is $(\hat\theta -
+\theta)^2$, which is $n/\sigma^2$ times the squared error in $\beta$.
+
+**Consistency forces $\lambda_n \to \infty$.** When $\theta = 0$, the criterion wrongly keeps the coefficient with
+probability $P(\ChiSq_1 > \lambda_n)$. That tends to zero only if $\lambda_n$ grows without bound.
+
+**A growing $\lambda_n$ makes the worst-case loss grow.** Consider a coefficient of size $\theta = \sqrt{\lambda_n}$,
+exactly at the threshold. Then $z$ falls below the threshold with probability about one half, and when it does, the
+coefficient is set to zero and the loss is $\theta^2 = \lambda_n$. So the risk at that $\theta$ is at least about
+$\lambda_n/2$, which grows without bound. Always keeping the coefficient has risk $\expect(z - \theta)^2 = 1$ for every
+$\theta$, and the oracle, which keeps it only when $\theta^2 > 1$, has risk $\min(\theta^2, 1) \le 1$. So the ratio of
+the consistent criterion's worst-case risk to the oracle's grows like $\lambda_n$.
+
+The same mechanism holds in general. Yang proved that no consistent criterion can attain the
+<NoteLink to="minimax-lower-bounds">minimax rate</NoteLink> of the regression
+estimation error, so no selection rule shares the strengths of AIC
+and BIC <Cite id="yang2005" />. Leeb and Pötscher showed that any estimator that selects the true sparse model
+consistently has a maximal scaled risk that diverges with $n$ <Cite id="leeb2008" />.
+
+<Derivation title="The risk of the selected estimate">
+Let $t = \sqrt{\lambda_n}$ and $z = \theta + Z$ with $Z \sim \Gauss(0, 1)$. The selected estimate is
+$\hat\theta = z\,\indicator[\abs z > t]$. Its risk splits by whether the coefficient is kept:
+
+$$
+r(\theta) = \expect(\hat\theta - \theta)^2 = \theta^2\,P(\abs z \le t) + \expect\brack{Z^2\,\indicator[\abs z > t]}.
+$$
+
+The first term is the bias of dropping a real coefficient. The second is the variance of keeping it, at most 1. At
+$\theta = 0$, both terms are small for large $t$: $r(0) = \expect\brack{Z^2\indicator[\abs Z > t]}$, which tends to
+zero. At $\theta = t$, $P(\abs z \le t) \ge P(Z \le 0) - P(Z < -2t) \approx \frac12$, so
+$r(t) \gtrsim t^2/2 = \lambda_n/2$.
+</Derivation>
+
+<ClosedAndOpen />
+
+## Worked example
+
+Evaluate the selected estimate of the previous section for the penalty of AIC, $\lambda = 2$, and of BIC at three sample
+sizes. Each column comes from the risk formula, integrated numerically over $Z$.
+
+| Penalty | $\lambda_n$ | $P(\text{keep a zero coefficient})$ | risk at $\theta = 0$ | worst-case risk | at $\theta \approx$ |
+| --- | --- | --- | --- | --- | --- |
+| AIC | 2 | 0.157 | 0.57 | 1.65 | 1.9 |
+| BIC, $n = 100$ | 4.61 | 0.032 | 0.20 | 2.82 | 2.3 |
+| BIC, $n = 10^4$ | 9.21 | 0.0024 | 0.027 | 5.16 | 2.9 |
+| BIC, $n = 10^6$ | 13.8 | 0.0002 | 0.003 | 7.71 | 3.4 |
+
+1. **The spurious coefficient.** AIC keeps a zero coefficient 15.7% of the time at every $n$, so it is not consistent.
+   BIC's rate falls towards zero as $n$ grows.
+2. **The cost of a spurious coefficient.** Even AIC's risk at $\theta = 0$ is $0.57$, below the risk 1 of always keeping
+   the coefficient. In prediction loss, the occasional spurious coefficient is cheap.
+3. **The worst case.** AIC's worst-case risk is $1.65$, a bounded multiple of the oracle's at most 1. BIC's grows with
+   $n$: $7.71$ at $n = 10^6$, nearly eight times the risk of always keeping the coefficient.
+4. **Where the worst case sits.** At $n = 10^6$ the worst case is at $\theta \approx 3.4$ standard errors, that is
+   $\beta \approx 3.4\sigma/\sqrt{10^6} = 0.0034\sigma$. Such a coefficient is real but tiny. BIC drops it nearly two
+   thirds of the time, and each time the loss is $\theta^2 \approx 11.4$.
+
+The Hannan–Quinn penalty sits between: $2\ln\ln n = 5.25$ at $n = 10^6$, so it is consistent with a smaller worst-case
+risk than BIC's, and it grows slowly enough that the cost stays moderate at practical sample sizes.
+
+## In practice
+
+- **Prediction** is the usual goal in machine learning, and the candidates are approximations. Use an efficient
+  criterion: AIC or AICc for likelihood models, $C_p$ or <Gloss name="sure" /> for squared error, and $K$-fold
+  cross-validation in general.
+- **Identification** suits a scientific question whose candidates are believable as the truth and whose sample is large.
+  Use BIC, or a Bayes factor computed with a considered prior (see
+  <NoteLink to="bayes-factors-and-model-comparison">Bayes factors and model comparison</NoteLink>).
+- **Neither** need be forced. Averaging the candidates with Akaike or posterior weights avoids the all-or-nothing choice
+  that causes the worst-case risk (see <NoteLink to="bayesian-model-averaging">Bayesian model averaging</NoteLink>).
+
+## Assumptions
+
+- **A fixed, finite list of candidates.** With the number of candidates growing with $n$, as in
+  <NoteLink to="best-subset-and-stepwise-selection">all-subsets regression</NoteLink> on many variables, both properties
+  need stronger conditions and penalties that grow with the number of candidates.
+- **Regular models and independent observations.** The $\ChiSq$ behaviour of the likelihood-ratio statistic, on which
+  both arguments rest, needs them.
+- **Asymptotics.** Both properties are limits. At a given $n$ the table above, not the limit, describes what a criterion
+  does.
+
+## Pitfalls
+
+- **Assuming the truth is a candidate.** Consistency is a promise about the M-closed case. In the M-open case a
+  consistent criterion still picks a model, with growing confidence, and its choice predicts worse than an efficient
+  criterion's.
+- **Reading consistency as accuracy.** A consistent criterion can be wrong often at moderate $n$, and its errors are
+  dropped real effects, not extra spurious ones.
+- **Treating the selected model as if it were fixed in advance.** <NoteLink to="confidence-intervals">Confidence
+  intervals</NoteLink> and tests computed after selection, as if the model had been chosen without the data, are too
+  narrow. The selection is part of the estimator, and its risk is the one in the table <Cite id="leeb2008" />.
+- **Expecting cross-validation to be consistent.** $K$-fold cross-validation with fixed $K$ behaves like a fixed
+  penalty and is not consistent <Cite id="shao1997" />. That is the right behaviour for prediction.

@@ -1,0 +1,111 @@
+---
+title: 'How optimistic is the best cross-validation score?'
+kind: example
+summary: 'With labels that are pure noise, $J$ classifiers are scored by 5-fold cross-validation on 50 rows. The best score averages 0.63 for $J = 10$ and 0.71 for $J = 100$, against a true accuracy of 0.5, while nested cross-validation returns about 0.5.'
+tags: [model-selection, worked-example]
+aliases: []
+requires: [overfitting-in-model-selection, nested-cross-validation]
+related: [reusable-holdout, maximal-inequalities, selection-inside-cross-validation, test-set-reuse, stratified-cross-validation]
+references: [varma2006, cawley2010]
+status: draft
+updated: 2026-10-13
+---
+
+import { NestedOnNoise } from './NestedOnNoise'
+
+<Definition>
+A data set has $n = 50$ rows, 25 of each of two classes in random order. Each row has $2J$ features, all independent
+standard normal and independent of the label. Candidate $j$, for $j = 1, \dots, J$, is a 5-nearest-neighbour classifier
+that uses only features $2j - 1$ and $2j$. Every candidate is scored by stratified 5-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink> on the same folds, and the candidate with the highest
+accuracy is selected. Find the expected cross-validation accuracy of the selected candidate for $J = 1$, 10 and 100, its
+true accuracy, and the estimate that nested cross-validation (5 outer folds, 5 inner folds) gives for the whole
+procedure.
+</Definition>
+
+## Setup
+
+- **The true accuracy** of a classifier $f$ is $\prob(f(\xvec) = y)$ for a new row $(\xvec, y)$ drawn from the same
+  distribution. On new data each class has probability $\frac12$.
+- **The cross-validation accuracy** of candidate $j$, written $\operatorname{CV}_j$, is the fraction of the 50 rows that
+  candidate $j$ classifies correctly when fitted without the row's fold.
+- **The reported score** is the best of them, $\max_j\operatorname{CV}_j$, the number a tuning run prints. Accuracy is
+  higher-is-better, so <NoteLink to="winners-curse">the winner's curse</NoteLink> pushes this score up rather than down.
+- **The nested estimate** runs the whole search, including its inner 5-fold cross-validation, inside each of 5 outer
+  training sets of 40 rows, and scores the chosen candidate on the outer test fold of 10 rows (see
+  <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>).
+- $\sigma$ is the standard deviation of one candidate's cross-validation accuracy across data sets.
+
+## Solution
+
+1. **Every candidate has true accuracy exactly 0.5.** A new label $y$ is independent of the features, so it is
+   independent of the prediction $f(\xvec)$ of any classifier fitted to other data. Then
+   $\prob(f(\xvec) = y) = \sum_c \prob(f(\xvec) = c)\,\prob(y = c) = \frac12\sum_c\prob(f(\xvec) = c) = \frac12$. The
+   selected candidate is one of them, so its true accuracy is also 0.5, and so is that of the whole procedure.
+2. **One candidate's score is unbiased but noisy.** With $J = 1$ nothing is selected, and $\operatorname{CV}_1$ averages
+   about 0.5. A hold-out set of 50 rows would have standard deviation $\sqrt{0.5 \times 0.5/50} = 0.071$. The
+   cross-validation score varies more, because the folds share training rows: across simulated data sets
+   $\sigma \approx 0.088$.
+3. **The scores of different candidates are nearly independent.** Each candidate reads its own two features, which are
+   independent of every other candidate's. The candidates share only the labels and the folds.
+4. **The best of $J$ is pushed into the tail.** For $J$ independent Gaussian scores with mean 0.5 and standard deviation
+   $\sigma$, the expected maximum is $0.5 + \sigma\, m_J$, where $m_J$ is the expected maximum of $J$ standard
+   Gaussians: $m_{10} = 1.539$ and $m_{100} = 2.508$ (see <NoteLink to="maximal-inequalities">maximal
+   inequalities</NoteLink>).
+   - $J = 10$: $0.5 + 0.088 \times 1.539 = 0.635$.
+   - $J = 100$: $0.5 + 0.088 \times 2.508 = 0.721$.
+
+   The sub-Gaussian maximal inequality $\sigma\sqrt{2\ln J}$ bounds the excess by $0.189$ and $0.267$, so the expected
+   best is at most $0.689$ and $0.767$, whatever the dependence between the candidates.
+5. **Nested cross-validation sees through the selection.** In each outer fold the search chooses a candidate using the
+   40 outer training rows only. The 10 outer test rows played no part in the choice, so the chosen classifier scores
+   them with expected accuracy 0.5, by step 1. The nested estimate averages these scores and is unbiased for 0.5, up to
+   the small pessimism of training on fewer rows.
+
+**Simulation on the engine.** Repeating the whole experiment on many simulated data sets gives:
+
+| $J$ | data sets | mean best CV accuracy | best above 0.6 | mean nested estimate |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 200 | 0.502 | 13% | 0.499 |
+| 10 | 100 | 0.631 | 74% | 0.505 |
+| 100 | 40 | 0.706 | 100% | 0.498 |
+
+The best score matches the prediction of step 4 at $J = 10$ and falls a little short of it at $J = 100$, because the
+shared labels and folds correlate the candidates slightly and the accuracy moves in steps of $1/50$. With 100
+candidates, every data set produced a classifier that cross-validates above 60%, although none can beat a coin. The
+nested estimate stays at 0.5 for every $J$. Its spread across data sets, a standard deviation of 0.07 to 0.09, comes
+from the outer folds of 10 rows, not from bias.
+
+## Simulation
+
+<NestedOnNoise />
+
+## What it illustrates
+
+- **Selection makes an unbiased estimate biased.** Each candidate's cross-validation score is honest on its own. The
+  maximum of them is not. This is <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>, and its size follows the <NoteLink to="maximal-inequalities">maximal inequality</NoteLink>:
+  logarithmic in $J$ and proportional to the noise $\sigma$ of one score.
+- **Nested cross-validation assesses the procedure.** Its outer folds never inform the choice, so it returns the true
+  accuracy of "search and refit" on average (<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>).
+- **Published examples.** Varma and Simon found the same pattern for shrunken centroids and <Gloss name="svm">support
+  vector machines</Gloss> tuned on null data: cross-validation errors below 30% on many data sets with a true error of
+  50%, removed by nesting <Cite id="varma2006" />. Cawley and Talbot showed that the bias can match the differences
+  between algorithms <Cite id="cawley2010" />.
+- **The extreme case is selection without any held-out data.** Choosing features on all the rows before
+  cross-validating is a search over a very large number of candidates whose scores have all seen the test folds; see
+  <NoteLink to="selection-inside-cross-validation">selection inside cross-validation</NoteLink>.
+
+## Variations
+
+- **More rows.** $\sigma$ falls roughly like $1/\sqrt n$. With $n = 200$, simulation gives $\sigma = 0.045$ and a best
+  of 100 candidates of 0.614 on average, close to $0.5 + 0.045 \times 2.508 = 0.613$ and still well above the truth.
+- **Correlated candidates.** A grid over the number of neighbours $k$ for one fixed feature pair gives candidates that
+  make nearly the same predictions. Their scores are strongly correlated, and the best of 100 such candidates is far
+  less optimistic than the best of 100 independent ones.
+- **Real signal.** If one feature pair carries information about the label, it usually wins, and its score is close to
+  honest. The optimism is largest when many candidates are equally good, and pure noise is the limit of that case.
+- **Repetition.** Repeating 5-fold cross-validation five times with fresh splits and averaging lowers $\sigma$ from
+  0.087 to 0.076 in simulation with $J = 20$, and the mean best score from 0.658 to 0.643. Most of the noise comes from
+  the 50 rows themselves, not from the split, so repetition shrinks the bias only a little. The cure is held-out data,
+  not a different splitter.

@@ -1,0 +1,189 @@
+---
+title: 'McNemar''s test'
+kind: test
+summary: 'McNemar''s test compares two classifiers scored on the same test set. It keeps only the $b + c$ cases on which they disagree; under equal accuracy each disagreement favours either classifier with probability 1/2, so $b$ is Binomial$(b + c, 1/2)$.'
+tags: [model-selection, evaluation, hypothesis-testing, paired, worked-example]
+aliases: [McNemar test, McNemar's chi-squared test, test of correlated proportions, matched-pairs proportion test]
+requires: [binomial-test, p-value]
+related: [comparing-learning-algorithms, paired-t-test, five-by-two-cross-validation-test, corrected-resampled-t-test, metric-confidence-intervals, is-one-classifier-better-than-another, sample-size-planning]
+references: [mcnemar1947, edwards1948, dietterich1998, raschka2018]
+status: draft
+updated: 2026-10-13
+---
+
+import { McnemarNull } from './McnemarNull'
+import { TypeIErrorRates } from '../_shared/TypeIErrorRates'
+
+<Definition>
+McNemar's test compares the accuracies of two classifiers A and B that have been scored on the same $n$ test cases. Let
+$b$ be the number of cases only A classifies correctly and $c$ the number only B classifies correctly. Under the null
+hypothesis that A and B are equally accurate, each of the $b + c$ discordant cases is equally likely to be one of A's or
+one of B's, so $b$ given $b + c$ follows $\Binom(b + c, 1/2)$ <Cite id="mcnemar1947" />. The test reads the observed $b$
+against that law.
+</Definition>
+
+## What it answers
+
+Two fitted classifiers, a single held-out test set and a question: is the difference in their test accuracy larger than
+the noise of a test set of this size? A common answer compares the two accuracies as if they came from two independent
+samples. That ignores the pairing. Both classifiers see the same cases, most cases are easy for both or hard for both,
+and only the cases on which they disagree say anything about which is better. McNemar's test uses exactly those cases.
+
+The test treats the two classifiers as fixed. It answers a question about these two models on this distribution of test
+cases, not about the learning algorithms that produced them. A second training set would give two other models and
+possibly the opposite ranking. The tests that address the algorithms resample the training data: the
+<NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink> and the
+<NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink>; see
+<NoteLink to="comparing-learning-algorithms">comparing learning algorithms</NoteLink> for which question each test
+answers.
+
+## Hypotheses
+
+Each test case falls in one cell of a $2 \times 2$ table:
+
+|               | B correct | B wrong |
+| ------------- | --------- | ------- |
+| **A correct** | $a$       | $b$     |
+| **A wrong**   | $c$       | $d$     |
+
+with $a + b + c + d = n$. Write $\pi_{10}$ for the probability that a random test case is one only A gets right and
+$\pi_{01}$ for one only B gets right. The accuracy of A is $\pi_{11} + \pi_{10}$ and that of B is $\pi_{11} + \pi_{01}$,
+where $\pi_{11}$ is the probability that both are right, so their difference is
+
+$$
+\operatorname{acc}_A - \operatorname{acc}_B = \pi_{10} - \pi_{01}.
+$$
+
+The cases both classifiers get right, or both get wrong, cancel. The null hypothesis is $H_0: \pi_{10} = \pi_{01}$,
+equal accuracy, against $H_1: \pi_{10} \ne \pi_{01}$, or a one-sided alternative fixed in advance.
+
+## Assumptions
+
+- The $n$ test cases are drawn independently from the distribution the classifiers will face.
+- The two classifiers are fixed: they were trained, and any hyperparameters chosen, without the test cases. A test set
+  that helped select either model gives an optimistic and invalid comparison; see
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink>.
+- Both classifiers are scored on exactly the same cases. Two different <NoteLink to="test-sets">test sets</NoteLink>
+  break the pairing and the test does not apply.
+
+## Test statistic
+
+**The exact null law.** Condition on the number of discordant cases $m = b + c$. Each discordant case is independently
+an "only A" case with probability
+
+$$
+\frac{\pi_{10}}{\pi_{10} + \pi_{01}},
+$$
+
+the probability of being "only A" given that it is discordant. Under $H_0$ this is $1/2$ whatever the common value of
+$\pi_{10}$ and $\pi_{01}$. The $m$ discordant cases are independent, so $b \mid m \sim \Binom(m, 1/2)$: the null law of
+a fair coin tossed $m$ times. Conditioning removed the one unknown, the rate of disagreement $\pi_{10} + \pi_{01}$, so
+the law is exact for every sample size. The test is the <NoteLink to="binomial-test">binomial test</NoteLink> of
+$p_0 = 1/2$ applied to the discordant cases, which is the sign test on the per-case differences in correctness.
+
+**The χ² approximation.** Under $H_0$ and given $m$, $b$ has mean $m/2$ and variance $m \cdot \tfrac12 \cdot \tfrac12 =
+m/4$. Standardising, and using $2b - m = b - c$,
+
+$$
+z = \frac{b - m/2}{\sqrt m / 2} = \frac{b - c}{\sqrt{b + c}}, \qquad
+\chi^2 = \frac{(b - c)^2}{b + c},
+$$
+
+and for large $m$ the <Gloss name="clt">central limit theorem</Gloss> makes $z$ approximately standard normal, so
+$\chi^2$ is approximately $\chi^2_1$. This is McNemar's original statistic <Cite id="mcnemar1947" />.
+
+**Continuity correction.** $b$ moves in steps of 1, so $b - c = 2b - m$ moves in steps of 2. Half a step of $b$ is a
+step of 1 in $\abs{b - c}$, and the corrected statistic is
+
+$$
+\chi^2_\text{cc} = \frac{(\abs{b - c} - 1)^2}{b + c} \sim \chi^2_1 \text{ approximately}
+$$
+
+<Cite id="edwards1948" />. It tracks the exact <NoteLink to="p-value">p-value</NoteLink> more closely than the
+uncorrected form.
+
+## Decision rule
+
+- **Exact:** the two-sided p-value is the total $\Binom(m, 1/2)$ probability of the outcomes no more likely than the
+  observed $b$, which for this symmetric law is $\min\paren{1, 2P(B \ge \max(b, c))}$ with $B \sim \Binom(m, 1/2)$.
+- **Approximate:** the p-value is $P(\chi^2_1 \ge \chi^2_\text{cc})$.
+
+Reject $H_0$ at level $\alpha$ when $p \le \alpha$. The exact test is valid for any $m$ and is the default in common
+software (statsmodels' `mcnemar`); the χ² form is a convenience for large $m$. When $m = 0$ the classifiers agree on
+every case and the data contain no evidence either way.
+
+<McnemarNull />
+
+## Worked example
+
+Two classifiers are scored on a test set of $n = 500$ cases that neither saw during training or tuning. A is right on
+430 cases and B on 414, accuracies 0.860 and 0.828. Cross-tabulating the cases:
+
+|               | B correct | B wrong |
+| ------------- | --------- | ------- |
+| **A correct** | 400       | 30      |
+| **A wrong**   | 14        | 56      |
+
+1. **Discordant counts.** $b = 30$ and $c = 14$, so $m = 44$. The 456 cases on which the classifiers agree drop out.
+   The difference in accuracy is $(b - c)/n = 16/500 = 0.032$, as the two accuracies give.
+2. **Exact test.** Under $H_0$, $b \sim \Binom(44, 1/2)$. The probability of 30 or more heads in 44 fair tosses is
+   0.0113, and doubling gives $p = 0.023$.
+3. **χ² forms.** $\chi^2_\text{cc} = (16 - 1)^2/44 = 5.11$, $p = 0.024$. Without the correction, $\chi^2 = 256/44 =
+   5.82$ and $p = 0.016$. The corrected value is the closer of the two to the exact one.
+4. **Decision.** At $\alpha = 0.05$ the test rejects: on this test distribution, A is more accurate than B.
+5. **The unpaired test.** Treating 430 of 500 and 414 of 500 as two independent proportions, a two-proportion
+   <NoteLink to="z-test">z-test</NoteLink> gives $p = 0.16$. The same data look like noise because the unpaired variance
+   counts the 456 agreements as if each could have gone either way.
+
+The last step is the reason to pair. The variance of the difference of the two accuracies, estimated on one test set, is
+
+$$
+\var\paren{\widehat{\operatorname{acc}}_A - \widehat{\operatorname{acc}}_B} = \frac{\pi_{10} + \pi_{01} - (\pi_{10} -
+\pi_{01})^2}{n},
+$$
+
+which depends only on the disagreement rate. Here it is about $(0.088 - 0.032^2)/500$, a
+<NoteLink to="standard-error">standard error</NoteLink> of 0.013. The unpaired formula
+$\sqrt{(0.86 \cdot 0.14 + 0.828 \cdot 0.172)/500}$ gives 0.023, nearly twice as large.
+
+## Effect size
+
+Report the difference in accuracy $(b - c)/n$ with a confidence interval, here 0.032 with standard error 0.013. The
+matched-pairs odds ratio $b/c = 2.14$ says that when the two classifiers disagree, A is right about twice as often as
+B. The test's power depends on $m$, the number of disagreements, not on $n$: two very similar classifiers need a large
+test set before they disagree often enough to be told apart; see <NoteLink to="sample-size-planning">sample-size
+planning</NoteLink> and <NoteLink to="metric-confidence-intervals">metric confidence intervals</NoteLink>.
+
+## Comparing learning algorithms with McNemar's test
+
+Dietterich studied McNemar's test as a way to compare two learning algorithms when each can be trained only once
+<Cite id="dietterich1998" />. Train both on one training set, score both on one held-out test set, and test. The
+procedure ignores the variation due to the training set, so in principle it can reject too often. In Dietterich's
+simulations its rate of false rejections never exceeded the nominal level, and among the tests whose false-rejection
+rate was acceptable it had power similar to the 5×2 cross-validation test. He recommended McNemar's test for algorithms
+that can be run only once and the 5×2 cross-validation test for algorithms that can be run ten times. The figure repeats
+the experiment with two learners that are equally good by construction.
+
+<TypeIErrorRates highlight={['mcnemar']} />
+
+In this simulation McNemar's test, on one third of the rows held out, rejects at or below the nominal 5%. Training on
+two thirds of the data and testing on a third has a cost: the models are trained on less data than the final model will
+be, and the test sees only the disagreements in one third of the rows. Raising the noise on B's inputs shows how much
+power each test keeps.
+
+## Pitfalls
+
+- **A test of models, read as a test of algorithms.** The test conditions on the two fitted models. A significant
+  result says these two models differ on the test distribution. It does not say that the algorithm behind A beats the
+  algorithm behind B on new training sets.
+- **A test set used for selection.** If the test set chose the hyperparameters, the architecture or the better of
+  several runs, the selected model is favoured on it and the test is optimistic. Keep a test set that no decision has
+  seen.
+- **Many pairwise tests.** Comparing every pair among several classifiers multiplies the chances of a
+  <Gloss name="fp">false positive</Gloss>; correct the p-values (see <NoteLink to="multiple-testing">multiple
+  testing</NoteLink>).
+- **The χ² form for few disagreements.** With $b + c$ small the χ² approximation is poor; the exact binomial test is
+  always available.
+- **Accuracy only.** The test compares <NoteLink to="accuracy-and-balanced-accuracy">error rates</NoteLink>. Two
+  classifiers with the same accuracy can differ in calibration, in their errors on a rare class or in cost; those need
+  their own comparisons.

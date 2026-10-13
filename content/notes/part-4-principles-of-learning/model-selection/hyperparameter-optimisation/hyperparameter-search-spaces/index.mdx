@@ -1,0 +1,194 @@
+---
+title: 'Hyperparameter search spaces'
+kind: concept
+summary: 'A search space lists the hyperparameters a search may set, with each one''s type, range, scale and the choices under which it applies. Scale parameters such as a learning rate are searched on a log scale; a kernel width exists only when the kernel has one.'
+tags: [model-selection, hyperparameters, worked-example]
+aliases: [search space, hyperparameter space, configuration space, conditional hyperparameters, log-uniform prior, combined algorithm selection and hyperparameter optimisation]
+requires: [hyperparameter-search]
+related: [grid-search, random-search, quasi-random-search, tree-structured-parzen-estimator, sequential-model-based-algorithm-configuration, automated-machine-learning, overfitting-in-model-selection, tuning-deep-learning-hyperparameters, categorical-encoding]
+references: [thornton2013, bergstra2011, bergstra2012, godbole2023, keerthi2003, hutter2019automl]
+status: draft
+updated: 2026-10-13
+---
+
+import { LogScaleSampling } from './LogScaleSampling'
+
+<Definition>
+A **hyperparameter search space** $\Lambda$ is the set of configurations $\lambdavec = (\lambda_1, \dots, \lambda_D)$
+that a <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> may try. It states, for each of the $D$
+hyperparameters, a **type** (real, integer, categorical or boolean), a **range**, a **scale** (linear or logarithmic)
+and a **condition**: the values of other hyperparameters under which it applies. Most searches also put a distribution
+on $\Lambda$, usually uniform on the chosen scales, from which random trials are drawn and which Bayesian optimisation
+treats as its domain. The search minimises a validation loss $L(\lambdavec)$ over $\Lambda$ and can return nothing
+outside it.
+</Definition>
+
+## Intuition
+
+The search space is where prior knowledge enters a search. A search algorithm decides the order in which configurations
+are tried. The search space decides which configurations can be tried at all, and how much of the budget each region
+receives.
+
+Three mistakes in the space cost more than any choice of algorithm.
+- **A range that excludes the optimum.** The search returns the best configuration on the boundary, and a finer search
+  does not help.
+- **A linear scale for a quantity that acts multiplicatively.** A <Gloss name="learning-rate">learning rate</Gloss>
+  drawn uniformly from $[10^{-5}, 1]$ lands above $0.1$ in 90% of trials, and below $10^{-3}$ in 0.1% of them.
+- **A flat space for a conditional one.** Varying a polynomial kernel's degree while the kernel is linear produces
+  duplicate trials that change nothing.
+
+The space also sets how much the search can overfit. Each extra hyperparameter, and each extra decade of range, adds
+candidates whose validation scores the search compares. The best of more noisy scores is more optimistic (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## Details
+
+### Types of hyperparameter
+
+- **Real.** The learning rate $\eta$, a penalty strength, a dropout probability $p \in [0, 1)$, a kernel width.
+- **Integer.** The number of layers, a tree depth, the number $k$ of neighbours, the number of trees.
+- **Categorical.** The optimiser (<Gloss name="sgd" /> or Adam), the kernel (linear, RBF or polynomial), the activation
+  function. The values have no order, so a search must not treat "polynomial" as lying between "linear" and "RBF".
+- **Boolean.** Whether to standardise the inputs, whether to use <NoteLink to="batch-normalisation">batch
+  normalisation</NoteLink>.
+- **Conditional.** A hyperparameter that exists only for some values of another: momentum only for SGD, the width
+  $\gamma$ of an <Gloss name="rbf-kernel" /> only when the kernel is RBF, the degree only for a polynomial kernel.
+
+Conditional hyperparameters make the space a tree. Its root holds the unconditional choices, and each branch adds the
+hyperparameters that its choice brings with it. Bergstra et al. called these **tree-structured** spaces and designed the
+<NoteLink to="tree-structured-parzen-estimator">tree-structured Parzen estimator</NoteLink> to search them
+<Cite id="bergstra2011" />.
+
+### Log scales
+
+A hyperparameter acts **multiplicatively** when doubling it has a similar effect wherever it starts. Penalty strengths,
+learning rates, the SVM's $C$ and $\gamma$, and the number of hidden units behave this way over several orders of
+magnitude. Such a hyperparameter is searched on a log scale: the search works with $\ln\lambda$, and a random trial
+draws $\ln\lambda$ uniformly.
+
+The **log-uniform** distribution on $[a, b]$, with $0 < a < b$, has density
+
+$$
+p(\lambda) = \frac{1}{\lambda\ln(b/a)}, \qquad a \le \lambda \le b.
+$$
+
+Each decade receives the same probability. For any $c$ with $a \le c$ and $10c \le b$,
+
+$$
+\prob(c \le \lambda \le 10c) = \int_c^{10c}\frac{d\lambda}{\lambda\ln(b/a)} = \frac{\ln 10}{\ln(b/a)},
+$$
+
+which does not depend on $c$. The uniform distribution on $[a, b]$ gives the decade $[c, 10c]$ probability
+$9c/(b - a)$, which grows tenfold with each decade. Over $[10^{-5}, 1]$, the log-uniform distribution gives each of the
+five decades probability $0.2$, while the uniform one gives the top decade $0.9/(1 - 10^{-5}) \approx 0.90$.
+
+Hyperparameters close to an upper limit are searched on the log scale of their distance from it. A momentum or Adam
+decay rate $\beta \in [0.9, 0.9999]$ is searched as $1 - \beta \in [10^{-4}, 0.1]$ on a log scale. The averaging
+horizon of such a rate is about $1/(1 - \beta)$ steps, so this scale spreads trials evenly over horizons from 10 to
+10,000 steps.
+
+### Encoding the space in a unit cube
+
+Search libraries map $\Lambda$ to the unit cube $[0, 1]^m$, search there, and map back.
+- A real hyperparameter on $[a, b]$ maps to $u = (\lambda - a)/(b - a)$ on a linear scale and to
+  $u = (\ln\lambda - \ln a)/(\ln b - \ln a)$ on a log scale.
+- An integer or categorical hyperparameter with $r$ values maps to $r$ equal bins of $[0, 1]$. Surrogate models such as
+  a <NoteLink to="gaussian-process">Gaussian process</NoteLink> often use a one-hot code instead, so that no order
+  between the values is implied (see <NoteLink to="categorical-encoding">categorical encoding</NoteLink>).
+- An inactive conditional hyperparameter takes a fixed default, so that it does not affect the surrogate.
+
+Uniform draws in the cube then decode to log-uniform draws on log scales and to uniform draws over the values of an
+integer or a category. <NoteLink to="random-search">Random search</NoteLink>,
+<NoteLink to="quasi-random-search">quasi-random search</NoteLink> and
+<NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> all work in these coordinates.
+
+### Combined algorithm selection and hyperparameter optimisation
+
+The choice of learning algorithm can itself be the root of a conditional space. Let $A^{(1)}, \dots, A^{(J)}$ be
+learning algorithms with hyperparameter spaces $\Lambda^{(1)}, \dots, \Lambda^{(J)}$. The <Gloss name="cash" /> problem
+is
+
+$$
+\paren{j^\star, \lambdavec^\star} = \argmin_{j \in \set{1, \dots, J},\ \lambdavec \in \Lambda^{(j)}} L_j(\lambdavec),
+$$
+
+where $L_j(\lambdavec)$ is the <NoteLink to="cross-validation">cross-validation</NoteLink> loss of algorithm $A^{(j)}$
+with hyperparameters $\lambdavec$ <Cite id="thornton2013" />. Written as one space, its root is a categorical
+hyperparameter with $J$ values, and $\Lambda^{(j)}$ hangs below value $j$. Auto-WEKA solved this problem for the
+classifiers of the WEKA library with <NoteLink to="sequential-model-based-algorithm-configuration">sequential
+model-based algorithm configuration</NoteLink> <Cite id="thornton2013" />, and
+<NoteLink to="automated-machine-learning">automated machine learning</NoteLink> systems extend the root to whole
+pipelines <Cite id="hutter2019automl" />.
+
+### Coupled hyperparameters and reparameterisation
+
+Two hyperparameters are **coupled** when the good values of one depend on the other. A search on axes aligned with the
+original hyperparameters then needs many points to trace a diagonal valley. A
+change of coordinates can align the valley with an axis.
+
+The RBF <Gloss name="svm" /> is the standard case. Keerthi and Lin showed that as $\gamma \to 0$ with $C\gamma$ held
+fixed, the RBF SVM approaches a linear SVM whose penalty is set by $C\gamma$ <Cite id="keerthi2003" />. Good settings
+then lie along lines of constant $C\gamma$. In the tabulated SVM error used in this chapter's figures, every setting
+within $0.002$ of the lowest error lies on the line $\log_{10}C + \log_{10}\gamma = -1$. Searching over $\log_{10}C$ and
+$\log_{10}(C\gamma)$ puts that valley along one axis.
+
+Deep learning has coupled pairs too. The best learning rate grows with the batch size, and the effect of
+<Gloss name="weight-decay">weight decay</Gloss> in SGD depends on the product of decay and learning rate.
+<NoteLink to="tuning-deep-learning-hyperparameters">Tuning deep-learning hyperparameters</NoteLink> treats these.
+
+## Log and linear scales on one hyperparameter
+
+<LogScaleSampling />
+
+The figure draws the cross-validated error of an RBF SVM against $C$ at a fixed $\gamma$. The error comes from a table
+of repeated 5-fold cross-validation on two species of Fisher's iris, over $C \in [10^{-2}, 10^3]$ and
+$\gamma \in [10^{-3}, 10^2]$.
+
+## Worked example
+
+**Linear against log scale.** The penalty $C$ of an SVM is searched over $[10^{-2}, 10^3]$, five decades. At
+$\gamma = 10^{-2}$ the error is lowest at $C = 10$.
+
+1. **Uniform on $[10^{-2}, 10^3]$.** The probability of a trial below $C = 10$ is
+   $(10 - 0.01)/(1000 - 0.01) = 0.0100$.
+2. **Log-uniform.** The same probability is the fraction of decades below 10: $(\log_{10}10 - \log_{10}0.01)/5 = 3/5 =
+   0.6$.
+3. **Twenty trials.** Uniform sampling puts $20 \times 0.01 = 0.2$ trials below $C = 10$ on average, and puts none there
+   with probability $0.99^{20} = 0.82$. Log-uniform sampling puts 12 there on average.
+
+Four searches in five on the linear scale never test a value of $C$ on the lower side of the optimum.
+
+**A conditional space.** An SVM search has the penalty $C$ on a log scale, a kernel in $\set{\text{linear},
+\text{RBF}, \text{polynomial}}$, a width $\gamma$ for the RBF and polynomial kernels, and a degree in $\set{2, 3, 4}$
+for the polynomial kernel. A grid takes 5 values of each real hyperparameter.
+
+1. **As a tree.** The linear kernel gives 5 configurations (one per $C$). The RBF kernel gives $5 \times 5 = 25$. The
+   polynomial kernel gives $5 \times 5 \times 3 = 75$. The tree has $5 + 25 + 75 = 105$ configurations.
+2. **As a flat product.** Every hyperparameter varies everywhere: $5 \times 3 \times 5 \times 3 = 225$ trials.
+3. **Duplicates.** Under the linear kernel the flat grid runs each value of $C$ with 15 settings of $\gamma$ and the
+   degree that the model ignores, so 75 trials give 5 distinct models. Under the RBF kernel 75 trials give 25. The flat
+   grid spends $225 - 105 = 120$ trials, more than half its budget, on duplicates.
+
+**Encoding a point.** The configuration $C = 10$, RBF kernel, $\gamma = 0.01$ in the tree-structured space encodes to
+the unit cube as follows. The penalty gives $u_C = (\log_{10}10 + 2)/5 = 0.6$. The kernel's three bins are
+$[0, \tfrac13)$, $[\tfrac13, \tfrac23)$ and $[\tfrac23, 1]$, and the RBF kernel takes the centre of the second, $0.5$.
+The width, searched over $[10^{-3}, 10^2]$, gives $u_\gamma = (\log_{10}0.01 + 3)/5 = 0.2$.
+
+## Pitfalls
+
+- **An optimum on the boundary.** If the best trials sit at the edge of a range, the range is too narrow. The Deep
+  Learning Tuning Playbook calls a search space suspicious when its best point lies close to the boundary, and widens
+  the range in that dimension <Cite id="godbole2023" />.
+- **Scales that depend on the data.** The useful range of $\gamma$ depends on the scale of the inputs, so the inputs are
+  standardised before the range is fixed. A penalty on a loss summed over the $n$ examples has an optimum about $n$
+  times larger than the same penalty on the mean loss, so a range copied between libraries or data sizes can miss.
+- **Integers by rounding a real.** Rounding a uniform draw on $[1, 4]$ to the nearest integer gives 1 and 4 half the
+  probability of 2 and 3. Draw integers uniformly over their values, or round a draw on $[0.5, 4.5]$.
+- **Order imposed on categories.** Encoding a category as an integer and searching it with a model that assumes
+  smoothness implies that neighbouring codes give similar losses.
+- **A space chosen after looking at the test set.** A range narrowed to where earlier models scored well on the test
+  set has used the test set for selection. The test score of the final model is then optimistic (see
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink>).
+- **More hyperparameters than the data can choose between.** Random search found that only a few hyperparameters
+  mattered on each dataset <Cite id="bergstra2012" />. Every extra hyperparameter adds noise to the comparison without
+  adding much accuracy, which raises the optimism of the best score.

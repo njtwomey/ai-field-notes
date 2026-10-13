@@ -1,0 +1,152 @@
+---
+title: 'Tuning a support vector machine by Bayesian optimisation'
+kind: example
+summary: 'The penalty $C$ and RBF width $\gamma$ of a support vector machine are tuned by Gaussian-process expected improvement and by random search with 30 evaluations each. Over 20 seeds expected improvement gets closer to the best error; with noisy scores both report optimistic errors.'
+tags: [model-selection, worked-example, hyperparameters, bayesian]
+aliases: [Bayesian optimisation of an SVM, tuning C and gamma]
+requires: [bayesian-optimisation, expected-improvement, support-vector-machine, random-search]
+related: [grid-search, hyperparameter-search-spaces, gaussian-process-hyperparameter-learning, overfitting-in-model-selection, nested-cross-validation, acquisition-functions, tuning-budgets-in-comparisons]
+references: [snoek2012, jones1998, bergstra2012, hsu2003, fisher1936, dodge2019, bull2011, frazier2018]
+status: draft
+updated: 2026-10-13
+---
+
+import { SvmBoWalkthrough } from './SvmBoWalkthrough'
+
+<Definition>
+An RBF <Gloss name="svm">support vector machine</Gloss> separates two iris species, versicolor and virginica
+<Cite id="fisher1936" />. Its kernel is $k(\xvec, \xvec') = \exp(-\gamma\norm{\xvec - \xvec'}^2)$ and its penalty on
+margin violations is $C$. The validation error $f(\lambdavec)$, with $\lambdavec = (\log_{10} C, \log_{10}\gamma)$ on
+the box $[-2, 3] \times [-3, 2]$, is the error of ten repeats of stratified 5-fold cross-validation, tabulated on a
+21 by 21 grid and interpolated between nodes. Its lowest value is $0.040$, at $\log_{10} C = 1$ and
+$\log_{10}\gamma = -2$. With a budget of $N = 30$ evaluations, compare Gaussian-process expected improvement with random
+search: which configuration does each return, how far is its true error from $0.040$, and how much does the answer vary
+with the seed?
+</Definition>
+
+## Setup
+
+- **Search space.** Both hyperparameters are searched on a log scale, as is standard for SVMs
+  <Cite id="hsu2003" /> (see <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink>).
+- **Objective.** $f$ is the tabulated cross-validated error, so an evaluation costs nothing here and the true error of
+  any configuration is known. In a real search each evaluation is a cross-validation run.
+- **Bayesian optimisation.** The surrogate is a <Gloss name="gp">Gaussian process</Gloss> with a Matérn 5/2 kernel on
+  the box rescaled to the unit square, with targets standardised. Its length-scale and variance are refitted by
+  <NoteLink to="gaussian-process-hyperparameter-learning">marginal likelihood</NoteLink> before every choice. The first
+  5 evaluations form a Latin hypercube. Each later evaluation maximises <NoteLink to="expected-improvement">expected
+  improvement</NoteLink> over a 41 by 41 grid of candidates, which contains every node of the table. The incumbent
+  $f^\star_t$ is the best value observed after $t$ evaluations.
+- **Random search.** <NoteLink to="random-search">Random search</NoteLink> draws 30 configurations uniformly on the box
+  and keeps the best <Cite id="bergstra2012" />.
+- **Score.** For each method and each budget $t \le 30$, the true error of the configuration it would return. Each
+  method runs with 20 seeds.
+
+## Solution
+
+### One run, step by step
+
+Seed 1 shows how the search behaves.
+
+1. **Initial design.** The five evaluations are spread over the box. The best is $0.066$ at
+   $(\log_{10} C, \log_{10}\gamma) = (-1.71, -0.60)$. The worst, $0.418$ at $(0.77, 1.67)$, is in the overfitting
+   region of large $\gamma$.
+2. **A short length-scale first.** Fitted to five points, the length-scale is $0.05$ of the box's side, so the
+   posterior is uncertain almost everywhere and expected improvement peaks next to the incumbent. Evaluation 6, at
+   $(-1.5, -0.75)$, gives $0.070$.
+3. **Exploration.** With six points the length-scale jumps to $0.28$. Evaluations 7 and 8 go to the edges of the box,
+   $(3, -0.5)$ and $(-2, -2)$, where the posterior is widest, and return $0.077$ and $0.114$.
+4. **Finding the valley.** Evaluation 9, at $(2.25, -3)$, returns $0.048$ and becomes the incumbent. It lies in the
+   diagonal valley of good settings, where a larger $C$ pairs with a smaller $\gamma$.
+5. **Refining.** Evaluations 10 to 13 test the edge of the box at large $C$. Evaluation 14, at $(1.63, -2.5)$, gives
+   $0.0455$. Evaluation 16, at $(1, -2.125)$, gives $0.043$, one grid step from the best node.
+6. **Diminishing returns.** The remaining 14 evaluations refine around the valley and make occasional trips to unvisited
+   edges. None improves on $0.043$. The largest expected improvement falls from $0.029$ at the first choice to
+   $0.0002$ at the last: the surrogate expects little more from the budget.
+
+Random search with seed 1 finds $0.049$ on its third trial and nothing better in the next 27.
+
+### Twenty seeds
+
+The mean over 20 seeds of the true error of the returned configuration, by budget:
+
+| evaluations $t$ | expected improvement | random search | seeds where EI is better |
+| --- | --- | --- | --- |
+| 5 | 0.0555 | 0.0556 | 7 of 20 |
+| 10 | 0.0473 | 0.0504 | 15 of 20 |
+| 15 | 0.0448 | 0.0477 | 12 of 20 |
+| 20 | 0.0421 | 0.0466 | 16 of 20 |
+| 30 | 0.0415 | 0.0455 | 19 of 20 |
+
+At 5 evaluations both methods have only their initial random designs, and they tie. After that expected improvement
+pulls ahead. Every one of its 20 runs reaches an error of $0.045$ or less within 30 evaluations, after a median of 12.5.
+Random search reaches $0.045$ in 12 of its 20 runs. At 30 evaluations expected improvement is within $0.0015$ of the
+best error on average, and random search within $0.0055$.
+
+The surface is easy for random search. About 5% of the box has error below $0.050$, within $0.01$ of the minimum (see
+<NoteLink to="random-search">random search</NoteLink>), so 30 random trials land there with probability
+$1 - 0.95^{30} = 0.79$. The gain from a surrogate grows as the good region shrinks and as evaluations become more
+expensive.
+
+### Noisy evaluations
+
+A real cross-validation score is noisy. With noise of standard deviation $0.02$ added to each evaluation, about the
+binomial <NoteLink to="standard-error">standard error</NoteLink> $\sqrt{0.05 \times 0.95/100} = 0.022$ of an
+<NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> near $0.05$ measured on 100 examples, and with the
+Gaussian process now fitting a noise variance, the means over 20 seeds become:
+
+| evaluations $t$ | EI, true error | EI, observed best | random, true error | random, observed best |
+| --- | --- | --- | --- | --- |
+| 10 | 0.0623 | 0.0312 | 0.0596 | 0.0403 |
+| 20 | 0.0572 | 0.0230 | 0.0559 | 0.0269 |
+| 30 | 0.0531 | 0.0158 | 0.0549 | 0.0222 |
+
+Both methods return the configuration with the lowest observed score, which is now often a lucky draw. The reported
+best score falls with every evaluation while the true error of the returned configuration barely improves. At 30
+evaluations expected improvement reports $0.016$ for a configuration whose true error is $0.053$. The optimism is larger
+for expected improvement than for random search, because it re-evaluates near low scores, including scores that were
+low by chance.
+
+Recommending instead the configuration with the lowest posterior mean, rather than the lowest observed score, gives a
+true error of $0.051$ at 30 evaluations, averaged over the 20 seeds, with a posterior mean there of $0.042$. The
+posterior mean averages neighbouring evaluations and shrinks lucky scores, so it is both the better choice and the less
+optimistic estimate. It is still optimistic.
+
+## Simulation
+
+<SvmBoWalkthrough />
+
+The figure runs one seed at a time. Step through seed 1 to watch the length-scale settle and the evaluations collect
+along the valley, then try seeds 2 to 4. Set the noise to $0.02$ to see the observed incumbent (dashed) fall away from
+its true error.
+
+## What it illustrates
+
+- **A surrogate uses earlier scores.** Expected improvement concentrates evaluations along the valley it has found;
+  random search keeps sampling the whole box. The surrogate's advantage is largest at moderate budgets, as in
+  <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> generally <Cite id="snoek2012" />.
+- **The exploration weight comes from the posterior.** Early evaluations go to the edges of the box because the
+  posterior spread is largest there. The balance is set by the closed form of
+  <NoteLink to="expected-improvement">expected improvement</NoteLink> <Cite id="jones1998" />.
+- **Refitting matters.** The length-scale fitted to five points is far too short. Refitting it at every step corrects it
+  within one evaluation here, but an overconfident length-scale can stop expected improvement from exploring at all
+  <Cite id="bull2011" />.
+- **Compare over seeds.** A single run can favour either method: random search beat expected improvement at 15
+  evaluations in 8 of 20 seeds. Comparisons need several seeds and equal budgets <Cite id="dodge2019" /> (see
+  <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+- **Selection makes scores optimistic.** The best observed score of any search is biased low, and an adaptive search
+  more so (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). The error of
+  the tuned SVM needs data the search never used, such as a test set or <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>.
+
+## Variations
+
+- **A finer budget question.** Stopping when the largest expected improvement falls below a threshold, such as $0.001$,
+  would have ended the seed-1 run after 21 evaluations with the same result.
+- **A grid.** A <NoteLink to="grid-search">grid</NoteLink> of 30 points, such as 5 by 6, tests five values of $C$ and
+  six of $\gamma$, and whether it hits the valley depends on where its lines fall.
+- **More hyperparameters.** Adding hyperparameters that do not affect the error leaves random search unchanged, since
+  its projection onto $(C, \gamma)$ is the same. A Gaussian process with one length-scale per hyperparameter can learn
+  that they do not matter, but needs evaluations to do so (see
+  <NoteLink to="high-dimensional-bayesian-optimisation">high-dimensional Bayesian optimisation</NoteLink>).
+- **Parallel workers.** With four workers, the batch methods of <NoteLink to="batch-bayesian-optimisation">batch
+  Bayesian optimisation</NoteLink> propose four configurations per round.

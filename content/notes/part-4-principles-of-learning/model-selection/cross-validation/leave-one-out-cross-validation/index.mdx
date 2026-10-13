@@ -1,0 +1,210 @@
+---
+title: 'Leave-one-out cross-validation'
+kind: technique
+summary: 'Leave-one-out cross-validation predicts each point from a model fitted to the other $n - 1$. For a linear smoother $\hat\yvec = \Smat\yvec$ the held-out residual is $(y_i - \hat y_i)/(1 - S_{ii})$, so one fit gives all $n$. Its variance is high for unstable learners.'
+tags: [model-selection, evaluation, resampling, linear-models, worked-example]
+aliases: [LOOCV, leave-one-out, PRESS statistic, prediction sum of squares, ordinary cross-validation]
+requires: [k-fold-cross-validation, effective-degrees-of-freedom]
+related: [generalised-cross-validation, leverage-and-influence, jackknife, pareto-smoothed-importance-sampling-leave-one-out, algorithmic-stability, consistency-and-efficiency-of-selection-criteria]
+references: [stone1974, allen1974, hastie2009, kohavi1995, shao1993, breiman1992, rogers1978, devroye1979, kearns1999, cook1977]
+status: draft
+updated: 2026-10-13
+---
+
+import { LooShortcut } from './LooShortcut'
+
+<Definition>
+Let $\hat f^{-i}$ be the model fitted to all the data except point $i$, and write $\hat y_i^{-i} = \hat f^{-i}(\xvec_i)$
+for its prediction at the left-out point. The **leave-one-out** (LOO) estimate of prediction error is
+
+$$
+\operatorname{LOO} = \frac{1}{n}\sum_{i=1}^n \ell\paren{y_i, \hat y_i^{-i}}.
+$$
+
+It is <NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink> with $K = n$ folds of one point each
+<Cite id="stone1974" />. For <NoteLink to="regression-losses">squared loss</NoteLink>,
+$n \cdot \operatorname{LOO} = \sum_i (y_i - \hat y_i^{-i})^2$ is the **PRESS** statistic, the prediction sum of squares
+<Cite id="allen1974" />.
+</Definition>
+
+## Problem
+
+$K$-fold cross-validation fits each fold model to $n(K-1)/K$ points and is
+pessimistic by the drop in error between that training size and $n$. It also depends on a random partition.
+Leave-one-out removes both: each fold model sees $n - 1$ points, and there is only one way to leave one point out.
+
+The price is $n$ fits. For the large family of linear smoothers that price disappears: one fit gives every
+leave-one-out residual exactly. A second price does not disappear: the $n$ fold models are almost identical, so their
+errors are strongly correlated, and the estimate can have high variance.
+
+## Mechanism
+
+1. For each $i = 1, \dots, n$, fit the model to the $n - 1$ points other than $i$ and predict $y_i$.
+2. Average the $n$ losses.
+3. For a linear smoother, fit once instead and rescale each residual by $1/(1 - S_{ii})$, as derived below.
+
+Every fold model is fitted to $n - 1$ points, and the left-out point is independent of them. The argument of $K$-fold
+cross-validation, applied with $K = n$, gives
+
+$$
+\expect\brack{\operatorname{LOO}} = \operatorname{Err}(n - 1),
+$$
+
+the expected error of the learner trained on $n - 1$ points. Leave-one-out is almost unbiased for the error at
+training size $n$: its pessimistic bias is $\operatorname{Err}(n-1) - \operatorname{Err}(n)$, which for an excess error
+falling as $c/m$ is $c/(n(n-1))$.
+
+## The shortcut for linear smoothers
+
+A **linear smoother** has fitted values $\hat\yvec = \Smat\yvec$ for an $n \times n$ matrix $\Smat$ that depends on the
+inputs $\xvec_1, \dots, \xvec_n$ but not on the targets $\yvec$. Least squares, <NoteLink to="ridge-regression">ridge
+regression</NoteLink>, <NoteLink to="smoothing-splines">smoothing splines</NoteLink>, P-splines and
+<NoteLink to="kernel-ridge-regression">kernel ridge regression</NoteLink> are linear smoothers. Each minimises a
+penalised squared error over a fixed class of functions $\mathcal{F}$,
+
+$$
+\hat f = \argmin_{f \in \mathcal{F}} \sum_{j=1}^n \paren{y_j - f(\xvec_j)}^2 + \lambda J(f),
+$$
+
+with a penalty $J \ge 0$ and a weight $\lambda \ge 0$ that do not depend on the data. The diagonal entry $S_{ii}$ is the
+**leverage** of point $i$: the weight its own target receives in its fitted value (see
+<NoteLink to="leverage-and-influence">leverage and influence</NoteLink>).
+
+The derivation fixes $i$ and compares two fitting problems.
+
+1. **The leave-one-out problem.** $\hat f^{-i}$ minimises the objective with the $j = i$ term removed,
+   $\sum_{j \ne i}(y_j - f(\xvec_j))^2 + \lambda J(f)$.
+2. **A modified full problem.** Replace the target $y_i$ by $y_i^* = \hat y_i^{-i}$, the leave-one-out prediction, and
+   keep every other target. Call the fit to these modified data $\tilde f$.
+3. **The two fits agree.** For any $f$, the modified objective is the leave-one-out objective plus the term
+   $(\hat y_i^{-i} - f(\xvec_i))^2$. At $f = \hat f^{-i}$ the leave-one-out objective is at its minimum and the added
+   term is zero, its own minimum. No $f$ can do better on the sum, so $\tilde f = \hat f^{-i}$, and the fitted value of
+   the modified problem at $\xvec_i$ is $\hat y_i^{-i}$.
+4. **Linearity.** The modified problem has the same inputs, so its fitted values are $\Smat$ times the modified
+   targets. Its fitted value at point $i$ is $\hat y_i^{-i}$, by step 3.
+
+Writing out row $i$ of $\Smat$ times the modified targets, and using $\hat y_i = \sum_j S_{ij}y_j$ for the original
+fit,
+
+$$
+\hat y_i^{-i} = \sum_{j \ne i} S_{ij}y_j + S_{ii}\hat y_i^{-i} = \hat y_i - S_{ii}y_i + S_{ii}\hat y_i^{-i}.
+$$
+
+Subtracting both sides from $y_i$ and collecting the $\hat y_i^{-i}$ terms gives
+$(1 - S_{ii})(y_i - \hat y_i^{-i}) = y_i - \hat y_i$, so
+
+$$
+y_i - \hat y_i^{-i} = \frac{y_i - \hat y_i}{1 - S_{ii}},
+\qquad
+\operatorname{LOO} = \frac{1}{n}\sum_{i=1}^n \paren{\frac{y_i - \hat y_i}{1 - S_{ii}}}^2.
+$$
+
+The leave-one-out residual is the ordinary residual inflated by $1/(1 - S_{ii})$. A point with high leverage pulls the
+fit towards itself, so its ordinary residual understates how badly the other points predict it. One fit, its
+residuals and the diagonal of $\Smat$ give the whole leave-one-out estimate.
+
+The derivation needs two conditions. The class $\mathcal{F}$, the penalty and $\lambda$ must be the same with and
+without point $i$; a basis whose knots are placed at the data, or a $\lambda$ chosen from the data, breaks the identity.
+The loss must be squared error, so that removing a point is the same as setting its residual to zero. The shortcut
+therefore gives leave-one-out for a fixed $\lambda$; choosing $\lambda$ by minimising it is a separate step. For least
+squares, the same identity follows from a rank-one update of $(\Xmat^\top\Xmat)^{-1}$.
+
+<Derivation title="The least-squares case by the Sherman–Morrison formula">
+Let $\Xmat$ be the $n \times p$ design with rows $\xvec_j^\top$, $\Amat = \Xmat^\top\Xmat$ invertible, and
+$h_{ii} = \xvec_i^\top\Amat^{-1}\xvec_i$ the leverage of point $i$. Removing row $i$ gives
+$\Xmat_{-i}^\top\Xmat_{-i} = \Amat - \xvec_i\xvec_i^\top$ and
+$\Xmat_{-i}^\top\yvec_{-i} = \Xmat^\top\yvec - \xvec_i y_i$. The Sherman–Morrison formula for a rank-one update gives
+
+$$
+(\Amat - \xvec_i\xvec_i^\top)^{-1} = \Amat^{-1} + \frac{\Amat^{-1}\xvec_i\xvec_i^\top\Amat^{-1}}{1 - h_{ii}}.
+$$
+
+Multiply by $\Xmat^\top\yvec - \xvec_i y_i$ and take the inner product with $\xvec_i$. With $\hat y_i = \xvec_i^\top
+\Amat^{-1}\Xmat^\top\yvec$,
+
+$$
+\hat y_i^{-i} = \hat y_i - h_{ii}y_i + \frac{h_{ii}(\hat y_i - h_{ii}y_i)}{1 - h_{ii}}
+= \frac{\hat y_i - h_{ii}y_i}{1 - h_{ii}}.
+$$
+
+Then
+$y_i - \hat y_i^{-i} = \paren{y_i(1 - h_{ii}) - \hat y_i + h_{ii}y_i}/(1 - h_{ii}) = (y_i - \hat y_i)/(1 - h_{ii})$, the
+shortcut with $S_{ii} = h_{ii}$.
+</Derivation>
+
+Replacing every $S_{ii}$ by the average $\trace\Smat/n$ gives <NoteLink to="generalised-cross-validation">generalised
+cross-validation</NoteLink>. The same deletion idea, applied to an estimator rather than to predictions, is the
+<NoteLink to="jackknife">jackknife</NoteLink>. Bayesian models approximate leave-one-out predictive densities from one
+posterior by <NoteLink to="importance-sampling">importance sampling</NoteLink> (see
+<NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">Pareto-smoothed importance sampling
+leave-one-out</NoteLink>).
+
+<LooShortcut />
+
+## Worked example
+
+Fit a straight line to $x = (0, 1, 2, 3, 4)$ and $y = (1, 3, 2, 5, 4)$.
+
+1. **The fit.** $\bar x = 2$ and $\bar y = 3$. The centred products sum to $\sum_j (x_j - 2)(y_j - 3) = 8$ and the
+   centred squares to $\sum_j (x_j - 2)^2 = 10$, so the slope is $0.8$ and the line is $\hat y = 1.4 + 0.8x$. The
+   residuals are $(-0.4, 0.8, -1.0, 1.2, -0.6)$, and the training <Gloss name="mse">mean squared error</Gloss> is
+   $3.6/5 = 0.72$.
+2. **The leverages.** For a line with an intercept, $S_{ii} = 1/n + (x_i - \bar x)^2/\sum_j(x_j - \bar x)^2
+   = 0.2 + (x_i - 2)^2/10$, which is $(0.6, 0.3, 0.2, 0.3, 0.6)$. The end points pull the line hardest.
+3. **The shortcut.** Dividing each residual by $1 - S_{ii}$ gives the leave-one-out residuals
+   $(-1.00, 1.14, -1.25, 1.71, -1.50)$. Their mean square is $9.06/5 = 1.81$.
+4. **A check by refitting.** Leave out the first point. The line through $(1, 3), (2, 2), (3, 5), (4, 4)$ has
+   $\bar x = 2.5$, $\bar y = 3.5$, centred products summing to 3 and centred squares to 5, so slope $0.6$ and
+   intercept $3.5 - 0.6 \times 2.5 = 2.0$. Its prediction at $x = 0$ is $2.0$, and the leave-one-out residual is
+   $1 - 2.0 = -1.0$, as the shortcut gave.
+
+The leave-one-out error, 1.81, is two and a half times the training error, 0.72. The end points, with leverage 0.6,
+have their residuals multiplied by $1/0.4 = 2.5$, and they contribute $(1.00 + 2.25)/9.06 = 36\%$ of the sum.
+
+## When leave-one-out fails
+
+**Unstable learners.** Kohavi gave an extreme case <Cite id="kohavi1995" />. A classifier that predicts the majority
+class of its training set is applied to Fisher's iris data: three classes of 50, so its accuracy on new data is
+one third. Leaving out a point of class $c$ leaves 49 of class $c$ and 50 of each other class, so the training majority
+is never $c$ and the prediction is always wrong. The leave-one-out accuracy is 0%. Every fold gives the same 0%, so
+the spread over folds is zero and suggests a precise estimate. The same happens on any dataset with balanced classes
+and labels unrelated to the inputs, where predicting the majority is the best a learner can do. The estimate breaks
+because one deletion changes the learner's output discontinuously. Whenever a single point can change the fit
+substantially, the $n$ leave-one-out errors are individually erratic.
+
+**Correlated fold models.** For stable learners the opposite problem arises. The fold models share $n - 2$ of their
+$n - 1$ training points, so they are nearly the same model, and their errors at different points move together across
+datasets. An average of $n$ strongly correlated terms keeps much of the variance of one term, so the leave-one-out
+estimate can have high variance although it is nearly unbiased <Cite id="hastie2009" />. Kohavi found high variance at
+leave-one-out for <NoteLink to="decision-tree">decision trees</NoteLink> on several datasets <Cite id="kohavi1995" />.
+
+**<NoteLink to="model-selection">Model selection</NoteLink>.** Leave-one-out chooses well when the aim is the best
+predictor, but it is asymptotically equivalent to <Gloss name="aic" /> and Mallows' $C_p$ and does not select the true
+model with probability tending to one as $n$ grows. Leaving out a fraction $n_v/n \to 1$ of the data does
+<Cite id="shao1993" /> (see <NoteLink to="consistency-and-efficiency-of-selection-criteria">consistency and efficiency
+of selection criteria</NoteLink>). For choosing among regression submodels, 10-fold cross-validation performed better
+than leave-one-out in simulation <Cite id="breiman1992" />.
+
+**When it is reliable.** The leave-one-out estimate is close to the true error when the learner is stable: when
+removing one point changes the fitted model little. Distribution-free bounds on its deviation were first proved for
+local rules such as $k$-nearest neighbours <Cite id="rogers1978" /> <Cite id="devroye1979" />, and stability of the
+learning algorithm is the general condition behind them <Cite id="kearns1999" /> (see
+<NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>).
+
+## Pitfalls
+
+- **Using the shortcut where it does not hold.** $k$-nearest-neighbour regression has $S_{ii} = 1/k$ at a training
+  point, but removing the point brings the $(k+1)$-th neighbour in, so the leave-one-out residual is not the ordinary
+  residual divided by $1 - 1/k$. <NoteLink to="logistic-regression">Logistic regression</NoteLink> and other
+  non-quadratic losses need an approximate version.
+- **Selecting the penalty and reporting its leave-one-out error.** The minimum of the leave-one-out curve over $\lambda$
+  is optimistic for the chosen $\lambda$ (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>).
+- **Near-duplicates.** Repeated measurements, augmented copies or several rows per entity leave a twin of each
+  left-out point in training. Leave-one-out is then the most optimistic of the cross-validation schemes; leave a whole
+  group out instead (see <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink>).
+- **Influential points.** A large $\paren{(y_i - \hat y_i)/(1 - S_{ii})}^2$ flags a point that the rest of the data
+  predict badly; such points dominate PRESS, as the end points do in the worked example. Cook's distance combines the
+  same two ingredients for diagnosis <Cite id="cook1977" />.
+- **Coarse estimates for classification.** With the <NoteLink to="surrogate-losses">0–1 loss</NoteLink>,
+  $\operatorname{LOO}$ takes values in multiples of $1/n$, and per-fold scores of one point say nothing about spread.

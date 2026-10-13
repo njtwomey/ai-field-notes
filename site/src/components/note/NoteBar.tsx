@@ -1,4 +1,4 @@
-import { BookText, ChevronRight, Code2, SquareTerminal } from 'lucide-react'
+import { BookText, Code2, SquareTerminal } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Heading } from '@/hooks/use-reading-position'
 import type { NoteMeta } from '@/lib/content'
@@ -36,15 +36,19 @@ export function NoteBar({
           style={{ width: `${progress * 100}%` }}
         />
       )}
-      <div className="flex min-w-0 items-center gap-1 text-sm">
-        <TaxonomyTrail note={note} className="shrink-0" />
+      {/* The trail takes the width it needs and folds when that is not enough; the section gets what is left. */}
+      <div className="flex min-w-0 flex-1 items-center text-[13px]">
+        <TaxonomyTrail note={note} />
         {section.length > 0 && (
           <a
             href={`#${section[section.length - 1].id}`}
-            className="flex min-w-0 items-center gap-1 text-muted-foreground hover:text-foreground"
+            className="flex min-w-0 flex-1 basis-0 items-center text-muted-foreground hover:text-foreground"
           >
-            <ChevronRight className="size-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{section.map((h) => h.text).join(' › ')}</span>
+            {/* The section is a place inside the note, not another level of the taxonomy: an anchor, not a slash. */}
+            <span className="shrink-0 px-0.5 text-muted-foreground/50" aria-hidden>
+              #
+            </span>
+            <span className="truncate">{section.map((h) => h.text).join(' / ')}</span>
           </a>
         )}
       </div>

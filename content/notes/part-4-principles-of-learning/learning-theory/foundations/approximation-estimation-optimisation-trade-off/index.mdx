@@ -1,0 +1,173 @@
+---
+title: 'Approximation, estimation and optimisation trade-off'
+kind: concept
+summary: 'The excess risk of a learned predictor splits into approximation error (the class is too small), estimation error (the sample is finite) and optimisation error (the empirical minimiser is not found exactly). Under a computing budget the three trade off.'
+tags: [learning-theory, generalisation, optimisation, worked-example]
+aliases: [optimisation error, optimization error, three-way error decomposition, large-scale learning trade-off]
+requires: [empirical-risk-minimisation]
+related: [stochastic-gradient-descent-theory, bias-variance-decomposition, inductive-bias, early-stopping, uniform-convergence, structural-risk-minimisation, statistical-learning-theory]
+references: [bottou2007, bottou2018, shalevshwartz2014, mohri2018]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $R^*$ be the <NoteLink to="bayes-decision-rule">Bayes risk</NoteLink>, $\Hcal$ a hypothesis class with best member
+$h^*_\Hcal$, $\hat h$ the <Gloss name="erm">empirical risk minimiser</Gloss> on a sample $S$ of $m$ points, and
+$\tilde h$ the hypothesis an optimiser actually returns. The expected **excess risk** of $\tilde h$ splits into three
+terms <Cite id="bottou2007" />:
+
+$$
+\expect\brack{R(\tilde h) - R^*} = \underbrace{R(h^*_\Hcal) - R^*}_{\text{approximation}} + \underbrace{\expect\brack{R(\hat h) - R(h^*_\Hcal)}}_{\text{estimation}} + \underbrace{\expect\brack{R(\tilde h) - R(\hat h)}}_{\text{optimisation}}.
+$$
+
+A richer class lowers the first term, more data lower the second, and more computation lowers the third. When the
+number of examples or the computing time is limited, lowering one term raises another.
+</Definition>
+
+## Intuition
+
+A learned predictor can fall short of the best possible predictor for three separate reasons.
+
+- **The class is too small.** No member of $\Hcal$ matches the target. Straight lines cannot fit a sine, however much
+  data there is.
+- **The sample is too small.** The empirical risk is a noisy estimate of the true risk, so its minimiser is not the best
+  member of the class.
+- **The optimiser stops early.** Training stops at a hypothesis whose empirical risk is above the minimum, because
+  time ran out or because exact minimisation is too expensive.
+
+The <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> note splits the excess risk into
+the first two terms. Bottou and Bousquet added the third and showed that it changes the advice when computing time,
+not data, is the scarce resource <Cite id="bottou2007" />. With unlimited time, the best plan is to optimise exactly and
+choose the class to balance approximation against estimation. With limited time and abundant data, a crude optimiser
+that processes more examples can beat an exact optimiser that processes fewer.
+
+## The three-way decomposition
+
+Write $\Ecal_{\text{app}}$, $\Ecal_{\text{est}}$ and $\Ecal_{\text{opt}}$ for the three terms in the definition. The
+decomposition is a telescoping sum: adding and subtracting $R(h^*_\Hcal)$ and $R(\hat h)$ in
+$R(\tilde h) - R^*$ gives the three differences, and taking expectations over the sample gives the definition. The
+expectation is over $S$ and over any randomness of the optimiser.
+
+**Signs.** The approximation error is non-negative, because no predictor beats the Bayes risk. The estimation error is
+non-negative, because $h^*_\Hcal$ has the smallest true risk in $\Hcal$ and $\hat h$ is in $\Hcal$. The optimisation
+error can be negative: the returned $\tilde h$ has a larger empirical risk than $\hat h$ but can have a smaller true
+risk. This is how <NoteLink to="early-stopping">early stopping</NoteLink> regularises.
+
+**What controls each term.**
+
+| Term | Depends on | Falls when |
+| --- | --- | --- |
+| $\Ecal_{\text{app}}$ | $\Hcal$ and $\Dcal$ only | the class grows |
+| $\Ecal_{\text{est}}$ | $\Hcal$, $m$ and $\Dcal$ | the sample grows; rises as the class grows |
+| $\Ecal_{\text{opt}}$ | the optimiser, its tolerance $\rho$ and its running time | the tolerance shrinks |
+
+**Bounding estimation and optimisation together.** Suppose the optimiser returns $\tilde h \in \Hcal$ with
+$\hat R_S(\tilde h) \le \hat R_S(\hat h) + \rho$ for a tolerance $\rho \ge 0$. Write
+$U = \sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)}$ for the <NoteLink to="uniform-convergence">uniform deviation</NoteLink>
+of the class on the sample. Then
+
+$$
+R(\tilde h) - R(h^*_\Hcal) = \underbrace{R(\tilde h) - \hat R_S(\tilde h)}_{\le U} + \underbrace{\hat R_S(\tilde h) - \hat R_S(\hat h)}_{\le \rho} + \underbrace{\hat R_S(\hat h) - \hat R_S(h^*_\Hcal)}_{\le 0} + \underbrace{\hat R_S(h^*_\Hcal) - R(h^*_\Hcal)}_{\le U}.
+$$
+
+Each bracket is bounded as marked: the first and last by the definition of $U$, the second by the tolerance, and the
+third because $\hat h$ minimises the empirical risk. Taking expectations,
+
+$$
+\Ecal_{\text{est}} + \Ecal_{\text{opt}} \le 2\,\expect[U] + \rho.
+$$
+
+The statistical part is the uniform deviation; for a class of linear predictors in
+$d$ dimensions with bounded loss, $\expect[U] \le c\sqrt{d/m}$ for a constant $c$ <Cite id="bottou2007" />. The
+computational part is the tolerance. There is no point making $\rho$ much smaller than $\expect[U]$: the extra
+optimisation is lost in the statistical noise. This is the "decompose" move of the
+<NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, extended by one term.
+
+Under conditions that give <NoteLink to="fast-rates-and-noise-conditions">fast rates</NoteLink> (strongly convex losses,
+low noise), the same argument gives the sharper form
+$\Ecal \le c\paren{\Ecal_{\text{app}} + ((d/m)\ln(m/d))^\alpha + \rho}$ with an exponent $\alpha \in [\frac12, 1]$ set
+by the noise <Cite id="bottou2007" />. The rates themselves are the subject of
+<NoteLink to="rates-and-consistency">excess risk and rates</NoteLink>.
+
+## Small-scale and large-scale learning
+
+The learner chooses three things: the class $\Hcal$, the number of examples $m$ it uses and the tolerance $\rho$. It
+minimises $\Ecal = \Ecal_{\text{app}} + \Ecal_{\text{est}} + \Ecal_{\text{opt}}$ subject to two budgets, the examples
+available $m \le m_{\max}$ and the computing time $T(\Hcal, m, \rho) \le T_{\max}$ <Cite id="bottou2007" />.
+
+- **Small-scale learning.** The number of examples is the binding constraint. Time is plentiful, so $\rho$ can be made
+  negligible and $m = m_{\max}$. Only $\Ecal_{\text{app}}$ and $\Ecal_{\text{est}}$ remain, and the problem is the
+  classical choice of class: <NoteLink to="model-selection">model selection</NoteLink>,
+  <NoteLink to="regularisation">regularisation</NoteLink> and <NoteLink to="structural-risk-minimisation">structural
+  risk minimisation</NoteLink>.
+- **Large-scale learning.** Time is the binding constraint. Using all the examples with a small tolerance is too
+  slow, so the learner must trade: fewer examples optimised accurately, or more examples optimised crudely. The answer
+  depends on how the optimiser's running time grows with $m$ and with $1/\rho$.
+
+For <NoteLink to="linear-models">linear models</NoteLink> in $d$ dimensions with a convex, smooth loss, Bottou and
+Bousquet compared four optimisers. Here $\kappa$ is the condition number of the Hessian at the optimum and $\nu$ a
+constant tied to the gradient noise <Cite id="bottou2007" />:
+
+| Optimiser | Cost of one step | Time to reach tolerance $\rho$ | Time to reach excess error $\epsilon$ |
+| --- | --- | --- | --- |
+| <NoteLink to="gradient-descent">Gradient descent</NoteLink> | $O(md)$ | $O(md\kappa\ln(1/\rho))$ | $O\paren{\frac{d^2\kappa}{\epsilon^{1/\alpha}}\ln^2\frac1\epsilon}$ |
+| Second-order gradient descent | $O(d^2 + md)$ | $O((d^2 + md)\ln\ln(1/\rho))$ | $O\paren{\frac{d^2}{\epsilon^{1/\alpha}}\ln\frac1\epsilon\ln\ln\frac1\epsilon}$ |
+| <Gloss name="sgd">Stochastic gradient descent</Gloss> | $O(d)$ | $O(d\nu\kappa^2/\rho)$ | $O(d\nu\kappa^2/\epsilon)$ |
+| Second-order stochastic gradient descent | $O(d^2)$ | $O(d^2\nu/\rho)$ | $O(d^2\nu/\epsilon)$ |
+
+As optimisers, the stochastic methods are the worst: their time to reach a
+tolerance grows like $1/\rho$, against $\ln(1/\rho)$ for gradient descent. As learners, they are the best: their time to
+reach an excess error $\epsilon$ grows like $1/\epsilon$ and does not depend on the statistical exponent $\alpha$, while
+gradient descent's grows like $\epsilon^{-1/\alpha}$, which is $1/\epsilon^2$ in the slow-rate case $\alpha = \frac12$.
+A step of stochastic gradient descent costs $O(d)$ whatever $m$ is, so within a fixed time it can visit far more
+examples, and the estimation error it saves outweighs the optimisation error it incurs. This is the theoretical case
+for <NoteLink to="stochastic-gradient-descent-theory">stochastic gradient descent</NoteLink> on large datasets
+<Cite id="bottou2018" />.
+
+## Worked example
+
+**A small-scale problem.** The <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> note
+fits polynomials to $m = 20$ noisy points of $\sin(2\pi x)$ by exact least squares, so $\Ecal_{\text{opt}} = 0$. Lines
+have approximation error $0.196$ and mean estimation error $0.030$; cubics have $0.0044$ and $0.017$. The cubic class
+wins, with excess risk $0.021$ against $0.226$. Here the trade-off is the classical two-way one, settled by the choice
+of class.
+
+**A large-scale budget.** Take a linear model with $d = 100$ parameters, $m_{\max} = 10^7$ examples and a
+budget of $T_{\max} = 10^9$ operations. The calculation sets every constant ($c$, $\kappa$, $\nu$) to 1 and uses the
+fast-rate form $\Ecal_{\text{est}} \approx d/m$ (dropping the logarithm) and $\Ecal_{\text{opt}} \approx \rho$. The
+approximation error is the same for both optimisers and is left out.
+
+1. **Gradient descent on all the data.** One pass costs $md = 10^9$ operations, the whole budget. It manages one step,
+   and $\rho$ stays large.
+2. **Gradient descent on a subsample.** With $m$ examples, reaching tolerance $\rho$ costs $md\ln(1/\rho)$ operations,
+   so $m = 10^7/\ln(1/\rho)$. The excess error is $d/m + \rho = 10^{-5}\ln(1/\rho) + \rho$. Setting its derivative in
+   $\rho$ to zero gives $\rho = 10^{-5}$, so $\ln(1/\rho) = 11.5$ and $m = 8.7 \times 10^5$. The excess error is
+   $100/(8.7 \times 10^5) + 10^{-5} = 1.25 \times 10^{-4}$.
+3. **Stochastic gradient descent.** Each step costs $d = 100$ operations, so the budget buys $10^7$ steps, one pass over
+   all $10^7$ examples. The estimation error is $d/m = 10^{-5}$, and the tolerance after $t = 10^7$ steps is
+   $\rho = 1/t = 10^{-7}$. The excess error is $1.01 \times 10^{-5}$.
+
+Under the same budget, stochastic gradient descent reaches an excess error twelve times smaller. Gradient descent is
+held back by its cost per step: to optimise accurately it must discard 91% of the data, and the discarded data are worth
+more than the accuracy. The numbers depend on the constants that were set to 1, but the conclusion follows from the
+orders in the table.
+
+{/* figure pending engine (A2 learningCurve excessOverClass / excessOverBayes, plus the tradeoffStudy sketch in .scratch/learning-theory/logs/lt-foundations.md): the three error terms measured for a threshold or linear problem as the class, the sample size and the optimiser's budget vary, with gradient descent and SGD compared at equal compute */}
+
+## Pitfalls
+
+- **The terms are not observable separately.** Each involves a true risk, and $h^*_\Hcal$ and $R^*$ are unknown. On
+  synthetic problems they can be computed; on real data only their sum, the test error, is measured.
+- **Optimisation error is not always harmful.** Stopping before the empirical minimum can lower the true risk. The
+  decomposition then shows a negative optimisation error offsetting part of the estimation error.
+- **The decomposition depends on the class.** Enlarging $\Hcal$ moves error from the approximation term to the
+  estimation term without changing the total. Comparing the terms of two models only makes sense for a common class.
+- **Over-parameterised models break the classical picture.** Large networks have approximation and optimisation errors
+  near zero and an estimation error far smaller than capacity-based bounds predict. See
+  <NoteLink to="double-descent">double descent</NoteLink> and <NoteLink to="benign-overfitting">benign
+  overfitting</NoteLink>.
+- **Not the bias–variance decomposition.** The <NoteLink to="bias-variance-decomposition">bias–variance
+  decomposition</NoteLink> splits the squared error of a fixed procedure around its average prediction. The
+  approximation–estimation split compares against the best predictor in the class. The two coincide only in special
+  cases.

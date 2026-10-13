@@ -1,0 +1,97 @@
+---
+title: 'Multi-fidelity hyperparameter optimisation'
+kind: overview
+summary: 'Judging hyperparameter configurations on cheap approximations, such as fewer epochs, a data subset or a lower resolution, and training only the promising ones fully: successive halving, Hyperband, ASHA, BOHB, learning-curve extrapolation and multi-fidelity Bayesian optimisation.'
+tags: [model-selection, hyperparameters, early-stopping]
+aliases: [multi-fidelity optimisation, multi-fidelity HPO, early stopping of trials, median stopping rule, low-fidelity evaluation]
+requires: [hyperparameter-search, random-search]
+related: [bayesian-optimisation, hyperparameter-search, early-stopping, best-arm-identification, population-based-training]
+references: [li2018hyperband, hutter2019automl, golovin2017vizier, akiba2019]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Multi-fidelity hyperparameter optimisation** searches over hyperparameter configurations using evaluations of
+different cost and accuracy. A **fidelity** is a budget at which a configuration can be evaluated: a number of training
+epochs, a fraction of the training set, an image resolution, or a number of trees or cross-validation folds. Low
+fidelities are cheap and only approximately rank the configurations; the highest fidelity is the full training run whose
+validation loss is the objective. The methods of this topic spend most of the budget at low fidelities and reserve the
+highest for configurations that look promising there.
+</Definition>
+
+## What it is for
+
+<NoteLink to="random-search">Random search</NoteLink> and <NoteLink to="bayesian-optimisation">Bayesian
+optimisation</NoteLink> treat each evaluation as a complete training run. For deep networks a run takes hours to days,
+so a full-fidelity search affords tens of configurations. Most of those runs are visibly poor after a fraction of their
+training: a <Gloss name="learning-rate">learning rate</Gloss> that diverges, or a network far behind the others after
+one epoch. Stopping them early frees budget for more configurations. In a typical search with a reduction factor of 3,
+the same budget that trains 4 configurations fully screens 27 at low fidelity (see
+<NoteLink to="successive-halving">successive halving</NoteLink>).
+
+Multi-fidelity methods are standard in current tuning tools for this reason. Optuna provides median, successive-halving
+and Hyperband pruners <Cite id="akiba2019" />, and Ray Tune provides ASHA and Hyperband schedulers. Feurer and Hutter's
+survey of hyperparameter optimisation treats multi-fidelity methods as one of its main families
+<Cite id="hutter2019automl" />.
+
+## Main ideas
+
+**Low-fidelity rankings.** Everything rests on one assumption: configurations that do well at low fidelity tend to do
+well at full fidelity. The assumption fails when learning curves cross. A small learning rate or strong regularisation
+starts slowly and finishes well; a model trained on 10% of the data prefers less capacity than the same model on all of
+it. Every method in this topic is a different answer to how far the cheap ranking can be trusted.
+
+**Fixed schedules.** <NoteLink to="successive-halving">Successive halving</NoteLink> trains many configurations at a
+small budget, keeps the best fraction $1/\eta$, multiplies their budget by $\eta$ and repeats, so every round costs the
+same. <NoteLink to="hyperband">Hyperband</NoteLink> runs several such schedules, from aggressive to none, to hedge
+against not knowing when rankings settle. <NoteLink to="asynchronous-successive-halving">ASHA</NoteLink> runs successive
+halving on many parallel workers without waiting for rounds to finish. These methods descend from fixed-budget
+<NoteLink to="best-arm-identification">best-arm identification</NoteLink> in bandits <Cite id="li2018hyperband" />.
+
+**Stopping rules.** A simpler family stops a single run when it falls behind. The **median stopping rule** of Google
+Vizier stops a trial at step $t$ if its best loss so far is worse than the median of the other trials' running-average
+losses up to $t$ <Cite id="golovin2017vizier" />. It needs no schedule and no model, and like successive halving it
+trusts the current ranking.
+
+**Models of the learning curve.** <NoteLink to="learning-curve-extrapolation">Learning-curve extrapolation</NoteLink>
+fits a parametric curve such as $a + bt^{-c}$ to the first epochs of a run and predicts its final loss, so a run that is
+behind but falling fast can be kept. Freeze-thaw optimisation pauses and resumes runs according to such predictions.
+
+**Models across configurations and fidelities.** <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink>
+keeps Hyperband's schedule and draws new configurations from a density model fitted at the largest budget with enough
+results. <NoteLink to="multi-fidelity-bayesian-optimisation">Multi-fidelity Bayesian optimisation</NoteLink> models the
+loss jointly over configuration and fidelity, learns how the cheap evaluations relate to the expensive one, and chooses
+both the configuration and the fidelity of each evaluation by information per unit cost.
+
+**Data reuse.** Multi-fidelity methods compare many configurations on the same validation set, and the configuration
+they return is the one with the lowest observed loss. That loss is optimistic, more so the more configurations were
+screened. The final model still needs an assessment on data the search never saw (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink> and
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>).
+
+## How the notes fit together
+
+- Start with <NoteLink to="successive-halving">successive halving</NoteLink>: its schedule, its equal-cost rounds and
+  the condition under which it keeps the best configuration underlie the rest.
+- <NoteLink to="hyperband">Hyperband</NoteLink> and <NoteLink to="asynchronous-successive-halving">ASHA</NoteLink> build
+  directly on it: one hedges over its aggressiveness, the other removes its synchronisation.
+- <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> needs Hyperband and the
+  <NoteLink to="tree-structured-parzen-estimator">tree-structured Parzen estimator</NoteLink>.
+- <NoteLink to="learning-curve-extrapolation">Learning-curve extrapolation</NoteLink> stands on its own; it replaces the
+  ranking at a budget with a forecast.
+- <NoteLink to="multi-fidelity-bayesian-optimisation">Multi-fidelity Bayesian optimisation</NoteLink> comes last; it
+  needs the <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> topic, in particular
+  <NoteLink to="entropy-search">entropy search</NoteLink> and
+  <NoteLink to="gaussian-process-upper-confidence-bound">GP-UCB</NoteLink>.
+
+## Prerequisites and next steps
+
+The topic assumes <NoteLink to="hyperparameter-search">hyperparameter optimisation</NoteLink> and
+<NoteLink to="random-search">random search</NoteLink>, and some familiarity with
+<NoteLink to="early-stopping">early stopping</NoteLink> of a single training run. For the deep-learning setting, where
+<NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink> interact with truncated runs, see
+<NoteLink to="tuning-deep-learning-hyperparameters">tuning deep-learning hyperparameters</NoteLink>.
+<NoteLink to="population-based-training">Population-based training</NoteLink> also stops weak runs early but changes the
+survivors' hyperparameters during training. In <NoteLink to="neural-architecture-search">neural architecture
+search</NoteLink>, low-fidelity proxies and weight sharing are the main tools for making the search affordable.

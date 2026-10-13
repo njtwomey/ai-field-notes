@@ -1,0 +1,186 @@
+---
+title: 'Minimum description length'
+kind: concept
+summary: 'The minimum description length principle picks the model that gives the shortest code for the data. Two-part MDL adds the bits that describe a hypothesis to the bits for the data given it, $L(h) - \log_2 P(D \mid h)$; refined MDL uses one universal code, normalised maximum likelihood.'
+tags: [learning-theory, model-selection, information-theory, worked-example]
+aliases: [MDL principle, two-part code, two-part MDL, stochastic complexity, normalised maximum likelihood, normalized maximum likelihood, parametric complexity]
+requires: [occam-bound, entropy, source-coding-theorem]
+related: [information-criteria, structural-risk-minimisation, oracle-inequalities, kullback-leibler-divergence, bayes-factors-and-model-comparison, laplace-approximation, pac-bayes-bounds]
+references: [rissanen1978, grunwald2007, barron1998, rissanen1996, barron1991, blumer1987]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+The **minimum description length** (<Gloss name="mdl" />) principle selects, among the models considered, the one that
+compresses the observed data $D$ most. In its **two-part** form, a hypothesis $h$ is described with $L(h)$ bits by a
+prefix code fixed in advance, and the data are then encoded with the code that $h$ defines, using
+$-\log_2 P(D \mid h)$ bits. MDL picks
+
+$$
+\hat h = \argmin_h \brack{L(h) - \log_2 P(D \mid h)}.
+$$
+
+**Refined** MDL encodes the data with a single universal code for a whole model class, such as the normalised maximum
+likelihood code, and selects the class with the shortest code length, its **stochastic complexity**
+<Cite id="rissanen1978" /> <Cite id="grunwald2007" />.
+</Definition>
+
+## Intuition
+
+A regularity in data is anything that allows the data to be described in fewer symbols than listing them. A sequence of
+a thousand coin flips with 900 heads can be sent in fewer bits than a fair-coin sequence, because a code can spend
+short code words on heads. Learning, on this view, is finding the regularity that compresses best.
+
+The two parts of the code pull in opposite directions. A simple hypothesis is cheap to describe but leaves much of the
+data unexplained, so the data cost many bits. A complex hypothesis explains more of the data, including its noise, but
+costs many bits to describe. Overfitting shows up as a hypothesis whose description grows faster than the data code
+shrinks. The shortest total code balances the two, as a penalised criterion does.
+
+MDL is the description-length form of the <NoteLink to="occam-bound">Occam bound</NoteLink>. The Occam bound charges a
+hypothesis $L(h)\ln 2$ nats of capacity; MDL charges the same $L(h)$ bits in its first part. In the
+<NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, the code supplies the weights
+of the weighted union bound, and minimising the total code length is
+<NoteLink to="structural-risk-minimisation">structural risk minimisation</NoteLink> with one class per code word.
+
+## Codes and probabilities
+
+A prefix code assigns each outcome a binary code word, none of which starts another. The Kraft inequality states that
+the lengths $L(x)$ of any prefix code satisfy $\sum_x 2^{-L(x)} \le 1$
+(<NoteLink to="source-coding-theorem">source coding theorem</NoteLink>). Conversely, for any distribution $P$ there is a
+prefix code with $L(x) = \lceil -\log_2 P(x) \rceil$. Code lengths and probabilities are therefore interchangeable,
+up to rounding:
+
+$$
+L(x) = -\log_2 P(x), \qquad P(x) = 2^{-L(x)}.
+$$
+
+"Shortest code" means "highest probability under the code's distribution". The data part of a two-part code,
+$-\log_2 P(D \mid h)$, is the negative log-likelihood in bits. MDL needs no assumption that any hypothesis generated
+the data. It compares descriptions of the data that were observed.
+
+## Two-part codes
+
+For a parametric model with $k$ real parameters $\thetavec$, the first part must describe $\thetavec$, and a real
+number needs infinitely many bits. Two-part MDL quantises each parameter to a grid of spacing $\varepsilon$ over a
+bounded range. The derivation of the total code length has three steps.
+
+1. **Cost of the parameters.** A grid of spacing $\varepsilon$ on a bounded range has about $1/\varepsilon$ points per
+   coordinate, so describing a grid point costs $k\log_2(1/\varepsilon)$ bits, plus a constant that depends on the
+   range.
+2. **Cost of rounding.** The grid point $\bar\thetavec$ nearest the maximum-likelihood estimate $\hat\thetavec$ fits a
+   little worse. The gradient of the log-likelihood vanishes at $\hat\thetavec$, so a
+   <NoteLink to="hessian">second-order Taylor expansion</NoteLink> gives an extra data cost of $\frac{n}{2\ln 2}(\bar\thetavec - \hat\thetavec)^\top\hat{\Imat}(\bar\thetavec -
+   \hat\thetavec)$ bits, where $\hat\Imat$ is the average observed information per example. With
+   $\abs{\bar\theta_j - \hat\theta_j} \le \varepsilon/2$, this is of order $n\varepsilon^2$.
+3. **Balance.** The sum $k\log_2(1/\varepsilon) + c\,n\varepsilon^2$ is smallest at $\varepsilon \propto 1/\sqrt n$:
+   the estimate is only known to that precision, so describing it more finely wastes bits. Substituting gives
+
+   $$
+   L(D) = -\log_2 P(D \mid \hat\thetavec) + \frac{k}{2}\log_2 n + O(1).
+   $$
+
+The penalty of $\frac12\log_2 n$ bits per parameter is the <NoteLink to="information-criteria">Bayesian information
+criterion</NoteLink> divided by $2\ln 2$. Two-part MDL with this precision and BIC choose the same model for large $n$
+<Cite id="rissanen1978" /> <Cite id="barron1998" />.
+
+## Refined MDL
+
+Two-part codes depend on arbitrary choices: the grid, the parameter range and the parameterisation. Refined MDL replaces
+them with one code for the whole model class $\Mcal = \set{P(\cdot \mid \thetavec)}$. The best code in hindsight would
+use $P(D \mid \hat\thetavec(D))$, the maximum-likelihood fit to the data being encoded. It is not a code, because these
+probabilities sum to more than 1 over all possible data sets. Normalising them gives the **normalised maximum
+likelihood** (NML) distribution over data sets of size $n$:
+
+$$
+P_{\text{NML}}(D) = \frac{P(D \mid \hat\thetavec(D))}{C_n}, \qquad C_n = \sum_{D'} P(D' \mid \hat\thetavec(D')),
+$$
+
+where the sum runs over all data sets $D'$ of size $n$. The **stochastic complexity** of $D$ relative to $\Mcal$ is its
+code length,
+
+$$
+-\log_2 P_{\text{NML}}(D) = -\log_2 P(D \mid \hat\thetavec(D)) + \log_2 C_n.
+$$
+
+The **parametric complexity** $\log_2 C_n$ is the penalty. It measures how many distinct data sets the model class can
+fit well, not how many parameters it has. For a model with $k$ parameters and <Gloss name="fisher-information">Fisher
+information</Gloss> $\Imat(\thetavec)$, Rissanen showed that
+
+$$
+\log_2 C_n = \frac{k}{2}\log_2\frac{n}{2\pi} + \log_2\int\sqrt{\det\Imat(\thetavec)}\,d\thetavec + o(1),
+$$
+
+so two models with the same $k$ can have different complexities <Cite id="rissanen1996" />.
+
+NML is optimal in a worst-case sense. For any distribution $Q$ over data sets, the **regret** on $D$ is the number of
+extra bits $Q$ spends compared with the best fit in hindsight, $-\log_2 Q(D) + \log_2 P(D \mid \hat\thetavec(D))$. NML
+minimises the worst-case regret <Cite id="grunwald2007" />.
+
+<Derivation title="Why NML minimises the worst-case regret">
+The regret of $P_{\text{NML}}$ is the same for every data set: $-\log_2 P_{\text{NML}}(D) + \log_2 P(D \mid
+\hat\thetavec(D)) = \log_2 C_n$.
+
+Take any other distribution $Q \ne P_{\text{NML}}$. Both sum to 1 over data sets of size $n$, so some $D$ has
+$Q(D) < P_{\text{NML}}(D)$. On that $D$, $Q$'s regret is larger than $\log_2 C_n$. Every $Q$ therefore has a worst-case
+regret of at least $\log_2 C_n$, and $P_{\text{NML}}$ attains it.
+</Derivation>
+
+A Bayesian mixture $\int P(D \mid \thetavec)\,w(\thetavec)\,d\thetavec$ with a prior $w$ is another universal code.
+With Jeffreys' prior $w(\thetavec) \propto \sqrt{\det\Imat(\thetavec)}$ its code length agrees with NML to $o(1)$ bits
+for smooth parametric models <Cite id="barron1998" />. MDL and Bayesian model selection with
+<NoteLink to="bayes-factors-and-model-comparison">Bayes factors</NoteLink> often agree for this reason, though MDL reads
+the prior as a code, not a belief.
+
+## Worked example
+
+A sequence of $n = 100$ coin flips is to be explained by one of two models: a fair coin $\Mcal_0$, with no parameters,
+or a Bernoulli model $\Mcal_1$ with unknown $\theta$.
+
+1. **Fair coin.** Every sequence has probability $2^{-100}$, so it costs 100 bits whatever the data.
+2. **Bernoulli, data part.** With 70 heads, $\hat\theta = 0.7$ and $-\log_2 P(D \mid \hat\theta) = 100\,H(0.7) = 88.13$
+   bits, where $H(p) = -p\log_2 p - (1 - p)\log_2(1 - p)$ is the binary entropy.
+3. **Bernoulli, two-part.** Adding $\frac12\log_2 100 = 3.32$ bits for $\hat\theta$ gives 91.45 bits.
+4. **Bernoulli, NML.** For this model $C_n = \sum_{j=0}^{n}\binom{n}{j}(j/n)^j(1 - j/n)^{n - j}$, which is 13.21 at
+   $n = 100$, so $\log_2 C_n = 3.72$ bits and the stochastic complexity is 91.85 bits. The asymptotic formula, with
+   $\int_0^1 (\theta(1 - \theta))^{-1/2}d\theta = \pi$, gives $\frac12\log_2(100/2\pi) + \log_2\pi = 3.65$ bits.
+5. **Decision.** Both MDL codes beat the fair coin by more than 8 bits, a likelihood ratio above $2^8 = 256$ in favour
+   of a biased coin.
+
+| Heads out of 100 | Fair coin | Two-part | NML | Bayes, uniform prior |
+| --- | --- | --- | --- | --- |
+| 70 | 100 | 91.45 | 91.85 | 91.26 |
+| 60 | 100 | 100.42 | 100.82 | 100.13 |
+| 55 | 100 | 102.60 | 103.00 | 102.29 |
+
+With 60 heads the fit saves only 2.9 bits, less than the 3.0 to 3.7 bits that the parameter costs, and every code
+prefers the fair coin. The three universal codes differ by less than one bit throughout.
+
+## MDL and generalisation bounds
+
+MDL as stated is a selection rule; bounds on its risk come from learning theory.
+
+- **Classification.** Code the training labels given a classifier $h$ by naming its errors. With $k$ errors among $m$
+  examples this takes about $\log_2(m + 1) + \log_2\binom{m}{k} \approx m\,H(k/m)$ bits. The two-part code length is
+  then about $L(h) + m\,H(\hat R_S(h))$. The relative-entropy form of the Occam bound,
+  $\operatorname{kl}(\hat R_S(h)\,\|\,R(h)) \le (L(h)\ln 2 + \ln(1/\delta))/m$, trades the same two quantities, so the
+  hypothesis with the shortest total code is close to the one with the best Occam bound.
+- **Density estimation.** Barron and Cover analysed the two-part MDL density estimator over a countable list of
+  candidate densities $q$ with code lengths $L(q)$. Its Hellinger risk is bounded by the **index of resolvability**,
+  $\min_q\brack{L(q)/n + D(p \,\|\, q)}$, where $p$ is the true density and $D$ the
+  <NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink>. The index is the best trade-off of
+  description length and approximation that an oracle could choose, an
+  <NoteLink to="oracle-inequalities">oracle inequality</NoteLink> for MDL <Cite id="barron1991" />.
+
+## Pitfalls
+
+- **The code must be fixed before the data.** A code that gives the fitted hypothesis a short code word because it was
+  fitted voids every guarantee, as for the Occam bound.
+- **Crude two-part codes are arbitrary.** The grid, the parameter range and the parameterisation change $L(h)$ by
+  constants. For small $n$ these constants can decide the choice. Refined MDL removes them for parametric classes.
+- **NML can be undefined.** For a Gaussian with unknown mean on the whole real line, $C_n$ is infinite: the
+  maximum-likelihood fit is equally good for data anywhere. The parameter range must be restricted, which brings back a
+  choice <Cite id="grunwald2007" />.
+- **Shortest is not true.** MDL selects the model that compresses the observed data best. It makes no claim that the
+  selected model generated the data, and with few data it prefers models simpler than the truth, as the 60-heads row
+  shows.

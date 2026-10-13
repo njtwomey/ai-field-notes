@@ -1,0 +1,138 @@
+---
+title: 'Cross-validating a pipeline'
+kind: concept
+summary: 'Every step that learns from data, such as scaling, imputation, encoding, resampling or feature selection, belongs inside the cross-validation folds. Fitting a step on all the data first leaks the held-out fold into training and biases the estimate.'
+tags: [model-selection, evaluation, leakage, worked-example]
+aliases: [preprocessing inside cross-validation, preprocessing leakage, the wrong way to do cross-validation, fitting preprocessing inside the folds]
+requires: [k-fold-cross-validation, data-leakage]
+related: [selection-inside-cross-validation, detecting-leakage, preprocessing-pipelines, mean-target-encoding, smote-and-variants, nested-cross-validation, what-cross-validation-estimates]
+references: [hastie2009, ambroise2002, moscovich2022, santos2018, kaufman2012, micci2001]
+status: draft
+updated: 2026-10-13
+---
+
+import { LeakyPipeline } from './LeakyPipeline'
+
+<Definition>
+A **pipeline** is the whole procedure that turns raw training data into a fitted predictor: every preprocessing step
+whose parameters are estimated from data, followed by the model. **Cross-validating a pipeline** refits every step on
+each training fold and applies the fitted steps, unchanged, to that fold's held-out rows. The estimate is then an
+estimate of the error of the pipeline. A step fitted once on all the rows before splitting has seen every held-out row,
+and the estimate is of a different procedure, one that had access to the test data <Cite id="hastie2009" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="cross-validation">Cross-validation</NoteLink> imitates deployment: a model is built from some data and
+asked about data it has never seen. The imitation holds only if nothing about the held-out rows reaches the model. A
+preprocessing step is part of the model, whatever the code calls it. A scaler's mean, an imputer's fill value, an
+encoder's table of category means and a feature selector's list of columns are parameters estimated from data, exactly
+like regression coefficients. Fitting them on all the rows and then cross-validating only the final model is like
+fitting the coefficients on all the rows and then scoring them on some of the same rows.
+
+How much this matters depends on what the step learns. A step that uses the targets can copy information about each
+held-out label into that row's features, and the estimate can be wildly optimistic. A step that uses only the inputs
+learns about the distribution of the held-out inputs, which usually biases the estimate only slightly but not always
+<Cite id="moscovich2022" />. Neither bias is needed: putting the step inside the folds costs one refit per fold.
+
+## What counts as fitting
+
+Any step with a parameter computed from the data is fitted. Grouped by what they read:
+
+- **Steps that read the targets.** Target (mean) encoding of categories; supervised
+  <NoteLink to="feature-selection">feature selection</NoteLink> by correlation, a univariate test or a model's
+  importances; supervised discretisation; outlier removal by residual; class reweighting by observed class frequencies.
+  These leak the most.
+- **Steps that change the rows.** Oversampling, undersampling and <NoteLink to="smote-and-variants">SMOTE</NoteLink>.
+  Resampling before splitting puts copies of a minority example, or synthetic points interpolated from it, on both
+  sides of the split. The held-out rows must stay as they are; resampling is applied to the training fold only
+  <Cite id="santos2018" />.
+- **Steps that read only the inputs.** Standardisation, imputation by mean or median, <Gloss name="pca">principal
+  component analysis</Gloss>, vocabularies and document frequencies for text, the categories of a one-hot encoding.
+  Their leak is a leak of the held-out input distribution.
+- **Choices made by looking at results.** Hyperparameters, the number of components, the threshold of a classifier,
+  <NoteLink to="early-stopping">early stopping</NoteLink> on a validation score and the choice among model families are
+  fitted too. Tuning them on the same folds that report the error needs <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>.
+
+Steps that need no data, such as a fixed logarithm, a unit conversion or a hand-written rule, can sit outside.
+
+The most damaging case, feature selection on all the rows, has its own note:
+<NoteLink to="selection-inside-cross-validation">selection inside cross-validation</NoteLink>. Ambroise and McLachlan
+showed on microarray data that selecting genes on all the samples and then cross-validating the classifier can drive the
+estimated <NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> close to zero while the error of the
+procedure is far higher <Cite id="ambroise2002" />.
+
+### Why input-only steps are not always safe
+
+An input-only step fitted on all $n$ rows makes the training rows of each fold look a little more like its held-out
+rows than fresh data would. For a scaler fitted to many rows the effect is small: a held-out row $\xvec$ moves the
+fitted mean by $(\xvec - \bar\xvec)/n$. The effect grows with the number of parameters the step estimates relative to
+$n$. Moscovich and Rosset analysed three common input-only steps before regression: selecting features by their
+variance, grouping rare categories, and rescaling. Each biases the cross-validation estimate, the bias can have either
+sign, it can be large when samples are small and features many, and it can change which model is selected
+<Cite id="moscovich2022" />.
+
+## Worked example
+
+Take $n = 100$ rows with one categorical input of 20 categories, 5 rows in each, and a target $y_i \iid
+\Gauss(0, 1)$ that is independent of the category. No model can predict $y$: the smallest possible
+<Gloss name="mse">mean squared error</Gloss> is the noise variance, 1. The pipeline is **target encoding** followed by
+least squares. Target encoding replaces each category $c$ by the mean $\bar y_c$ of the training targets in that
+category <Cite id="micci2001" />.
+
+**Encoding outside the folds.** Encode all 100 rows once. Row $i$ in category $c$ gets $z_i = \bar y_c$, an average of
+5 labels that includes its own $y_i$.
+
+1. The least-squares slope of $y$ on $z$ over the rows is exactly 1. Within category $c$ every $z_i$ equals $\bar y_c$,
+   so $\sum_{i \in c} y_i(z_i - \bar z) = n_c\bar y_c(\bar y_c - \bar z) = \sum_{i \in c} z_i(z_i - \bar z)$, and
+   summing over categories makes the numerator of the slope equal to its denominator. The intercept is 0 because $\bar y = \bar
+   z$.
+2. The fitted value of row $i$ is therefore $\bar y_c$, and its residual is $y_i - \bar y_c$. A deviation from a group
+   mean that includes the point itself has expected square $(1 - 1/n_c)\sigma^2 = 0.8$.
+3. Ten-fold cross-validation of the regression on these encoded rows refits the slope and intercept on 90 rows, but
+   every held-out row still carries its own label inside $z_i$. The estimate is close to 0.8; over 200 simulated data
+   sets its mean is 0.84.
+
+The estimate says the pipeline beats the noise floor by 16%, which is impossible.
+
+**The truth.** Fit the pipeline to all 100 rows and score a new row in category $c$. Its encoding $\bar y_c$ is an
+average of 5 training labels that are independent of the new $y$, and the slope is 1, so the error is
+$\var(y) + \var(\bar y_c) = 1 + 1/5 = 1.2$. The same 200 simulations give 1.20.
+
+**Encoding inside the folds.** Each training fold fits its own encoder on 90 rows, about 4.5 per category, and the
+held-out rows are encoded with those training means. The held-out labels no longer enter their own features. The
+estimate averages 1.30 over the 200 data sets. It is a little above the truth because each fold's pipeline sees fewer
+rows per category, but it reports correctly that the pipeline does worse than predicting the mean.
+
+**A better pipeline.** The pipeline itself is poor: on the training rows the in-sample encoding still contains each
+row's own label, so the regression learns to trust the encoding (slope 1). Encoding the training rows out of fold, as
+<NoteLink to="mean-target-encoding">mean target encoding</NoteLink> recommends, makes the learned slope close to 0
+(mean $-0.13$ in the simulations), and the true error falls to 1.03. Cross-validating that pipeline gives 1.035. Honest
+cross-validation is what reveals that the first pipeline needs fixing.
+
+<LeakyPipeline />
+
+## Assumptions
+
+The estimate of a correctly cross-validated pipeline inherits the assumptions of cross-validation itself: rows
+exchangeable between folds, and folds that reproduce how new data will differ from the training data. Rows that cluster
+by group, location or time need folds that respect the clustering; see
+<NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink> and
+<NoteLink to="spatial-and-blocked-cross-validation">spatial and blocked cross-validation</NoteLink>.
+
+## Pitfalls
+
+- **Preprocessing in a notebook cell before the split.** The most common form. Bundle every fitted step and the model
+  into one pipeline object and hand only that object to the cross-validation routine, as scikit-learn's `Pipeline` and
+  the engine's `pipeline` do; see <NoteLink to="preprocessing-pipelines">preprocessing pipelines</NoteLink>.
+- **Encoding or selecting on the train-plus-validation set, then tuning.** The leak reaches the tuning as well as the
+  estimate, so the chosen hyperparameters favour whatever the leak rewards.
+- **Resampling the whole data set.** Oversampling or SMOTE before the split makes copies of held-out minority examples,
+  or points interpolated from them, appear in training, and the estimate is over-optimistic <Cite id="santos2018" />.
+- **Deduplication and filtering after the split decision.** Removing near-duplicates or outliers with statistics
+  computed over all rows is a fitted step. Deduplicate before splitting, using rules that do not look at the targets,
+  and fit any data-driven filter inside the folds.
+- **Checking only the score.** A leak shows as a score that is too good, but a moderate leak looks like a moderate
+  improvement. Controls with shuffled labels, which should score at chance, catch it more reliably; see
+  <NoteLink to="detecting-leakage">detecting leakage</NoteLink> <Cite id="kaufman2012" />.

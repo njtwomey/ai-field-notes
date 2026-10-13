@@ -1,0 +1,201 @@
+---
+title: 'Adaptive data analysis'
+kind: concept
+summary: 'When a test set is reused to choose among models or queries that depend on earlier answers, its estimates overfit. Adaptive data analysis bounds this, and differentially private answering (the reusable holdout) keeps the estimates valid.'
+tags: [learning-theory, generalisation, evaluation, worked-example]
+aliases: [statistical query answering, adaptive statistical queries, Thresholdout, boosting attack, transfer theorem]
+requires: [test-set-bounds, union-bound, differential-privacy]
+related: [test-set-reuse, algorithmic-stability, information-theoretic-generalisation-bounds, cross-validation, multiple-testing, generalisation-gap, maximal-inequalities, algorithm-dependent-bounds]
+references: [dwork2015, dwork2015preserving, dwork2015holdout, bassily2016, hardt2014preventing, blum2015ladder, freedman1983, recht2019, dwork2014, russo2016bias]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+A **statistical query** is a function $\phi$ from examples to $[0, 1]$, such as the <NoteLink to="surrogate-losses">0-1
+loss</NoteLink> of a fixed model. Its true value is $\Dcal[\phi] = \expect_{z \sim \Dcal}\phi(z)$ and its empirical
+value on a holdout sample $S$ of $m$ independent examples is $S[\phi] = \frac1m\sum_{i=1}^m \phi(z_i)$. In **adaptive
+data analysis** an analyst asks $k$ queries $\phi_1, \dots, \phi_k$ in sequence, and each $\phi_j$ may depend on the
+answers $a_1, \dots, a_{j-1}$ already received. A mechanism that answers the queries is **$(\tau, \delta)$-accurate**
+if, for every analyst, with probability at least $1 - \delta$ every answer satisfies
+$\abs{a_j - \Dcal[\phi_j]} \le \tau$ <Cite id="dwork2015preserving" />. Answering with the empirical values $S[\phi_j]$
+needs $m$ of order $\ln(k/\delta)/\tau^2$ when the queries are fixed in advance, but of order $k/\tau^2$ when they are
+adaptive. Differentially private answers need only about $\sqrt k/\tau^2$, up to logarithmic factors
+<Cite id="bassily2016" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="test-set-bounds">test-set bound</NoteLink> holds for a model chosen before the test set is looked at.
+Then the test error is an average of independent losses, and <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink> applies. In practice a test set is consulted many times. A score comes back, the analyst adjusts a
+feature, a threshold or a hyperparameter, and asks again. Each answer carries a little information about the particular
+sample, including its noise. The next model is chosen partly because it does well on that noise. After many rounds the
+model fits the holdout's accidents, and its holdout error understates its true error.
+
+Two kinds of reuse must be distinguished. For $k$ models that were all fixed in advance, the number of models enters the
+bound only through $\ln k$: the <NoteLink to="union-bound">union bound</NoteLink> covers it, as in
+<NoteLink to="multiple-testing">multiple testing</NoteLink>. Evaluating $k$ models where each depends on the previous
+scores can cost far more, because the analyst's choices form a tree of possible paths, and the holdout must be valid
+along whichever path the data select. Freedman showed that screening regression variables and then refitting on the same
+data produces significant-looking fits to pure noise <Cite id="freedman1983" />.
+
+The remedy borrows from <NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>. If every answer is
+insensitive to any single example of the holdout, then whatever the analyst builds from the answers is insensitive
+too, and an insensitive procedure cannot overfit. <NoteLink to="differential-privacy">Differential privacy</NoteLink> is
+the form of insensitivity that survives arbitrary post-processing and composes over many queries, which is exactly
+what an adaptive analyst needs <Cite id="dwork2015preserving" />.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, adaptive data analysis
+revisits the concentration step for one hypothesis. The hypothesis is no longer fixed in advance, so concentration must
+be made robust to the way the hypothesis was chosen.
+
+## How reuse breaks the test-set bound
+
+**Non-adaptive queries.** If $\phi_1, \dots, \phi_k$ are fixed before $S$ is drawn, Hoeffding's inequality and a union
+bound give $\abs{S[\phi_j] - \Dcal[\phi_j]} \le \sqrt{\ln(2k/\delta)/(2m)}$ for all $j$ with probability at least
+$1 - \delta$. The number of queries enters through $\ln k$. Selecting the best of $k$ fixed models is still
+non-adaptive: the selection happens after all scores are known, and the bound covers every candidate.
+
+**Adaptive queries: the boosting attack.** Blum and Hardt gave a simple analyst that breaks empirical answers with a
+number of queries proportional to $m$ <Cite id="blum2015ladder" />. The analyst knows the holdout inputs but not their
+labels $y_i \in \set{-1, +1}$, as in a competition leaderboard.
+
+1. Submit $k$ random label vectors $u_1, \dots, u_k \in \set{-1, +1}^m$ and observe the holdout accuracy of each.
+2. Keep the vectors with accuracy above $\frac12$.
+3. Submit the coordinate-wise majority vote $u^*$ of the kept vectors.
+
+Each kept vector agrees with $y$ slightly more than chance, by accident of the sample. The majority vote adds up these
+accidents. Its holdout accuracy is $\frac12 + \Omega(\sqrt{k/m})$ with probability at least $2/3$, while its accuracy on
+fresh data is exactly $\frac12$, because random guesses carry no information about new labels
+<Cite id="blum2015ladder" />. The bias grows like $\sqrt k$, not $\sqrt{\ln k}$. The attack is the last query: it uses
+the first $k$ answers to choose a query that is overfitted to $S$.
+
+<Derivation title="The size of the boosting attack's bias">
+
+Write $c_j = \sum_i u_{ji}y_i$, so vector $j$ has holdout accuracy $\frac12 + c_j/(2m)$. For a random vector, $c_j$ is
+a sum of $m$ independent signs, approximately $\Gauss(0, m)$. About $k/2$ vectors have $c_j > 0$ and are kept. Given
+$c_j > 0$, the expected value of $c_j$ is the half-normal mean $\sqrt{2m/\pi}$, so each coordinate of a kept vector
+agrees with $y_i$ with an excess $\expect[u_{ji}y_i \mid c_j > 0] \approx \sqrt{2/(\pi m)}$.
+
+At a fixed coordinate $i$, the vote margin $V_i = \sum_{\text{kept } j}u_{ji}y_i$ is a sum of about $k/2$ nearly
+independent signs, with mean about $\frac k2\sqrt{2/(\pi m)}$ and variance about $k/2$. The majority vote is right at
+$i$ when $V_i > 0$, which by the normal approximation has probability
+
+$$
+\Phi\paren{\frac{\frac k2\sqrt{2/(\pi m)}}{\sqrt{k/2}}} = \Phi\paren{\sqrt{\frac{k}{\pi m}}} \approx \frac12 + \frac{1}{\sqrt{2\pi}}\sqrt{\frac{k}{\pi m}},
+$$
+
+where $\Phi$ is the standard normal distribution function. The holdout accuracy of $u^*$ is the average over $i$,
+which is close to this probability. The excess is of order $\sqrt{k/m}$.
+
+</Derivation>
+
+**The description-length bound.** A union bound can still be made to work if it covers every path the analysis could
+take. If each answer is rounded to one of $r$ values, then the $k$ answers form one of at most $r^k$ transcripts, and
+the queries are a fixed function of the transcript. A union bound over transcripts and queries gives accuracy
+$\sqrt{(k\ln r + \ln(2k/\delta))/(2m)}$ <Cite id="dwork2015holdout" />. The number of queries now enters linearly under
+the square root, which matches the boosting attack. Fewer possible values $r$ per answer shrink the $k\ln r$ term in
+this bound. The Ladder mechanism for competition leaderboards reports a new score only when a submission beats the
+previous best by a margin, so most answers reveal nothing <Cite id="blum2015ladder" />.
+
+**An experiment.** Dwork and colleagues simulated a common workflow on pure noise. The data had $d = 10{,}000$
+attributes independent of random labels, with $10{,}000$ training and $10{,}000$ holdout examples. The analyst kept
+attributes whose correlation with the label had the same sign on training and holdout data and exceeded a threshold on
+both, then combined the 500 strongest into a sign-vote classifier. The classifier's reported accuracy was over 63% on
+both the training and the holdout set, while no classifier can exceed 50% on new data <Cite id="dwork2015holdout" />.
+
+## The reusable holdout
+
+**Privacy implies generalisation.** Suppose the procedure that maps the holdout $S$ to a query $\phi$ is
+$\varepsilon$-differentially private: replacing one example of $S$ changes the probability of any set of outputs by at
+most a factor $e^\varepsilon$. Then, in expectation over $S$ and the procedure's randomness,
+
+$$
+\expect S[\phi] \le e^\varepsilon\,\expect\Dcal[\phi], \qquad\text{so}\qquad \expect\LB S[\phi] - \Dcal[\phi]\RB \le e^\varepsilon - 1 \approx \varepsilon.
+$$
+
+The proof is the renaming argument of <NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>.
+
+1. **Privacy at one example.** $\expect S[\phi] = \frac1m\sum_i\expect\phi(z_i)$, where $\phi$ was computed from $S$,
+   which contains $z_i$. For a $[0, 1]$-valued query, $\expect\phi(z_i) = \int_0^1\prob(\phi(z_i) > t)\,dt$, and each
+   event $\set{\phi(z_i) > t}$ is an event about the procedure's output. Privacy bounds its probability by
+   $e^\varepsilon$ times its probability when the procedure is run on $S^{(i)}$, the holdout with $z_i$ replaced by a
+   fresh $z_i'$.
+2. **Renaming.** A query computed from $S^{(i)}$ and evaluated at $z_i$ has the same distribution as a query computed
+   from $S$ and evaluated at a fresh example, whose expected value is $\Dcal[\phi]$.
+
+Applying the same argument to $1 - \phi$ bounds the gap in the other direction. Dwork and colleagues proved the
+high-probability version, and Bassily and colleagues gave a tight transfer theorem: a mechanism whose answers are
+accurate on the sample and differentially private is accurate on the distribution <Cite id="dwork2015preserving" />
+<Cite id="bassily2016" />.
+
+**Why privacy suits adaptivity.** Two properties of differential privacy do the work
+<Cite id="dwork2014" />.
+
+- **Post-processing.** Anything computed from private answers, including the analyst's next query and her final model,
+  is private with the same parameter. The analyst's strategy need not be known.
+- **Composition.** $k$ answers, each $\varepsilon_0$-private, are together about $\sqrt k\,\varepsilon_0$-private (up to
+  logarithmic factors and a small failure probability). This $\sqrt k$ is where the $\sqrt k/\tau^2$ sample size comes
+  from.
+
+Adding Gaussian noise of a suitable scale to each empirical answer gives a mechanism that answers $k$ adaptive
+statistical queries to accuracy $\tau$ with $m = \tilde O(\sqrt k/\tau^2)$, where $\tilde O$ hides logarithmic factors
+<Cite id="bassily2016" />. Under standard cryptographic assumptions, no efficient
+mechanism can answer more than about $m^2$ adaptive queries accurately <Cite id="dwork2015preserving" />
+<Cite id="hardt2014preventing" />.
+
+**Thresholdout.** The reusable holdout of Dwork and colleagues splits the data into a training set $S_t$, which the
+analyst sees freely, and a holdout $S_h$, which answers queries <Cite id="dwork2015holdout" /> <Cite id="dwork2015" />.
+It has a threshold $T$, a noise scale $\sigma$ and a budget $B$.
+
+1. Draw a noisy threshold $\hat T = T + \gamma$ with $\gamma \sim \Laplace(2\sigma)$.
+2. For each query $\phi$, draw $\eta \sim \Laplace(4\sigma)$. If $\abs{S_h[\phi] - S_t[\phi]} \le \hat T + \eta$,
+   answer with the training value $S_t[\phi]$.
+3. Otherwise answer $S_h[\phi] + \xi$ with $\xi \sim \Laplace(\sigma)$, draw a fresh noisy threshold, and reduce the
+   budget $B$ by one. Stop when the budget is spent.
+
+When training and holdout agree, the analyst learns nothing new about the holdout. Only the queries that overfit the
+training set consume the budget. The mechanism is $(2B/(\sigma m), 0)$-differentially private with respect to the
+holdout, and it can validate a number of queries exponential in $m$ as long as few of them overfit
+<Cite id="dwork2015holdout" />. In the noise experiment above, Thresholdout with $T = 0.04$ kept the reported holdout
+accuracy within about 0.04 of the true 50%.
+
+## Worked example
+
+A holdout of $m = 10{,}000$ labelled examples, a binary task, confidence $\delta = 0.05$, and $k = 1{,}000$ queries.
+
+1. **Fixed models.** If the 1,000 models are fixed in advance, every holdout accuracy is within
+   $\sqrt{\ln(2{,}000/0.05)/20{,}000} = \sqrt{10.6/20{,}000} = 0.023$ of the truth. If all 1,000 are random guesses, the
+   best of them scores about $\frac12 + \sqrt{2\ln 1{,}000}/(2\sqrt{10{,}000}) = 0.519$ on the holdout
+   (<NoteLink to="maximal-inequalities">maximal inequalities</NoteLink>), inside the guarantee.
+2. **The boosting attack.** The same 1,000 random guesses, followed by their majority vote, give a holdout accuracy
+   of about $\Phi(\sqrt{1{,}000/(10{,}000\pi)}) = \Phi(0.178) = 0.571$ by the approximation above. The true accuracy is
+   0.5. The error, 0.071, is three times the non-adaptive guarantee, after only 1,001 queries.
+3. **The description-length bound.** If every answer is reported to two decimal places, $r = 101$ and the guarantee
+   for adaptive use is $\sqrt{(1{,}000\ln 101 + 10.6)/20{,}000} = 0.48$, nearly vacuous. If every answer is one bit,
+   such as "better than the best so far or not", it is $\sqrt{(1{,}000\ln 2 + 10.6)/20{,}000} = 0.19$.
+4. **Fresh data for every query.** Sample splitting restores the non-adaptive guarantee for each query at the price of
+   a fresh holdout each time: 1,000 holdouts of 10,000, or 10 million examples, for accuracy 0.023.
+5. **Private answers.** Ignoring constants and logarithmic factors, a private mechanism needs a sample proportional to
+   $\sqrt k/\tau^2$ rather than $k/\tau^2$, a factor $\sqrt{1{,}000} \approx 32$ smaller than splitting for the same
+   accuracy.
+
+{/* figure pending engine (sketch adaptiveHoldoutStudy in the lt-algorithmic log): holdout and fresh accuracy of the
+boosting attack and of the correlation-screening classifier against the number of queries, answered empirically, with
+Gaussian noise, and by Thresholdout */}
+
+## Pitfalls
+
+- **Adaptivity is not the number of models.** For a thousand models fixed in advance, the number of models enters the
+  bound only through $\ln k$; ten models, each tuned on the previous one's holdout score, can already bias the estimate.
+- **Rounding and budgets are partial remedies.** Coarser answers and fewer submissions shrink the description length
+  and the bias, but they also limit what the analyst learns.
+- **The guarantees are worst-case over analysts.** Real analysts are not adversarial. Recht and colleagues rebuilt
+  <NoteLink to="test-sets">test sets</NoteLink> for <Gloss name="cifar-10" /> and <Gloss name="imagenet" /> and found
+  accuracy drops of 3% to 15% and 11% to 14%. They attributed the drops not to adaptive overfitting but to the new
+  images being slightly harder, because gains on the old test sets carried over to the new ones <Cite id="recht2019" />.
+- **Privacy noise costs accuracy.** Each private answer is noisier than the empirical one. The trade-off pays off only
+  when the number of adaptive queries is large.
+- **Engineering practice.** Budgets, two-tier test sets and replication in engineering workflows are covered
+  in <NoteLink to="test-set-reuse">test-set reuse</NoteLink>; this note covers the guarantees.

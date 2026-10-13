@@ -1,0 +1,159 @@
+---
+title: 'Weak and strong learnability'
+kind: concept
+summary: 'A class is weakly learnable if some algorithm beats random guessing by a fixed edge $\gamma > 0$ on every distribution. Schapire proved weak and strong (PAC) learnability equivalent: boosting turns a weak learner into a strong one.'
+tags: [learning-theory, boosting, worked-example]
+aliases: [weak learnability, strong learnability, weak learner, weak learning assumption, boosting theorem, hypothesis boosting]
+requires: [probably-approximately-correct-learning, adaboost]
+related: [margin-theory-of-boosting, gradient-boosting, hedge-and-exponential-weights, vapnik-chervonenkis-dimension, sample-compression-bounds]
+references: [kearns1994, schapire1990, freund1995, freund1997, schapire2012, shalevshwartz2014, long2010]
+status: draft
+updated: 2026-10-12
+---
+
+import { WeakToStrong } from './WeakToStrong'
+
+<Definition>
+In the realisable setting, a learner is a **$\gamma$-weak learner** for a class $\Ccal$ if, for every target
+$c \in \Ccal$, every distribution $\Dcal$ over inputs and every $\delta \in (0, 1)$, it returns from enough examples a
+hypothesis $h$ with $R(h) \le \tfrac12 - \gamma$ with probability at least $1 - \delta$. The class is **weakly
+learnable** if a $\gamma$-weak learner exists for some fixed $\gamma > 0$, and **strongly learnable** if it is PAC
+learnable, with every accuracy $\epsilon > 0$ attainable. Kearns and Valiant asked whether the two notions coincide
+<Cite id="kearns1994" />. Schapire proved that they do: a class is weakly learnable if and only if it is strongly
+learnable, and the proof is an algorithm, **boosting** <Cite id="schapire1990" />.
+</Definition>
+
+## Intuition
+
+A weak learner is only slightly better than random guessing. It may be wrong on 45% of the examples, as long as it is
+right more often than not on whatever distribution it is given. A strong learner must reach any accuracy asked of it.
+The two seem far apart, but a weak learner that works on every distribution can be pointed at the examples it currently
+gets wrong. Reweighting the data towards past mistakes forces each new weak hypothesis to be informative where the
+previous ones were not. A vote of these hypotheses corrects most of their individual mistakes.
+
+The phrase "every distribution" carries the argument. A rule of thumb that is slightly better than chance on the
+natural data distribution, but not on reweighted versions of it, cannot be boosted. The equivalence also needs the
+edge $\gamma$ to be fixed: an edge that may shrink as the distribution changes gives no guarantee.
+
+## Definitions
+
+Let $\Ccal$ be a class of target functions $\Xcal \to \set{-1, +1}$ and let $\Bcal$ be the class of hypotheses that the
+weak learner returns, the **base class**.
+
+- **Strong learnability** is realisable <NoteLink to="probably-approximately-correct-learning">PAC
+  learnability</NoteLink>: for every $\epsilon, \delta \in (0, 1)$, every $c \in \Ccal$ and every $\Dcal$, the learner
+  returns $h$ with $R(h) \le \epsilon$ with probability at least $1 - \delta$, from
+  $m(\epsilon, \delta)$ examples.
+- **Weak learnability** fixes $\epsilon = \tfrac12 - \gamma$. The weak learner's edge $\gamma$ is the amount by which
+  it beats random guessing.
+- **The weak learning assumption on a sample.** Boosting applies the weak learner to weighted versions of one training
+  sample. The assumption it uses is: for every weighting $D$ of the training examples, the weak learner returns
+  $h \in \Bcal$ with weighted error $\sum_i D(i)\indicator[h(x_i) \ne y_i] \le \tfrac12 - \gamma$.
+
+The definitions say nothing about computation. Schapire's theorem holds in both the statistical and the
+polynomial-time versions: if the weak learner runs in polynomial time, so does the strong learner it is turned into
+<Cite id="schapire1990" />.
+
+## The boosting theorem
+
+Schapire's original construction was recursive. It trains three weak hypotheses on filtered distributions and takes
+their majority, which turns error $\alpha$ into at most $g(\alpha) = 3\alpha^2 - 2\alpha^3$, and it repeats this on the
+majority <Cite id="schapire1990" />. Freund's boost-by-majority and Freund and Schapire's AdaBoost replaced the
+recursion with a single weighted vote <Cite id="freund1995" /> <Cite id="freund1997" />. The proof below is AdaBoost's
+training-error bound.
+
+**The algorithm.** Given $m$ examples with labels $y_i \in \set{-1, +1}$, start from uniform weights
+$D_1(i) = 1/m$. In round $t = 1, \dots, T$:
+
+1. the weak learner returns $h_t$ with weighted error $\epsilon_t = \sum_i D_t(i)\indicator[h_t(x_i) \ne y_i] =
+   \tfrac12 - \gamma_t$;
+2. the vote weight is $\alpha_t = \tfrac12\ln((1 - \epsilon_t)/\epsilon_t)$;
+3. the weights become $D_{t+1}(i) = D_t(i)\exp(-\alpha_t y_i h_t(x_i))/Z_t$, where $Z_t$ makes them sum to 1.
+
+The output is $H(x) = \sgn(f(x))$ with $f = \sum_{t=1}^{T}\alpha_t h_t$ (<NoteLink to="adaboost">AdaBoost</NoteLink>).
+
+**The bound.** The training error of $H$ satisfies
+
+$$
+\hat R_S(H) \le \prod_{t=1}^{T}2\sqrt{\epsilon_t(1 - \epsilon_t)} = \prod_{t=1}^{T}\sqrt{1 - 4\gamma_t^2} \le
+\exp\paren{-2\sum_{t=1}^{T}\gamma_t^2}.
+$$
+
+The derivation has four steps.
+
+1. **Unroll the weights.** Applying the update $T$ times gives
+   $D_{T+1}(i) = \exp(-y_i f(x_i))/(m\prod_t Z_t)$, because the exponents add up to $-y_i\sum_t\alpha_t h_t(x_i)$.
+2. **Bound the <NoteLink to="surrogate-losses">0–1 loss</NoteLink> by the exponential loss.** $H$ errs on example $i$
+   only if $y_i f(x_i) \le 0$, and then $\exp(-y_i f(x_i)) \ge 1$. Hence
+
+$$
+\hat R_S(H) \le \frac1m\sum_{i=1}^{m}\exp(-y_i f(x_i)) = \sum_{i=1}^{m}D_{T+1}(i)\prod_{t=1}^{T}Z_t = \prod_{t=1}^{T}Z_t,
+$$
+
+   since the weights $D_{T+1}$ sum to 1.
+3. **Compute each normaliser.** The correctly classified examples carry weight $1 - \epsilon_t$ and are multiplied by
+   $e^{-\alpha_t}$; the others carry $\epsilon_t$ and are multiplied by $e^{\alpha_t}$. So
+   $Z_t = (1 - \epsilon_t)e^{-\alpha_t} + \epsilon_t e^{\alpha_t}$. The chosen $\alpha_t$ minimises this, and
+   substituting it gives $Z_t = 2\sqrt{\epsilon_t(1 - \epsilon_t)} = \sqrt{1 - 4\gamma_t^2}$.
+4. **Use $1 + u \le e^u$.** With $u = -4\gamma_t^2$, $\sqrt{1 - 4\gamma_t^2} \le \exp(-2\gamma_t^2)$, and the product
+   of these is the exponential of the sum.
+
+Under the weak learning assumption every $\gamma_t \ge \gamma$, so $\hat R_S(H) \le e^{-2\gamma^2 T}$. The training
+error is a multiple of $1/m$, so it is exactly zero once $e^{-2\gamma^2T} < 1/m$, that is after
+
+$$
+T > \frac{\ln m}{2\gamma^2}
+$$
+
+rounds <Cite id="freund1997" />.
+
+**From the training sample to the distribution.** A consistent hypothesis is not yet a strong learner: its
+<NoteLink to="empirical-risk-minimisation">true risk</NoteLink> must also be small. The vote $H$ belongs to the class of
+signs of weighted sums of $T$ base hypotheses. If the base class has VC dimension $d_\Bcal$, that class has VC dimension
+of order $Td_\Bcal\ln(Td_\Bcal)$ <Cite id="shalevshwartz2014" />. With $T$ of order $\ln m/\gamma^2$, the capacity grows
+only logarithmically in $m$, and the realisable <NoteLink to="vapnik-chervonenkis-dimension">VC bound</NoteLink> makes
+$R(H)$ as small as required for large enough $m$. Weak learnability therefore implies strong learnability. The converse
+is immediate, because a strong learner run with $\epsilon = \tfrac12 - \gamma$ is a weak learner.
+
+The bound is also an instance of the <NoteLink to="hedge-and-exponential-weights">exponential weights</NoteLink>
+algorithm run on the training examples. Freund and Schapire derived AdaBoost from Hedge, and the weak learning
+assumption is equivalent, by the minimax theorem, to the target being a <NoteLink to="weighted-majority">weighted
+majority</NoteLink> of base hypotheses with margin at least $2\gamma$ <Cite id="schapire2012" />.
+
+## Worked example
+
+Take a weak learner with edge $\gamma = 0.1$ (weighted error at most 0.4) and $m = 1{,}000$ training examples.
+
+1. **Zero training error.** $T > \ln 1{,}000/(2 \times 0.1^2) = 6.91/0.02 = 345.4$, so 346 rounds suffice.
+2. **The bound after 100 rounds.** If every round has $\epsilon_t = 0.4$, the product bound is
+   $(2\sqrt{0.4 \times 0.6})^{100} = 0.96^{50} = 0.130$. The looser exponential form gives $e^{-2 \times 0.01 \times 100}
+   = e^{-2} = 0.135$.
+3. **A smaller edge.** With $\gamma = 0.05$, zero training error needs $T > 6.91/0.005 = 1{,}382$ rounds. Halving
+   the edge quadruples the rounds.
+4. **Schapire's recursion.** Starting from error $0.4$, the map $\alpha \mapsto 3\alpha^2 - 2\alpha^3$ gives $0.352$,
+   $0.285$, $0.197$, $0.101$ and $0.029$ after five levels. Level $k$ calls the weak learner $3^k$ times, so five levels
+   use 243 calls for an error of 2.9%.
+
+## Simulation
+
+<WeakToStrong />
+
+{/* figure pending engine (adaBoost training-error bound per round, see log; B3 marginDistribution): the product bound
+∏ 2√(εₜ(1 − εₜ)) beside the measured training error, and the margin distribution at chosen rounds */}
+
+## Pitfalls
+
+- **Weak on every distribution is a strong requirement.** A learner whose edge vanishes on some reweighting breaks the
+  guarantee. In practice the edges $\gamma_t$ of later rounds shrink, as the simulation shows, and the bound
+  $e^{-2\sum_t\gamma_t^2}$ slows down accordingly.
+- **The theorem is about the realisable setting.** With <NoteLink to="label-noise">label noise</NoteLink> no hypothesis
+  is consistent, the weak learning assumption cannot hold on every reweighting, and the training-error bound stops
+  describing the true risk. Long and Servedio showed that <NoteLink to="label-noise-models">random classification
+  noise</NoteLink> defeats every boosting algorithm that minimises a convex potential, AdaBoost included
+  <Cite id="long2010" />.
+- **Zero training error is not the end of training.** The VC argument predicts that more rounds raise the capacity and
+  eventually hurt. AdaBoost's test error often keeps falling after the training error reaches zero, which the
+  <NoteLink to="margin-theory-of-boosting">margin theory of boosting</NoteLink> explains.
+- **Multiclass needs a stronger weak learner.** Beating random guessing among $K > 2$ classes ($1 - 1/K$ error) is not
+  enough to boost; the multiclass analogue needs error below $\tfrac12$ or a modified assumption
+  <Cite id="schapire2012" />.

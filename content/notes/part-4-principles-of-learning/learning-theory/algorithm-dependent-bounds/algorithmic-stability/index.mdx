@@ -1,0 +1,242 @@
+---
+title: 'Algorithmic stability'
+kind: concept
+summary: 'A learning algorithm is uniformly $\beta$-stable if replacing one training example changes its loss at any point by at most $\beta$. Its expected generalisation gap is then at most $\beta$; for a loss in $[0, M]$ the gap exceeds $\beta$ by at most $(2m\beta + M)\sqrt{\ln(1/\delta)/(2m)}$ with probability $1 - \delta$.'
+tags: [learning-theory, generalisation, stability, worked-example]
+aliases: [uniform stability, uniformly stable algorithm, replace-one stability, hypothesis stability, Bousquet–Elisseeff bound]
+requires: [empirical-risk-minimisation, mcdiarmids-inequality, generalisation-gap]
+related: [stability-of-regularised-empirical-risk-minimisation, stability-of-stochastic-gradient-descent, uniform-convergence, adaptive-data-analysis, information-theoretic-generalisation-bounds, differential-privacy, cross-validation, algorithm-dependent-bounds]
+references: [bousquet2002, hardt2016sgd, rogers1978, devroye1979, kearns1999, shalevshwartz2010, mukherjee2006, feldman2019stability, bousquet2020sharper, shalevshwartz2014, mohri2018]
+status: draft
+updated: 2026-10-12
+---
+
+import { ReplaceOnePoint } from '../_shared/ReplaceOnePoint'
+
+<Definition>
+Let $A$ be a learning algorithm that maps a sample $S = (z_1, \dots, z_m)$ of examples $z_i = (x_i, y_i)$ to a
+hypothesis $A(S)$, and let $\ell(h, z) \in [0, M]$ be the loss of hypothesis $h$ on example $z$. Write $S^{(i)}$ for the
+sample with $z_i$ replaced by another example $z_i'$. The algorithm is **uniformly $\beta$-stable** if
+
+$$
+\abs{\ell(A(S), z) - \ell(A(S^{(i)}), z)} \le \beta
+$$
+
+for every sample $S$, every index $i$, every replacement $z_i'$ and every test example $z$. For a uniformly
+$\beta$-stable algorithm and a sample of $m$ independent draws from a distribution $\Dcal$, the
+<NoteLink to="generalisation-gap">expected generalisation gap</NoteLink> is at most $\beta$, and with probability at
+least $1 - \delta$
+
+$$
+R(A(S)) \le \hat R_S(A(S)) + \beta + (2m\beta + M)\sqrt{\frac{\ln(1/\delta)}{2m}}
+$$
+
+<Cite id="bousquet2002" /> <Cite id="shalevshwartz2014" />.
+</Definition>
+
+## Intuition
+
+A bound by <NoteLink to="uniform-convergence">uniform convergence</NoteLink> asks how far the empirical risk can be
+from the true risk for the worst hypothesis in the class. The learner returns only one hypothesis, and that hypothesis
+may be far from the worst. Stability asks a different question about the learner itself: how much does its output
+depend on any single training example?
+
+If the output hardly depends on any one example, then each training example plays almost the same role as a fresh test
+example. A training example $z_i$ influences $A(S)$ by at most $\beta$ in loss. Remove that influence and $z_i$ is just
+an independent draw from $\Dcal$, on which the expected loss is the true risk. So the training loss on $z_i$ can
+understate the true risk by at most about $\beta$. Averaging over the $m$ examples gives an expected gap of at most
+$\beta$.
+
+The extreme cases fix the scale. A constant algorithm, which ignores the data, has $\beta = 0$ and no gap. A lookup
+table, which memorises every training label and guesses elsewhere, can change its loss at $z_i$ by the whole range $M$
+when $z_i$ is replaced, so $\beta = M$ and the bound says nothing. Useful algorithms sit in between. The sample mean has
+$\beta = O(1/m)$, and so do <NoteLink to="stability-of-regularised-empirical-risk-minimisation">regularised empirical
+risk minimisation</NoteLink> and <NoteLink to="stability-of-stochastic-gradient-descent">stochastic gradient
+descent</NoteLink> run for a limited time. The <NoteLink to="k-nearest-neighbours">$k$-nearest-neighbour</NoteLink>
+average of labels in $[0, 1]$ moves by at most $1/k$ when one label changes, so its stability improves with $k$ rather
+than with $m$.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, stability skips the step
+that makes a bound uniform over a class. It exploits structure in the algorithm instead. The concentration step still
+applies, through <NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink>, because the gap is a function
+of the $m$ independent examples that no single example can move much. No class,
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> or
+<NoteLink to="covering-numbers-and-metric-entropy">covering number</NoteLink> appears in the result.
+
+<ReplaceOnePoint />
+
+## Notions of stability
+
+The literature uses several notions. They differ in what is perturbed (an example removed or replaced), where the
+change is measured (at a fixed point, at the perturbed point, or on average) and whether a supremum or an expectation
+is taken over samples. The table orders them from strongest to weakest.
+
+| Notion | Condition | What it gives |
+| --- | --- | --- |
+| Uniform stability | $\sup_{S, i, z_i', z}\abs{\ell(A(S), z) - \ell(A(S^{(i)}), z)} \le \beta$ | Expected gap $\le \beta$; high-probability bound via McDiarmid |
+| Hypothesis stability | $\expect_{S, z}\abs{\ell(A(S), z) - \ell(A(S^{\setminus i}), z)} \le \beta$ | High-probability bound with $1/\delta$ in place of $\ln(1/\delta)$ |
+| On-average replace-one stability | $\expect_{S, z_i', i}[\ell(A(S^{(i)}), z_i) - \ell(A(S), z_i)] \le \beta$ | Expected gap $\le \beta$, and nothing more |
+| Error stability | $\abs{R(A(S)) - R(A(S^{\setminus i}))} \le \beta$ | Sanity-check bounds for the leave-one-out estimate <Cite id="kearns1999" /> |
+
+Here $S^{\setminus i}$ is the sample with $z_i$ removed. Removal and replacement are interchangeable up to a factor of
+2: an algorithm that changes by at most $\beta$ when one example is removed changes by at most $2\beta$ when one is
+replaced, by the triangle inequality through $S^{\setminus i}$ <Cite id="bousquet2002" />. Bousquet and Elisseeff state
+their results for removal; this note and Shalev-Shwartz and Ben-David use replacement <Cite id="shalevshwartz2014" />.
+
+Hypothesis stability gives a bound whose deviation term is $\sqrt{(M^2 + 12Mm\beta)/(2m\delta)}$, which grows like
+$1/\sqrt\delta$ rather than $\sqrt{\ln(1/\delta)}$ <Cite id="bousquet2002" />.
+
+Two further variants:
+
+- **Randomised algorithms.** When $A$ uses its own randomness, as <Gloss name="sgd">stochastic gradient descent</Gloss>
+  does, the condition is applied to $\expect_A \ell(A(S), z)$, the loss averaged over the algorithm's internal
+  randomness, with the samples still fixed <Cite id="hardt2016sgd" />.
+- **Distributional stability.** <NoteLink to="differential-privacy">Differential privacy</NoteLink> asks that the whole
+  distribution of the output change by at most a factor $e^\varepsilon$ when one example is replaced. It implies
+  uniform stability in the randomised sense, with $\beta = (e^\varepsilon - 1)M$ for every loss in $[0, M]$, and it
+  survives post-processing and composition, which is what
+  <NoteLink to="adaptive-data-analysis">adaptive data analysis</NoteLink> needs.
+
+The idea is older than its name. Rogers and Wagner (1978) and Devroye and Wagner (1979) bounded the error of local rules
+such as $k$-nearest neighbours through the effect of one deleted example <Cite id="rogers1978" />
+<Cite id="devroye1979" />. Kearns and Ron used stability to justify the leave-one-out estimate of the error
+<Cite id="kearns1999" />. Mukherjee, Niyogi, Poggio and Rifkin showed that stability is sufficient for generalisation
+and characterises the consistency of <Gloss name="erm">empirical risk minimisation</Gloss> <Cite id="mukherjee2006" />.
+In Vapnik's general learning setting, some problems are learnable although uniform convergence fails, and stability
+rather than uniform convergence is the condition that characterises learnability <Cite id="shalevshwartz2010" />.
+
+## The generalisation bound
+
+The bound comes from two facts. The expected gap equals an average stability, and the gap concentrates around its
+expectation. Fix a uniformly $\beta$-stable algorithm $A$, a loss in $[0, M]$ and a sample $S$ of $m$ independent draws
+from $\Dcal$. Let $S' = (z_1', \dots, z_m')$ be a second, independent sample, the <NoteLink to="symmetrisation">ghost
+sample</NoteLink> that supplies the replacements.
+
+**Step 1: the expected gap is an average stability.** The true risk of the output is an expectation over a fresh
+example. For each $i$, the ghost example $z_i'$ is independent of $S$, so
+
+$$
+\expect_S R(A(S)) = \expect_{S, S'}\, \ell(A(S), z_i').
+$$
+
+Now rename. Swapping the names of $z_i$ and $z_i'$ maps the pair $(S, z_i')$ to the pair $(S^{(i)}, z_i)$, and both
+pairs consist of $m + 1$ independent draws from $\Dcal$. The two pairs have the same distribution, so
+
+$$
+\expect_{S, S'}\, \ell(A(S), z_i') = \expect_{S, S'}\, \ell(A(S^{(i)}), z_i).
+$$
+
+The expected training loss is $\expect_S \hat R_S(A(S)) = \frac1m\sum_{i=1}^m \expect_S\, \ell(A(S), z_i)$. Averaging
+the renamed identity over $i$ and subtracting gives
+
+$$
+\expect_S\LB R(A(S)) - \hat R_S(A(S))\RB = \frac1m\sum_{i=1}^m \expect_{S, S'}\LB\ell(A(S^{(i)}), z_i) - \ell(A(S), z_i)\RB.
+$$
+
+Each term on the right compares the loss at $z_i$ of a hypothesis trained without $z_i$ and of one trained with it.
+Uniform stability bounds each term by $\beta$, so the expected gap is at most $\beta$. The identity is exact. It says
+that the expected generalisation gap is the expected increase in loss at a training point when that point is swapped
+out of the training set <Cite id="shalevshwartz2014" />.
+
+**Step 2: the gap has bounded differences.** Let $\Phi(S) = R(A(S)) - \hat R_S(A(S))$. Replace $z_i$ by $z_i'$.
+
+- The true risk $R(A(S)) = \expect_z \ell(A(S), z)$ changes by at most $\beta$, because the loss at every $z$ changes by
+  at most $\beta$.
+- The empirical risk is an average of $m$ terms. The $m - 1$ terms at the unchanged examples each change by at most
+  $\beta$. The term at position $i$ changes from $\ell(A(S), z_i)$ to $\ell(A(S^{(i)}), z_i')$, two losses at different
+  points, so it changes by at most $M$. The average changes by at most $\frac{m-1}{m}\beta + \frac{M}{m} \le \beta +
+  \frac{M}{m}$.
+
+So $\Phi$ changes by at most $c = 2\beta + M/m$ when any one example is replaced.
+
+**Step 3: concentrate.** <NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink> for a function of $m$
+independent examples with bounded differences $c$ gives
+
+$$
+\prob\paren{\Phi(S) - \expect\Phi(S) \ge t} \le \exp\paren{-\frac{2t^2}{mc^2}}.
+$$
+
+Setting the right side to $\delta$ and solving gives
+$t = c\sqrt{m\ln(1/\delta)/2} = (2m\beta + M)\sqrt{\ln(1/\delta)/(2m)}$.
+
+**Step 4: combine.** With probability at least $1 - \delta$, $\Phi(S) \le \expect\Phi(S) + t \le \beta + t$, which is
+the bound in the definition.
+
+<Derivation title="Why the renaming step is legitimate">
+
+The examples $z_1, \dots, z_m, z_1', \dots, z_m'$ are <Gloss name="iid">independent and identically distributed</Gloss>.
+Any function of them has the same expectation after two of them are swapped, because the swap does not change their
+joint distribution. Apply this to the function $g(z_1, \dots, z_m, z_i') = \ell(A(z_1, \dots, z_m), z_i')$ and the swap
+of $z_i$ with $z_i'$. The swapped function is
+$\ell(A(z_1, \dots, z_{i-1}, z_i', z_{i+1}, \dots, z_m), z_i) = \ell(A(S^{(i)}), z_i)$. Hence
+$\expect \ell(A(S), z_i') = \expect \ell(A(S^{(i)}), z_i)$. The argument needs no property of $A$; stability enters only
+when the difference is bounded.
+
+</Derivation>
+
+### Reading the bound
+
+The bound has two terms with different roles.
+
+- **The expected gap, $\beta$.** This term is tight in the sense of Step 1: it is the average effect of swapping one
+  example.
+- **The fluctuation, $(2m\beta + M)\sqrt{\ln(1/\delta)/(2m)}$.** For a single fixed hypothesis,
+  <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> gives $M\sqrt{\ln(1/\delta)/(2m)}$. The extra
+  $2m\beta$ is the price of the output depending on the sample. It stays bounded only if $\beta = O(1/m)$. With
+  $\beta = \kappa/m$ the bound reads $\kappa/m + (2\kappa + M)\sqrt{\ln(1/\delta)/(2m)}$, which is of order $1/\sqrt m$.
+  With $\beta$ of order $1/\sqrt m$ the fluctuation term no longer shrinks, and the bound is vacuous.
+
+Later work removed most of this overhead. Feldman and Vondrák proved a gap of
+$O\paren{\beta\ln(m)\ln(m/\delta) + M\sqrt{\ln(1/\delta)/m}}$ for a loss in $[0, M]$. For
+$\beta = O(1/\sqrt m)$ this is of the same order as the sampling error of a single fixed hypothesis, up to logarithms
+<Cite id="feldman2019stability" />. Bousquet, Klochkov and Zhivotovskiy sharpened the bound and proved lower bounds
+showing it is sharp up to a logarithmic factor <Cite id="bousquet2020sharper" />.
+
+## Worked example
+
+Take examples $z_i \in [0, 1]$, the hypothesis space $[0, 1]$ and the <NoteLink to="regression-losses">squared
+loss</NoteLink> $\ell(w, z) = (w - z)^2$, so the loss lies in $[0, 1]$ and $M = 1$. The algorithm returns the sample
+mean, $A(S) = \bar z = \frac1m\sum_i z_i$.
+
+1. **The stability constant.** Replacing $z_i$ by $z_i'$ moves the mean by $\abs{z_i' - z_i}/m \le 1/m$. For any test
+   point $z$, the loss changes by $\abs{(w - z)^2 - (w' - z)^2} = \abs{w - w'}\,\abs{w + w' - 2z} \le \frac1m \cdot 2$.
+   So $\beta = 2/m$.
+2. **The expected gap.** The bound says $\expect[R(\bar z) - \hat R_S(\bar z)] \le 2/m$. The exact value is known. If
+   the examples have variance $\sigma^2$, then $\expect R(\bar z) = \sigma^2(1 + 1/m)$ and
+   $\expect \hat R_S(\bar z) = \sigma^2(1 - 1/m)$, so the expected gap is $2\sigma^2/m$. A variable in $[0, 1]$ has
+   $\sigma^2 \le 1/4$, so the true expected gap is at most $1/(2m)$. The stability bound is four times too large in the
+   worst case.
+3. **The high-probability bound.** With $m = 1{,}000$ and $\delta = 0.05$, $\ln(1/\delta) = 3.00$ and $2m\beta + M = 5$.
+   The bound is $0.002 + 5\sqrt{3.00/2{,}000} = 0.002 + 0.194 = 0.196$. A single fixed hypothesis would have Hoeffding
+   width $\sqrt{3.00/2{,}000} = 0.039$. The factor of 5 is $2m\beta + M$, with $2m\beta = 4$ and $M = 1$.
+4. **Vacuous or not.** The loss lies in $[0, 1]$ and the expected loss of any $w \in [0, 1]$ is at most $1$, so a gap
+   bound of 0.196 is informative. It is still about 400 times the largest possible expected gap, $1/(2m) = 0.0005$.
+5. **Sample size.** For the fluctuation term to be at most $0.05$, the sample must satisfy
+   $5\sqrt{3.00/(2m)} \le 0.05$, that is $m \ge (5/0.05)^2 \cdot 3.00/2 = 15{,}000$.
+
+The example shows the typical pattern. The expected-gap statement $\beta$ is within a small factor of the truth. The
+high-probability statement pays a factor $2m\beta + M$ in front of the usual $\sqrt{\ln(1/\delta)/m}$ term.
+
+## Assumptions
+
+- **Independent examples.** Step 1 swaps examples, and Step 3 needs independence for McDiarmid's inequality.
+- **Bounded loss.** The bound uses the range $M$ in Step 2. Unbounded losses, such as the squared loss on unbounded
+  targets, need a bounded domain or a different argument.
+- **A supremum over all samples.** Uniform stability is a worst case over every sample, including samples that the
+  distribution never produces. Weaker, distribution-dependent notions trade this for weaker conclusions.
+
+## Pitfalls
+
+- **Stability is a property of the algorithm, not of the class.** Two learners with the same hypothesis class can have
+  very different stability. Unregularised least squares on a degree-9 polynomial is unstable;
+  <NoteLink to="ridge-regression">ridge regression</NoteLink> on the same class is stable.
+- **Exact empirical risk minimisation is usually not uniformly stable for the <NoteLink to="surrogate-losses">0-1
+  loss</NoteLink>.** A single example can flip which hypothesis wins, and the 0-1 loss then jumps by 1. Stability
+  results apply to convex surrogate losses, smooth algorithms and averaged or randomised predictors.
+- **The constant depends on the convention.** Removal and replacement differ by a factor of 2, and the factor in the
+  regulariser ($\lambda\norm{\wvec}^2$ or $\frac\lambda2\norm{\wvec}^2$) changes another factor of 2. Compare constants
+  only after fixing both.
+- **A small expected gap is not a small gap with high probability.** The bound $\beta$ on the expected gap can be tight
+  while the high-probability bound is vacuous, as in the worked example of
+  <NoteLink to="stability-of-regularised-empirical-risk-minimisation">regularised empirical risk
+  minimisation</NoteLink>.

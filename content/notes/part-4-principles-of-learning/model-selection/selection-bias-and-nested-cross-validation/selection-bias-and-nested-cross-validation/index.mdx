@@ -1,0 +1,86 @@
+---
+title: 'Selection bias and nested cross-validation'
+kind: overview
+summary: 'The best of many validation scores overstates the chosen model, by up to $\sigma\sqrt{2\ln J}$ for $J$ candidates. Nested cross-validation and a locked test set give honest assessments; the one-standard-error rule and the reusable holdout limit what selection fits.'
+tags: [model-selection, generalisation, evaluation]
+aliases: []
+requires: [cross-validation, model-selection-and-model-assessment]
+related: [overfitting-in-model-selection, foundations-of-model-selection, adaptive-data-analysis, test-set-reuse]
+references: [cawley2010, varma2006, hastie2009]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+Selection bias in <NoteLink to="model-selection">model selection</NoteLink> is the optimism of a validation score that
+was used to choose the model it reports. Choosing the best of several candidates by their estimated errors favours the
+candidate whose estimate was luckiest, so the winning score understates the winner's true error
+<Cite id="cawley2010" />. This topic covers the size of that bias, the procedures that assess a selected model honestly,
+and the rules and mechanisms that limit how much of the validation noise the selection can fit.
+</Definition>
+
+## What it is for
+
+Every tuned model passes through a selection step: a grid or <NoteLink to="random-search">random search</NoteLink> over
+hyperparameters, a choice among model families, a choice of features, a choice of training checkpoint. The score that
+wins the search is the number most often reported, in papers, competitions and model cards. On small data with many
+candidates it can be far from the truth. Varma and Simon tuned classifiers on data with no signal and obtained
+cross-validation errors below 30% on many data sets whose true error was 50% <Cite id="varma2006" />.
+
+The notes here answer three practical questions. How optimistic is the reported score? How can the selected model be
+assessed without that optimism? And how can the selection itself be made less sensitive to noise, so that it picks a
+good model rather than a lucky one?
+
+## Main ideas
+
+**The winner's curse.** Each candidate's validation score is unbiased on its
+own; the minimum of $J$ of them is not. If each estimate errs with a sub-Gaussian scale $\sigma$, the expected optimism
+of the minimum is at most $\sigma\sqrt{2\ln J}$, whatever the dependence between candidates, by the
+<NoteLink to="maximal-inequalities">maximal inequality</NoteLink>. The same noise can also choose a worse model than the
+best candidate. <NoteLink to="overfitting-in-model-selection">Overfitting in model selection</NoteLink> derives both
+effects and the fold-based bias correction of Tibshirani and Tibshirani.
+
+**Assess on data the selection never saw.** An honest estimate of a selected model needs examples that took no part in
+the choice. A large data set reserves a test set and scores it once, the three-way split of
+<NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>. A small one uses
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>: the whole search runs inside each training
+set of an outer cross-validation, and the outer folds score the procedure "search, then refit". The nested estimate
+assesses that procedure, not a single hyperparameter value, and the final model comes from the search run on all the
+data.
+
+**Prefer what the data can resolve.** Near its minimum a cross-validation curve is flat, and the minimiser moves with
+the split. The <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> picks the simplest candidate
+within one <NoteLink to="standard-error">standard error</NoteLink> of the minimum, trading a difference the folds cannot
+resolve for a choice less driven by noise. Fewer candidates, coarser grids, lower-variance criteria and averaging over
+near-equal candidates serve the same end.
+
+**Adaptive reuse costs more than selection.** Choosing among a fixed list costs a logarithmic factor. Designing each new
+model after reading the previous one's holdout score can cost far more: a plain holdout of $n$ examples supports only
+about $n$ adaptive queries. The <NoteLink to="reusable-holdout">reusable holdout</NoteLink> reveals less per query.
+Thresholdout answers from the training set unless the holdout disagrees, and the Ladder updates a leaderboard only for
+significant improvements, so that its error grows only logarithmically with the number of submissions.
+
+## How the notes fit together
+
+- Start with <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>, which sets out the
+  bias and its size. It depends on <NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink> and the
+  maximal inequality.
+- <NoteLink to="nested-cross-validation">Nested cross-validation</NoteLink> and the
+  <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> build on it: one for assessing, one for
+  selecting.
+- The <NoteLink to="reusable-holdout">reusable holdout</NoteLink> extends the argument from a fixed list of candidates
+  to adaptive analysis and leaderboards.
+- <NoteLink to="how-optimistic-is-the-best-cross-validation-score" /> works the whole story on noise labels: the best
+  of 100 cross-validation scores averages 0.71 against a true accuracy of 0.5, and nested cross-validation returns 0.5.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="cross-validation">cross-validation</NoteLink> and the distinction between
+<NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>. The theory of
+adaptive reuse is developed in <NoteLink to="adaptive-data-analysis">adaptive data analysis</NoteLink>, and the
+probability behind the bias in <NoteLink to="maximal-inequalities">maximal inequalities</NoteLink> and
+<NoteLink to="multiple-testing">multiple testing</NoteLink>. Engineering practice for <NoteLink to="test-sets">test
+sets</NoteLink>, budgets and leakage is in <NoteLink to="test-set-reuse">test-set reuse</NoteLink> and
+<NoteLink to="selection-inside-cross-validation">selection inside cross-validation</NoteLink>. The same optimism returns
+when learning algorithms are compared after tuning; see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in
+comparisons</NoteLink>.

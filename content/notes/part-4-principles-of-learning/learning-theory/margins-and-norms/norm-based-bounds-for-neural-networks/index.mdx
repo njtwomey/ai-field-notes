@@ -1,0 +1,206 @@
+---
+title: 'Norm-based bounds for neural networks'
+kind: concept
+summary: 'Norm-based bounds measure the capacity of a neural network by its weight norms divided by its margin, not by its parameter count: products of layer norms in Rademacher bounds, and the spectrally normalised complexity of Bartlett, Foster and Telgarsky in multiclass margin bounds.'
+tags: [learning-theory, generalisation, neural-networks, margin, worked-example]
+aliases: [norm-based capacity, spectrally normalised margin bound, spectral complexity, path norm, size of the weights]
+requires: [margin-bounds, rademacher-complexity]
+related: [limits-of-uniform-convergence, flat-minima-and-sharpness, non-vacuous-generalisation-bounds, contraction-lemma, pseudo-dimension-and-fat-shattering-dimension, multilayer-perceptron, matrix-norms, measuring-capacity-empirically, margins-and-norms]
+references: [bartlett1998, bartlett2019vc, zhang2017, neyshabur2015norm, golowich2018, bartlett2017, neyshabur2018, nagarajan2019, jiang2020, ledoux1991]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+A **norm-based bound** for a neural network $f_{\Wmat}$ with weight matrices $\Wmat_1, \dots, \Wmat_L$ bounds its risk
+by a margin loss plus a capacity term of the form $C(\Wmat)\,X/(\gamma\sqrt m)$, up to logarithmic factors. Here
+$C(\Wmat)$ is a function of the weight norms (a product of Frobenius or spectral norms, or a path norm), $X$ bounds the
+input norm, $\gamma$ is the margin and $m$ the sample size <Cite id="bartlett1998" /> <Cite id="bartlett2017" />. The
+number of parameters enters at most through logarithms. The **spectrally normalised margin bound** takes $C(\Wmat)$ to
+be the product of the layers' spectral norms times a correction for their shapes <Cite id="bartlett2017" />.
+</Definition>
+
+## Intuition
+
+A network with a million weights trained on fifty thousand examples has far more parameters than data. A bound that
+counts parameters cannot say anything about it. Such networks still generalise on real data, while the same architecture
+can also fit random labels perfectly <Cite id="zhang2017" />. Whatever controls generalisation must depend on the
+particular weights the training found, not only on the architecture.
+
+Bartlett's answer for two-layer networks was that the size of the weights matters more than their number
+<Cite id="bartlett1998" />. The argument is the one behind <NoteLink to="margin-bounds">margin bounds</NoteLink> for
+linear classifiers. A function with small weights changes slowly, so it cannot separate many points with a wide margin
+in every way. The class of networks with bounded weight norms can be large in parameter count and small in
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink>.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, these bounds make the
+move that exploits structure: concentration and <NoteLink to="symmetrisation">symmetrisation</NoteLink> are standard,
+and the capacity is measured by norms that the trained network actually has.
+
+## Counting parameters fails
+
+A <Gloss name="relu" /> network with $W$ weights and $L$ layers has VC dimension $O(WL\ln W)$, and some architectures
+reach $\Omega(WL\ln(W/L))$ <Cite id="bartlett2019vc" />. A <NoteLink to="vapnik-chervonenkis-dimension">VC
+bound</NoteLink> is therefore vacuous whenever $W$ exceeds $m$, which is the regime of most modern networks.
+
+The random-label experiment shows that the failure is not a weakness of the VC argument alone. Zhang et al. trained
+standard image networks on <Gloss name="cifar-10" /> with the labels replaced by random ones, and the networks reached
+zero training error <Cite id="zhang2017" />. A network class that fits random labels has empirical Rademacher complexity
+near its maximum on that sample. Any bound that depends only on the class, the sample size and the confidence then has
+to be vacuous for that class. A useful bound must look at the trained weights, for instance through a norm that is small
+after training on real labels and large after training on random ones (see
+<NoteLink to="measuring-capacity-empirically">measuring capacity empirically</NoteLink>).
+
+## Norm-based capacity
+
+**A two-layer network.** Let $f(\xvec) = \sum_{j=1}^h v_j\,\sigma(\uvec_j^\top\xvec)$ with $h$ hidden units, the
+<NoteLink to="activation-functions">ReLU</NoteLink> $\sigma(z) = \max(0, z)$, output weights with
+$\norm{\vvec}_1 \le B_1$, input weights with $\norm{\uvec_j}_2 \le B_2$ for every unit, and inputs with
+$\norm{\xvec} \le X$. The empirical Rademacher complexity of this class $\Fcal$ satisfies
+
+$$
+\hat\Rad_S(\Fcal) \le \frac{2B_1B_2X}{\sqrt m},
+$$
+
+whatever the width $h$ and the input dimension. The derivation has three steps.
+
+1. **A scaled convex hull.** Write $\Gcal = \set{\xvec \mapsto \sigma(\uvec^\top\xvec) : \norm{\uvec} \le B_2}$ for the
+   hidden units. Dividing $f$ by $\norm{\vvec}_1$ gives a weighted average of members of $\Gcal$ and their negatives,
+   with weights $\abs{v_j}/\norm{\vvec}_1$. So $\Fcal \subseteq \set{c\,g : 0 \le c \le B_1,\
+   g \in \mathrm{conv}(\Gcal \cup -\Gcal)}$. The convex hull is symmetric about 0, so the supremum over $c$ is attained
+   at $c = B_1$, and $\hat\Rad_S(\Fcal) \le B_1\hat\Rad_S(\mathrm{conv}(\Gcal \cup -\Gcal))$.
+2. **The convex hull leaves the supremum unchanged.** A linear function of $g$, such as $\sum_i\sigma_i g(\xvec_i)$,
+   attains its supremum over a convex hull at one of its generators (the same step as in the
+   <NoteLink to="margin-theory-of-boosting">margin theory of boosting</NoteLink>). The generators are $\pm g$ with
+   $g \in \Gcal$, so the supremum is $\sup_{g \in \Gcal}\abs{\sum_i\sigma_i g(\xvec_i)}$.
+3. **Contract through the ReLU.** The ReLU is 1-Lipschitz and $\sigma(0) = 0$. The Ledoux–Talagrand contraction
+   inequality with absolute values then gives
+   $\expect\sup_{\uvec}\abs{\sum_i\sigma_i\,\sigma(\uvec^\top\xvec_i)} \le 2\,\expect\sup_{\uvec}\abs{\sum_i\sigma_i\uvec^\top\xvec_i}$
+   <Cite id="ledoux1991" /> (the factor 2 comes from the absolute value; see the <NoteLink to="contraction-lemma" />).
+   The right side is $2B_2\,\expect\norm{\sum_i\sigma_i\xvec_i} \le
+   2B_2\sqrt{\sum_i\norm{\xvec_i}^2} \le 2B_2X\sqrt m$ by Cauchy–Schwarz and Jensen's inequality.
+
+Dividing by $m$ and multiplying the three steps together gives the bound.
+
+**Deeper networks.** Applying the same three steps once per layer, from the output down, multiplies the bound by 2 and
+by that layer's norm at every layer. The result is $2^L\prod_j B_j\,X/\sqrt m$ for a depth-$L$ network, which grows
+exponentially with depth even when every norm is at most 1 <Cite id="neyshabur2015norm" />. Golowich, Rakhlin and Shamir
+removed the exponential factor for Frobenius norms. If every layer has $\norm{\Wmat_j}_F \le M_j$, then
+
+$$
+\hat\Rad_S(\Fcal) \le \frac{X\paren{\sqrt{2L\ln 2} + 1}\prod_{j=1}^L M_j}{\sqrt m}
+$$
+
+<Cite id="golowich2018" />. The **path norm** is another choice: the sum over all input-to-output paths of the product
+of the absolute weights along the path. It is unchanged by any rescaling of the weights that leaves the function
+unchanged <Cite id="neyshabur2015norm" />.
+
+## Spectrally normalised margin bounds
+
+**The Lipschitz constant.** A network $f(\xvec) = \sigma_L(\Wmat_L\sigma_{L-1}(\cdots\sigma_1(\Wmat_1\xvec)))$ is a
+composition of linear maps and activations. The linear map $\Wmat_i$ stretches a difference of inputs by at most its
+spectral norm $\norm{\Wmat_i}_\sigma$, the largest singular value (see <NoteLink to="matrix-norms">matrix
+norms</NoteLink>). A $\rho_i$-Lipschitz activation stretches it by at most $\rho_i$. Composing the layers,
+
+$$
+\norm{f(\xvec) - f(\xvec')} \le \paren{\prod_{i=1}^L\rho_i\norm{\Wmat_i}_\sigma}\norm{\xvec - \xvec'}.
+$$
+
+The product of spectral norms bounds how fast the outputs can change. Dividing the margin by it gives a margin that does
+not change when the outputs are rescaled.
+
+**The bound.** For $k$ classes, the margin of $f$ on $(\xvec, y)$ is $f(\xvec)_y - \max_{j \ne y}f(\xvec)_j$, and
+$\hat R_\gamma(f)$ is the fraction of training points with margin at most $\gamma$. Bartlett, Foster and Telgarsky
+proved that, with probability at least $1 - \delta$, every network and every $\gamma > 0$ satisfy
+
+$$
+R(f) \le \hat R_\gamma(f) + \tilde O\paren{\frac{\norm{\Xmat}_F\,R_{\Wmat}}{\gamma m}\ln W + \sqrt{\frac{\ln(1/\delta)}{m}}},
+\qquad
+R_{\Wmat} = \paren{\prod_{i=1}^L\rho_i\norm{\Wmat_i}_\sigma}\paren{\sum_{i=1}^L\frac{\norm{\Wmat_i^\top - \Mmat_i^\top}_{2,1}^{2/3}}{\norm{\Wmat_i}_\sigma^{2/3}}}^{3/2}
+$$
+
+<Cite id="bartlett2017" />. The symbols are:
+
+- $\norm{\Xmat}_F = \sqrt{\sum_i\norm{\xvec_i}^2}$, so $\norm{\Xmat}_F/m \le X/\sqrt m$;
+- $\Mmat_i$ is a reference matrix fixed in advance, such as zero or the initialisation;
+- $\norm{\Amat}_{2,1}$ is the sum of the Euclidean norms of the columns of $\Amat$;
+- $W$ is the largest layer width, which enters only through the logarithm, and $\tilde O$ hides further logarithmic
+  factors.
+
+The first factor of $R_{\Wmat}$ is the Lipschitz constant. The second corrects for the shape of each layer: it is about
+$L^{3/2}$ times a typical ratio $(\norm{\Wmat_i^\top - \Mmat_i^\top}_{2,1}/\norm{\Wmat_i}_\sigma)$, which is small when
+the weights stay close to the reference or have few large directions. The bound has no explicit dependence on the
+number of classes.
+
+The proof covers the class of networks with bounded spectral complexity $R_{\Wmat}$ layer by layer, then uses a
+Rademacher margin bound. Neyshabur, Bhojanapalli and Srebro obtained a bound of the same flavour, with the product of
+spectral norms times a sum of Frobenius-to-spectral ratios, from a <NoteLink to="pac-bayes-bounds">PAC-Bayes</NoteLink>
+argument <Cite id="neyshabur2018" />.
+
+**Rescaling.** A ReLU network computes the same function when one layer's weights are multiplied by $c > 0$ and
+another's are divided by $c$. The product of norms does not change, so product-form bounds respect this symmetry. A sum
+of norms does not, and a bound built from sums must first rebalance the layers.
+
+## What the bounds predict
+
+- **Random labels.** On CIFAR-10, the margins of AlexNet divided by its spectral complexity are much smaller with random
+  labels than with true labels, although the unnormalised margins look alike. The Lipschitz constant tracks the
+  <NoteLink to="empirical-risk-minimisation">excess risk</NoteLink> during training <Cite id="bartlett2017" />.
+- **Sample size.** Nagarajan and Kolter trained 5-layer networks of width 1,024 on <Gloss name="mnist" /> with batch
+  size 1. The distance from initialisation grew like $m^{0.4}$ and the product of spectral norms grew with $m$. The
+  norm-based bounds of Bartlett et al. and Neyshabur et al. then grew like $m^{0.68}$, while the test error fell like
+  $m^{-0.43}$ <Cite id="nagarajan2019" />. A bound that grows with the sample size cannot explain why more data helps.
+- **Hyperparameters.** A study of over 10,000 <NoteLink to="convolutional-networks">convolutional networks</NoteLink>
+  found that the product of spectral norms correlates strongly and negatively with generalisation across changes in
+  hyperparameters. The path norm correlated positively, and sharpness-based measures did best <Cite id="jiang2020" />.
+
+The bounds therefore get the direction right for some comparisons, such as true against random labels, and wrong for
+others, such as depth, batch size and sample size.
+
+{/* figure pending engine (sketch normBoundStudy in .scratch/learning-theory/logs/lt-margins.md): two-layer ReLU
+networks of widths 16 to 4,096 trained to a fixed margin on a fixed problem; parameter count, VC-based term, Frobenius
+and spectral products and the measured test error against width, on log axes */}
+
+## Worked example
+
+**Two-layer network.** Take a network with $h = 1{,}000$ hidden ReLU units on inputs in $\reals^{784}$ with
+$\norm{\xvec} \le X = 1$, so $W = 784 \times 1{,}000 + 1{,}000 = 785{,}000$ weights. Train it on $m = 60{,}000$
+examples. Suppose it reaches $\hat R_\gamma = 0.02$ at a margin with $B_1B_2X/\gamma = 10$, meaning the margin is a
+tenth of the largest output the norm constraints allow.
+
+1. **The norm-based term.** The fixed-margin theorem of <NoteLink to="margin-bounds" /> with the two-layer complexity
+   gives a capacity term $\frac{2}{\gamma} \times \frac{2B_1B_2X}{\sqrt m} = \frac{4 \times 10}{\sqrt{60{,}000}} =
+   \frac{40}{244.9} = 0.163$.
+2. **The confidence term.** At $\delta = 0.05$ it is $\sqrt{\ln 20/120{,}000} = 0.005$.
+3. **The bound.** $R \le 0.02 + 0.163 + 0.005 = 0.19$. It is loose but not vacuous.
+4. **The sample size for a gap of 0.05.** The capacity term falls to 0.045 at $m = (40/0.045)^2 \approx 790{,}000$.
+5. **The parameter count.** With $W = 785{,}000$ weights and $m = 60{,}000$, any VC bound is vacuous.
+
+The norm-based bound depends on the ratio $B_1B_2X/\gamma$. Doubling it doubles the capacity term and quadruples the
+sample size needed. The width $h$ does not appear, so the same bound holds for $h = 10^6$ units with the same norms.
+
+**A deep network.** Take $L = 10$ layers with every Frobenius norm $M_j = 2$ and $X = 1$. The Golowich bound's
+product is $2^{10} = 1{,}024$, multiplied by $\sqrt{20\ln 2} + 1 = 4.72$. At $m = 60{,}000$ the Rademacher complexity
+bound is $4{,}837/244.9 = 19.7$, far above 1. Norms that look modest per layer multiply into a vacuous bound with depth,
+unless the margin $\gamma$ grows in proportion.
+
+## Assumptions
+
+- **Lipschitz activations.** The ReLU, leaky ReLU and max-pooling are 1-Lipschitz. The contraction steps need this.
+- **Norm bounds known in advance.** As with every margin bound, norms read off the trained network need a union bound
+  over a grid of norm values, which costs logarithmic terms.
+- **Independent, identically distributed data,** as in every uniform-convergence bound.
+
+## Pitfalls
+
+- **Norm-based is not the same as small.** The capacity terms are typically above 1 for networks trained without
+  explicit constraints. Their use is in comparisons, and even there the large-scale evidence is mixed
+  <Cite id="jiang2020" />.
+- **The bound depends on the reference matrix.** Measuring $\Wmat_i - \Mmat_i$ from the initialisation rather than from
+  zero changes the bound by large factors, and neither choice is correct in general <Cite id="jiang2020" />.
+- **Uniform convergence may be the limit.** Some networks trained by gradient descent generalise while every uniform
+  convergence bound over the networks they could output is vacuous (see
+  <NoteLink to="limits-of-uniform-convergence">the limits of uniform convergence</NoteLink>). Norm-based bounds are
+  <NoteLink to="uniform-convergence">uniform convergence</NoteLink> bounds, so they inherit this limit.
+- **Products hide depth.** A product of $L$ norms each slightly above 1 grows exponentially with $L$. A bound that looks
+  depth-free in its statement can still grow quickly with depth in practice.

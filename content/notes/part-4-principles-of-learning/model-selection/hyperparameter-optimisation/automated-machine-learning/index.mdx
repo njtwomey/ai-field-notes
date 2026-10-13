@@ -1,0 +1,179 @@
+---
+title: 'Automated machine learning'
+kind: concept
+summary: 'Automated machine learning (AutoML) chooses the preprocessing, the learning algorithm and their hyperparameters together, the CASH problem, usually by Bayesian optimisation from meta-learned starting points, and combines the models it trains into an ensemble.'
+tags: [model-selection, hyperparameters, automl, worked-example]
+aliases: [AutoML, Auto-WEKA, auto-sklearn, ensemble selection, Caruana ensemble selection, pipeline search, CASH problem]
+requires: [hyperparameter-search, bayesian-optimisation]
+related: [hyperparameter-search-spaces, warm-starting-hyperparameter-optimisation, cross-validating-a-pipeline, stacking, neural-architecture-search, sequential-model-based-algorithm-configuration, nested-cross-validation, tabular-benchmark-datasets]
+references: [thornton2013, feurer2015autosklearn, feurer2022autosklearn2, caruana2004ensemble, olson2016tpot, erickson2020autogluon, gijsbers2024amlb, hutter2019automl]
+status: draft
+updated: 2026-10-13
+---
+
+import { AutoMlLoop } from './AutoMlLoop'
+
+<Definition>
+**Automated machine learning** (<Gloss name="automl" />) is the automatic construction of a predictive pipeline from
+data: the preprocessing steps, the learning algorithm and all their hyperparameters <Cite id="hutter2019automl" />.
+Its core is the <Gloss name="cash" /> problem. Given learning algorithms $A^{(1)}, \dots, A^{(J)}$ with hyperparameter
+spaces $\Lambda^{(1)}, \dots, \Lambda^{(J)}$ and $K$ validation splits of the data $\Dcal$, it seeks
+
+$$
+(A^\star, \lambdavec^\star) \in \argmin_{j \in \{1, \dots, J\},\ \lambdavec \in \Lambda^{(j)}} \frac{1}{K}\sum_{k=1}^{K}
+L\paren{A^{(j)}_{\lambdavec},\ \Dcal^{(k)}_\text{train},\ \Dcal^{(k)}_\text{valid}},
+$$
+
+where $L(A_{\lambdavec}, \Dcal_\text{train}, \Dcal_\text{valid})$ is the validation loss of algorithm $A$ with
+hyperparameters $\lambdavec$ trained on $\Dcal_\text{train}$ <Cite id="thornton2013" />. Most systems solve it by
+Bayesian optimisation, start the search from configurations that worked on earlier data sets, and return an ensemble
+of the models trained during the search.
+</Definition>
+
+## Intuition
+
+Applying machine learning to a new table of data involves a chain of choices. Missing values must be imputed, categories
+encoded, features scaled or selected, and a learner chosen and tuned. Each choice interacts with the others: the best
+penalty of a linear model depends on how the features were scaled, and whether feature selection helps depends on the
+learner. An expert makes these choices from experience and a few experiments. AutoML makes them by search, treating the
+whole pipeline as one configuration and the whole chain of choices as one search space.
+
+The approach rests on three observations. Algorithm selection and hyperparameter tuning are the same kind of problem,
+so one optimiser can do both. Past data sets carry information about which pipelines tend to work. And a search
+trains many good models, so combining several of them usually beats keeping only the best.
+
+AutoML is model selection at its widest. Every risk of model selection applies with more force, because the number of
+candidates compared on the validation data is larger than in any hand-run search.
+
+## The CASH problem
+
+The CASH problem becomes an ordinary hyperparameter search by adding one categorical **root** hyperparameter
+$\lambda_r \in \{1, \dots, J\}$ that names the algorithm. The search space is
+
+$$
+\Lambda = \{\lambda_r\} \cup \Lambda^{(1)} \cup \dots \cup \Lambda^{(J)},
+$$
+
+and the hyperparameters of $\Lambda^{(j)}$ are **conditional**: they are active only when $\lambda_r = j$
+<Cite id="thornton2013" />. Preprocessing steps add further root-level choices, each with conditional children. The
+result is a tree-structured space (see <NoteLink to="hyperparameter-search-spaces">hyperparameter search
+spaces</NoteLink>).
+
+A tree-structured space is the union of its branches, not their product. Take three learners: logistic regression with
+a penalty $C$; a support vector machine with $C$, a kernel width $\gamma$ and a kernel choice; and a random forest with
+the number of trees, the fraction of features tried at each split and the minimum leaf size. The joint space has
+$1 + 1 + 3 + 3 = 8$ hyperparameters, but a single configuration activates at most 4 of them. A search method must cope
+with this structure. Gaussian-process surrogates assume a fixed-dimensional input and handle it poorly. Random-forest
+surrogates, as in <NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink>, and the
+<NoteLink to="tree-structured-parzen-estimator">tree-structured Parzen estimator</NoteLink> handle it directly, which is
+why AutoML systems use them.
+
+The validation loss in the CASH objective is computed by $K$-fold cross-validation or a single hold-out split. Every
+fitted step of the pipeline, from the imputer to the learner, is refitted on each training split
+(see <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).
+
+## Systems
+
+<AutoMlLoop />
+
+- **Auto-WEKA** posed the CASH problem and solved it over the WEKA library: 27 base classifiers, 10 meta-methods,
+  2 ensemble methods and a choice of feature-selection methods, 786 hyperparameters in a four-level tree. It searched
+  the space with SMAC and with TPE <Cite id="thornton2013" />.
+- **Auto-sklearn** searched pipelines of scikit-learn: 15 classifiers, 14 feature preprocessing methods and 4 data
+  preprocessing methods, 110 hyperparameters in all. It added two components to Bayesian optimisation by SMAC. A warm
+  start ran first the best configurations of the 25 most similar of 140 earlier data sets. An ensemble of 50 was built
+  from all the models evaluated during the search, by ensemble selection <Cite id="feurer2015autosklearn" />.
+- **Auto-sklearn 2.0** replaced the similarity-based warm start with a fixed portfolio of 32 pipelines, allocated
+  budget by successive halving, and chose between hold-out and cross-validation with a learned policy
+  <Cite id="feurer2022autosklearn2" />. The portfolio construction is described in
+  <NoteLink to="warm-starting-hyperparameter-optimisation">warm-starting hyperparameter optimisation</NoteLink>.
+- **TPOT** represents a pipeline as a tree of operators and searches over trees by genetic programming, so the shape of
+  the pipeline is searched as well as its settings <Cite id="olson2016tpot" />.
+- **AutoGluon-Tabular** does not search the CASH space. It trains a fixed list of model types with good defaults,
+  bags each one, and stacks them in several layers. Its authors report that this combination uses a time budget
+  better than searching for the single best model <Cite id="erickson2020autogluon" />.
+
+The AutoML Benchmark compared 9 frameworks on 71 classification and 33 regression tasks under time limits of one and
+four hours. AutoGluon had the highest average rank, and in most scenarios the frameworks beat the strongest baseline,
+a tuned random forest. The most accurate frameworks also produced the slowest models at prediction time, sometimes by
+orders of magnitude <Cite id="gijsbers2024amlb" />.
+
+## Ensembles of the search
+
+A search over $N$ configurations trains $N$ models, and the default output, the single best, discards the rest. Many
+of the others are nearly as good and make different errors. **Ensemble selection** combines them using only their
+predictions on the validation data <Cite id="caruana2004ensemble" />.
+
+1. Store every model's predictions on the validation set.
+2. Start from an empty ensemble. The ensemble predicts the unweighted average of its members' predictions.
+3. Add the model, from the whole library, whose addition gives the lowest validation loss. A model may be added more
+   than once.
+4. Repeat for a fixed number of rounds, and return the ensemble with the lowest validation loss seen.
+
+A model added $c$ times out of $R$ rounds has weight $c/R$, so the result is a weighted average with non-negative
+weights that sum to 1. Selection **with replacement** keeps the validation loss from rising once the useful models are
+used up, because re-adding a good model is always available. Caruana et al. built libraries of about 2000 models and
+optimised the ensemble directly for the metric of interest, such as accuracy or the area under the ROC curve
+<Cite id="caruana2004ensemble" />. Feurer et al. found that stacking and direct numerical optimisation of the weights
+overfitted the validation set, while ensemble selection was fast and robust <Cite id="feurer2015autosklearn" />.
+
+Ensemble selection is a form of <NoteLink to="stacking">stacking</NoteLink> with a constrained meta-model. The
+constraint is what makes it safe to fit on a small validation set.
+
+## Worked example
+
+A search has trained three regression models. Their predictions on four validation points with targets
+$\yvec = (3, 1, 4, 2)$ are:
+
+| model | point 1 | point 2 | point 3 | point 4 | validation MSE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | 2.6 | 1.6 | 3.4 | 2.4 | 0.260 |
+| B | 3.6 | 0.8 | 4.8 | 1.4 | 0.350 |
+| C | 3.2 | 1.4 | 4.4 | 2.6 | 0.180 |
+
+The <Gloss name="mse">mean squared error</Gloss> of A is
+$\paren{0.4^2 + 0.6^2 + 0.6^2 + 0.4^2}/4 = 0.26$, and similarly for B and C.
+
+1. **Round 1.** The best single model is C, with 0.180. The ensemble is $\{C\}$.
+2. **Round 2.** Averaging C with A gives errors $(-0.1, 0.5, -0.1, 0.5)$ and a mean squared error of 0.130. Averaging
+   C with B gives $(0.4, 0.1, 0.6, 0.0)$ and 0.1325. Adding C again leaves 0.180. Selection adds A.
+3. **Round 3.** The members' errors in $\{C, A\}$ sum to $(-0.2, 1.0, -0.2, 1.0)$ over the four points. Adding B, whose
+   errors are $(0.6, -0.2, 0.8, -0.6)$, gives the sum $(0.4, 0.8, 0.6, 0.4)$; divided by 3, the errors are
+   $(0.13, 0.27, 0.20, 0.13)$ and the mean squared error is 0.037. Adding A gives 0.153 and adding C gives 0.127.
+   Selection adds B, and the ensemble is the equal average of A, B and C.
+4. **Rounds 4 and 5.** Adding A gives 0.041, then adding B gives 0.025. The ensemble $\{C, A, B, A, B\}$ has weights
+   $0.2$, $0.4$ and $0.4$.
+
+The validation error fell from 0.180 for the best single model to 0.037 with three equal members and 0.025 with
+tuned weights. The last fall is suspect. Four validation points cannot support three weights tuned to the second
+decimal. With replacement, each round adds a degree of freedom in the weights, and the validation loss of the ensemble
+falls as the weights adapt to the noise of those four points. The same validation data chose the configurations, the
+models and the weights, so none of these numbers estimates the error on new data.
+
+## Assessing an AutoML system
+
+An AutoML run is a learning algorithm whose output is a pipeline. Its own validation score is a selection statistic
+over thousands of candidates, and is optimistic in the way described in <NoteLink to="overfitting-in-model-selection">
+overfitting in model selection</NoteLink>. Honest assessment needs data the run never saw: a held-out test set, or
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink> with the whole AutoML run inside each outer
+fold. Benchmarks such as the AutoML Benchmark fix the time budget and the hardware, and score every framework on the
+same outer test folds <Cite id="gijsbers2024amlb" />.
+
+## Pitfalls
+
+- **Reporting the search's own score.** The best validation loss of a large search, and the validation loss of the
+  ensemble built on the same data, are both optimistic. Report a test score.
+- **Preprocessing outside the search.** Imputing, encoding or selecting features on all the data before handing it to
+  an AutoML system leaks the validation folds into every candidate. Give the system raw data and let it fit every step
+  inside its folds.
+- **A validation set too small for the search.** Thousands of candidates, plus ensemble weights, compared on a few
+  hundred validation rows will fit the noise. Prefer <NoteLink to="cross-validation">cross-validation</NoteLink> for
+  small data, and limit the ensemble.
+- **Unequal budgets.** AutoML frameworks, and AutoML against a hand-tuned baseline, are comparable only at the same
+  time limit and hardware. A framework that fails or times out on a task needs an explicit rule, such as scoring it as
+  the constant predictor.
+- **Ignoring prediction cost.** An ensemble of 50 stacked models can be far more accurate and far slower than one
+  tuned model. Deployment constraints belong in the objective, not in an afterthought.
+- **Treating AutoML as a substitute for problem framing.** The search optimises the loss it is given on the data it is
+  given. The choice of target, metric, split and features remains the user's, and leakage in the data defeats any
+  search.

@@ -1,0 +1,69 @@
+---
+title: 'Training at scale'
+kind: overview
+summary: 'Training models too large for one accelerator: where the memory goes, mixed-precision arithmetic with loss scaling, data parallelism with all-reduce, ZeRO sharding of optimiser state, tensor and pipeline model parallelism, and mixture-of-experts layers.'
+tags: [engineering, distributed-training, deep-learning, scaling]
+aliases: [distributed training, large-scale training, parallel training]
+requires: [stochastic-gradient-descent-theory, backpropagation]
+related: [efficient-inference, deployment-and-monitoring]
+references: [rajbhandari2020, shoeybi2019, narayanan2021]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Training at scale** is the set of techniques that let one model be trained on many accelerators at once, when its
+parameters, optimiser state or activations do not fit on a single device, or when one device would take too long. The
+techniques split the data, the model state or the model itself across devices, and reduce the number of bytes each
+value occupies.
+</Definition>
+
+## What it is for
+
+A <Gloss name="language-model">language model</Gloss> with tens of billions of parameters needs hundreds of gigabytes
+for its weights, gradients and optimiser state alone, several times the memory of the largest single accelerator. Large
+language and vision models are trained with a combination of the methods here, chosen by where the memory goes and how
+fast the devices can communicate <Cite id="narayanan2021" />.
+
+## Main ideas
+
+**Account for the memory first.** <NoteLink to="memory-footprint-of-training" /> splits training memory into model
+state and activations. Mixed-precision Adam needs 16 bytes per parameter for weights, gradients and the two moment
+estimates. Activations grow with batch size, sequence length and width, and for long sequences they dominate. Each
+technique below removes one of these terms.
+
+**Use fewer bits per number.** <NoteLink to="mixed-precision-training" /> runs matrix products in 16-bit floating point
+while keeping a 32-bit master copy of the weights, so small updates are not rounded away. Loss scaling keeps small fp16
+gradients from rounding to zero. The bf16 format has the exponent range of fp32 and needs no loss scaling.
+
+**Split the data.** <NoteLink to="data-parallelism" /> gives each of $N$ devices a full replica of the model and $1/N$
+of each mini-batch. An all-reduce averages the gradients after each backward pass. A ring all-reduce sends about twice
+the gradient size per device, almost independent of $N$, so data parallelism scales well until the model no longer fits.
+
+**Shard the redundant state.** Plain data parallelism stores the full model state on every device.
+<NoteLink to="zero-and-sharded-optimisers" /> partitions the optimiser state, then the gradients, then the weights
+across devices, cutting the per-device memory from $16\Psi$ bytes for $\Psi$ parameters towards $16\Psi/N$
+<Cite id="rajbhandari2020" />.
+
+**Split the model.** <NoteLink to="model-parallelism" /> divides the network itself. Tensor parallelism splits each
+layer's weight matrices and needs an all-reduce inside every block, so it suits devices with fast links
+<Cite id="shoeybi2019" />. Pipeline parallelism gives each device a run of layers and streams micro-batches through
+them, at the cost of idle time at the start and end of each step.
+
+**Grow parameters without growing compute.** A <NoteLink to="mixture-of-experts" /> layer holds many expert networks
+and routes each token to a few of them. Parameters grow with the number of experts while computation per token stays
+fixed. A load-balancing loss or bias keeps tokens spread across the experts.
+
+## How the notes fit together
+
+Start with <NoteLink to="memory-footprint-of-training" />, which gives the budget the other notes reduce. Mixed
+precision comes next and sets the bytes per parameter. Data parallelism, ZeRO and model parallelism are three ways to
+use more devices, in increasing order of how much each device's model differs. Mixture of experts is an architectural
+change rather than a parallelism scheme, and comes last.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="backpropagation" />, <NoteLink to="stochastic-gradient-descent-theory" /> and the
+<NoteLink to="adam" /> optimiser; the activation counts refer to the <NoteLink to="transformer" />. Making the trained
+model cheap to run is the subject of <NoteLink to="efficient-inference" />. Floating-point formats and rounding are
+covered in the numerical-methods chapter of Part I.

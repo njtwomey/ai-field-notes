@@ -1,5 +1,5 @@
-import { BookOpen, Check, ChevronDown, ChevronRight, CornerDownRight, Ellipsis, LayoutGrid } from 'lucide-react'
-import { Fragment, useState } from 'react'
+import { BookOpen, Check, CornerDownRight, LayoutGrid } from 'lucide-react'
+import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import {
   DropdownMenu,
@@ -10,12 +10,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { kindIcons } from '@/components/layout/kind-icon'
 import {
   browseUrl,
   categoryIndexNote,
   indexFirst,
-  kindLabels,
   categoryTrail,
   notesInCategory,
   noteUrl,
@@ -26,88 +24,150 @@ import {
 import { cn } from '@/lib/utils'
 
 /**
- * A note's place in the taxonomy as a trail of dropdowns, ending in the note itself. Each category opens its siblings,
- * so a reader can move sideways at any level without going back; the note opens the other notes in its category.
- * Only the note's category and its parent show at first: the categories above them fold into an ellipsis that expands
- * the trail in place, and fold again on the next note. On narrow screens only the note crumb shows.
+ * How many leading crumbs to fold into the ellipsis so the trail fits on one line. The trail renders in full, then
+ * folds one more crumb per layout pass while it overflows, all before paint; a change in the width available to it (its
+ * parent's width) unfolds it and measures again. `max` is the most crumbs that may fold.
  */
-/** Categories shown before the trail folds: the note's category and its parent. */
-const SHOWN = 2
+function useFold(key: string, max: number) {
+  const ref = useRef<HTMLElement>(null)
+  const [state, setState] = useState({ key, fold: 0 })
+  const fold = state.key === key ? state.fold : 0
+  if (state.key !== key) setState({ key, fold: 0 })
 
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && fold < max && el.scrollWidth > el.clientWidth + 1) setState({ key, fold: fold + 1 })
+  })
+
+  useLayoutEffect(() => {
+    const parent = ref.current?.parentElement
+    if (!parent) return
+    let width = parent.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (parent.clientWidth === width) return
+      width = parent.clientWidth
+      setState((s) => ({ ...s, fold: 0 }))
+    })
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [])
+
+  return { ref, fold }
+}
+
+/**
+ * A note's place in the taxonomy as a /-joined trail ending in the note itself. Each crumb opens a menu on click: a
+ * category lists its siblings, so a reader can move sideways at any level; the note lists the other notes in its
+ * category. The whole path shows when it fits; otherwise the outermost categories fold into an ellipsis that opens them
+ * as a menu, and on the narrowest screens only the note shows.
+ */
 export function TaxonomyTrail({ note, className }: { note: NoteMeta; className?: string }) {
   const trail = categoryTrail(note.category)
-  const Icon = kindIcons[note.kind]
-  // Expanded for one note only, like the browse panel: arriving at another note finds the trail folded.
-  const [expandedFor, setExpandedFor] = useState<string | null>(null)
-  const folded = expandedFor !== note.slug && trail.length > SHOWN
-  const shown = folded ? trail.slice(-SHOWN) : trail
+  const { ref, fold } = useFold(note.slug, trail.length)
   return (
-    <nav aria-label="Breadcrumb" className={cn('flex min-w-0 items-center gap-x-1 text-sm', className)}>
-      {folded && (
+    <nav
+      ref={ref}
+      aria-label="Breadcrumb"
+      className={cn('flex min-w-0 items-center overflow-hidden text-[13px] whitespace-nowrap', className)}
+    >
+      {fold > 0 && (
         <>
-          <button
-            type="button"
-            onClick={() => setExpandedFor(note.slug)}
-            aria-label={`Show the full path: ${trail
-              .slice(0, -SHOWN)
-              .map((c) => c.title)
-              .join(' › ')}`}
-            title={trail
-              .slice(0, -SHOWN)
-              .map((c) => c.title)
-              .join(' › ')}
-            className={cn(triggerClass, 'hidden text-muted-foreground md:inline-flex')}
-          >
-            <Ellipsis className="size-4" aria-hidden />
-          </button>
-          <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" aria-hidden />
+          <FoldedCrumbs nodes={trail.slice(0, fold)} />
+          <Slash />
         </>
       )}
-      {shown.map((c) => {
+      {trail.slice(fold).map((c) => {
         const i = trail.indexOf(c)
         return (
           <Fragment key={c.path}>
-            <CategoryCrumb node={c} siblings={i === 0 ? taxonomy : trail[i - 1].children} />
-            <ChevronRight className="hidden size-3.5 shrink-0 text-muted-foreground md:block" aria-hidden />
+            <CategoryCrumb node={c} siblings={i === 0 ? taxonomy : trail[i - 1].children} className="shrink-0" />
+            <Slash />
           </Fragment>
         )
       })}
-      <Icon className="ml-1 size-3.5 shrink-0 text-muted-foreground" aria-label={kindLabels[note.kind]} />
-      <NoteCrumb note={note} />
+      <NoteCrumb note={note} className={cn(fold < trail.length && 'shrink-0')} />
     </nav>
   )
 }
 
 /**
- * A category's place in the taxonomy as the same trail of dropdowns, for the browse page: "All topics", each ancestor,
- * then the category itself in bold. The last crumb also opens the category's subtopics, so the tree can be walked both
- * up and down.
+ * A category's place in the taxonomy as the same trail, for the browse page: "All topics", each ancestor, then the
+ * category itself in bold. The last crumb also opens the category's subtopics, so the tree can be walked both up and
+ * down. Ancestors fold into an ellipsis when the trail does not fit.
  */
 export function CategoryTrail({ path, className }: { path: string; className?: string }) {
   const trail = categoryTrail(path)
+  const { ref, fold } = useFold(path, Math.max(0, trail.length - 1))
   return (
-    <nav aria-label="Breadcrumb" className={cn('flex min-w-0 flex-wrap items-center gap-x-1 text-sm', className)}>
-      <Link to={browseUrl()} className={cn(triggerClass, 'text-muted-foreground')}>
+    <nav
+      ref={ref}
+      aria-label="Breadcrumb"
+      className={cn('flex min-w-0 items-center overflow-hidden text-[13px] whitespace-nowrap', className)}
+    >
+      <Link to={browseUrl()} className={cn(triggerClass, 'shrink-0 text-muted-foreground')}>
         All topics
       </Link>
-      {trail.map((c, i) => (
-        <Fragment key={c.path}>
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <CategoryCrumb
-            node={c}
-            siblings={i === 0 ? taxonomy : trail[i - 1].children}
-            current={i === trail.length - 1}
-            className="inline-flex"
-          />
-        </Fragment>
-      ))}
+      {fold > 0 && (
+        <>
+          <Slash />
+          <FoldedCrumbs nodes={trail.slice(0, fold)} />
+        </>
+      )}
+      {trail.slice(fold).map((c) => {
+        const i = trail.indexOf(c)
+        const current = i === trail.length - 1
+        return (
+          <Fragment key={c.path}>
+            <Slash />
+            <CategoryCrumb
+              node={c}
+              siblings={i === 0 ? taxonomy : trail[i - 1].children}
+              current={current}
+              className={cn(current && fold === trail.length - 1 ? 'min-w-0' : 'shrink-0')}
+            />
+          </Fragment>
+        )
+      })}
     </nav>
   )
 }
 
+function Slash() {
+  return (
+    <span className="shrink-0 px-0.5 text-muted-foreground/50 select-none" aria-hidden>
+      /
+    </span>
+  )
+}
+
 const triggerClass =
-  'inline-flex min-w-0 items-center gap-0.5 rounded-md px-1 py-0.5 hover:bg-muted hover:text-foreground ' +
+  'inline-flex min-w-0 items-center rounded px-1 py-0.5 hover:bg-muted hover:text-foreground cursor-pointer ' +
   'data-popup-open:bg-muted data-popup-open:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+/** The categories folded out of the trail, outermost first, as one ellipsis that opens them as a menu. */
+function FoldedCrumbs({ nodes }: { nodes: CategoryNode[] }) {
+  const navigate = useNavigate()
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Show the full path: ${nodes.map((c) => c.title).join(' / ')}`}
+        className={cn(triggerClass, 'shrink-0 text-muted-foreground')}
+      >
+        …
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-auto min-w-56">
+        {nodes.map((c, i) => (
+          <DropdownMenuItem key={c.path} onClick={() => navigate(browseUrl({ c: c.path }))}>
+            <span style={{ paddingLeft: `${i * 0.75}rem` }}>{c.title}</span>
+            <span className="ml-auto pl-4 text-xs text-muted-foreground tabular-nums">
+              {notesInCategory(c.path).length}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 function CategoryCrumb({
   node,
@@ -117,7 +177,7 @@ function CategoryCrumb({
 }: {
   node: CategoryNode
   siblings: CategoryNode[]
-  /** The category being viewed: set in bold, and its menu also lists its subtopics. */
+  /** The category being viewed: set in the text colour, and its menu also lists its subtopics. */
   current?: boolean
   className?: string
 }) {
@@ -127,15 +187,9 @@ function CategoryCrumb({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-current={current ? 'page' : undefined}
-        className={cn(
-          triggerClass,
-          'hidden md:inline-flex',
-          current ? 'font-semibold text-foreground' : 'text-muted-foreground',
-          className,
-        )}
+        className={cn(triggerClass, current ? 'font-medium text-foreground' : 'text-muted-foreground', className)}
       >
         <span className="truncate">{node.title}</span>
-        <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-auto min-w-56">
         {lead && (
@@ -207,9 +261,8 @@ export function NoteCrumb({ note, className }: { note: NoteMeta; className?: str
   const lead = categoryIndexNote(note.category)
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger aria-current="page" className={cn(triggerClass, 'font-semibold text-foreground', className)}>
+      <DropdownMenuTrigger aria-current="page" className={cn(triggerClass, 'font-medium text-foreground', className)}>
         <span className="truncate">{note.title}</span>
-        <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-auto max-w-sm min-w-56">
         <DropdownMenuGroup>

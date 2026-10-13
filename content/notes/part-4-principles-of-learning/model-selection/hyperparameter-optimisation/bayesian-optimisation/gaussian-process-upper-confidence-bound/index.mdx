@@ -1,0 +1,249 @@
+---
+title: 'Gaussian process upper confidence bound'
+kind: concept
+summary: 'GP-UCB evaluates the candidate with the most optimistic posterior bound, $\mu_{t-1} - \sqrt{\beta_t}\,\sigma_{t-1}$ when minimising. With $\beta_t$ growing like $\log t$, its cumulative regret is at most $\sqrt{C T \beta_T \gamma_T}$, where $\gamma_T$ is the maximum information gain of the kernel.'
+tags: [model-selection, optimisation, bayesian, theory, worked-example]
+aliases: [GP-UCB, GP-LCB, Gaussian process lower confidence bound, maximum information gain, GP bandit]
+requires: [acquisition-functions, upper-confidence-bound-algorithm, mutual-information]
+related: [bayesian-optimisation, expected-improvement, entropy-search, thompson-sampling, multi-armed-bandit, union-bound, reproducing-kernel-hilbert-space, covariance-functions]
+references: [srinivas2010, vakili2021, russo2014, auer2002, frazier2018, garnett2023, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { BoWalkthrough } from '../_shared/BoWalkthrough'
+
+<Definition>
+**GP-UCB** is a <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> rule with a
+<Gloss name="gp">Gaussian-process</Gloss> surrogate. To minimise $f$, at step $t$ it evaluates
+
+$$
+\lambdavec_t = \argmin_{\lambdavec \in \Lambda} \paren{\mu_{t-1}(\lambdavec) - \sqrt{\beta_t}\,\sigma_{t-1}(\lambdavec)},
+$$
+
+the candidate whose <NoteLink to="acquisition-functions">lower confidence bound</NoteLink> is smallest, where
+$\mu_{t-1}$ and $\sigma_{t-1}$ are the posterior mean and standard deviation after $t - 1$ evaluations and $\beta_t$ is
+an exploration weight. Srinivas, Krause, Kakade and Seeger gave a schedule for $\beta_t$ under which the **cumulative
+regret** $R_T = \sum_{t=1}^{T}\paren{f(\lambdavec_t) -
+f(\lambdavec^\star)}$ grows more slowly than $T$, where $\lambdavec^\star$ minimises $f$ <Cite id="srinivas2010" />. The
+name comes from the maximisation form, $\mu_{t-1} + \sqrt{\beta_t}\,\sigma_{t-1}$.
+</Definition>
+
+## Intuition
+
+GP-UCB carries the bandit rule <NoteLink to="upper-confidence-bound-algorithm">UCB1</NoteLink> to a continuum of arms
+whose values are correlated. UCB1 adds to each arm's sample mean a bonus that shrinks with the arm's pulls. GP-UCB adds
+to each candidate's posterior mean a multiple of its posterior standard deviation, which shrinks wherever evaluations
+are nearby. One evaluation narrows the posterior over a whole neighbourhood, so the method learns about candidates it
+has never tried.
+
+The rule is **optimism in the face of uncertainty**: act as if each candidate were as good as the posterior plausibly
+allows. Optimism corrects itself. If a candidate is chosen for its optimistic bound and turns out worse, the posterior
+around it rises and narrows, and its bound stops winning. If the true minimiser looks unpromising, its bound stays low
+while it is unexplored, and it is eventually evaluated.
+
+The weight $\beta_t$ sets how optimistic the bound is. A bound $\sqrt{\beta_t}$ standard deviations below the mean holds
+for one candidate with probability about $1 - e^{-\beta_t/2}$. To hold for every candidate and every step at once, the
+bound must widen slowly as the number of candidates and steps grows. That is why $\beta_t$ grows with $t$.
+
+## Regret
+
+The analysis measures a search by its regret rather than by its final answer. The **instantaneous regret** of step $t$
+is $r_t = f(\lambdavec_t) - f(\lambdavec^\star) \ge 0$, the excess of the evaluated value over the minimum. The
+cumulative regret is $R_T = \sum_{t \le T} r_t$. A rule is **no-regret** when $R_T/T \to 0$: on average, its evaluations
+approach the minimum.
+
+No-regret also bounds the quality of the best evaluation. The smallest instantaneous regret is at most the average, so
+
+$$
+\min_{t \le T} f(\lambdavec_t) - f(\lambdavec^\star) \le \frac{R_T}{T}.
+$$
+
+For <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> this is the guarantee that matters: the best
+configuration evaluated gets close to the best in $\Lambda$. The guarantee is about the true values $f(\lambdavec_t)$,
+not about the noisy observed values.
+
+## The regret bound on a finite set of candidates
+
+Take a finite set $\Lambda$ of $\abs{\Lambda}$ candidates, such as a grid. Assume that $f$ is a sample from the
+Gaussian-process prior $\GP(0, k)$ with $k(\lambdavec, \lambdavec) \le 1$, and that each observation is
+$y_t = f(\lambdavec_t) + \varepsilon_t$ with independent noise $\varepsilon_t \sim \Gauss(0, \sigma_n^2)$. The surrogate
+is that same Gaussian process, so its posterior is the true conditional distribution of $f$. Fix a failure probability
+$\delta \in (0, 1)$ and set
+
+$$
+\beta_t = 2\log\paren{\frac{\abs{\Lambda}\,t^2\pi^2}{6\delta}}.
+$$
+
+**Theorem** <Cite id="srinivas2010" />. With probability at least $1 - \delta$, for every $T \ge 1$,
+
+$$
+R_T \le \sqrt{C_1 T \beta_T \gamma_T}, \qquad C_1 = \frac{8}{\log(1 + \sigma_n^{-2})},
+$$
+
+where $\gamma_T$ is the maximum information gain defined below. The proof has four steps.
+
+**Step 1: the bounds hold everywhere at once.** Given the first $t - 1$ observations, $f(\lambdavec)$ is
+$\Gauss(\mu_{t-1}(\lambdavec), \sigma_{t-1}^2(\lambdavec))$. A standard normal variable $U$ satisfies
+$\prob(\abs{U} > c) \le e^{-c^2/2}$ for $c > 0$. So
+
+$$
+\prob\paren{\abs{f(\lambdavec) - \mu_{t-1}(\lambdavec)} > \sqrt{\beta_t}\,\sigma_{t-1}(\lambdavec)} \le e^{-\beta_t/2}
+= \frac{6\delta}{\abs{\Lambda}\,\pi^2 t^2}.
+$$
+
+By the <NoteLink to="union-bound">union bound</NoteLink> over the $\abs{\Lambda}$ candidates and all steps $t \ge 1$,
+the probability that any bound fails is at most $\sum_{t \ge 1} 6\delta/(\pi^2 t^2) = \delta$, because
+$\sum_{t \ge 1} 1/t^2 = \pi^2/6$. The schedule for $\beta_t$ was chosen to make this sum equal $\delta$. From here on,
+assume every bound holds.
+
+**Step 2: the regret of a step is at most the width of the chosen interval.** The rule picks $\lambdavec_t$ with the
+smallest lower bound, so in particular no larger than the lower bound at $\lambdavec^\star$. With
+$s = \sqrt{\beta_t}$,
+
+$$
+f(\lambdavec^\star) \ge \mu_{t-1}(\lambdavec^\star) - s\,\sigma_{t-1}(\lambdavec^\star)
+\ge \mu_{t-1}(\lambdavec_t) - s\,\sigma_{t-1}(\lambdavec_t).
+$$
+
+The upper bound at the chosen point gives $f(\lambdavec_t) \le \mu_{t-1}(\lambdavec_t) + s\,\sigma_{t-1}(\lambdavec_t)$.
+Subtracting the two,
+
+$$
+r_t = f(\lambdavec_t) - f(\lambdavec^\star) \le 2\sqrt{\beta_t}\,\sigma_{t-1}(\lambdavec_t).
+$$
+
+Optimism pays here. The regret is charged to the posterior uncertainty at the point the rule chose to evaluate, and
+evaluating there reduces that uncertainty.
+
+**Step 3: the total uncertainty evaluated is bounded by the information gained.** Square and sum Step 2, using that
+$\beta_t$ increases with $t$:
+
+$$
+\sum_{t=1}^{T} r_t^2 \le 4\beta_T\sum_{t=1}^{T}\sigma_{t-1}^2(\lambdavec_t).
+$$
+
+Write $u_t = \sigma_n^{-2}\sigma_{t-1}^2(\lambdavec_t)$. Since the prior variance is at most 1, $u_t$ lies in
+$[0, \sigma_n^{-2}]$. On that interval the concave function $\log(1 + u)$ lies above its chord from 0 to
+$\sigma_n^{-2}$, so $u \le \sigma_n^{-2}\log(1 + u)/\log(1 + \sigma_n^{-2})$. Multiplying by $\sigma_n^2$,
+
+$$
+\sigma_{t-1}^2(\lambdavec_t) \le \frac{\log(1 + u_t)}{\log(1 + \sigma_n^{-2})}.
+$$
+
+The sum $\frac12\sum_t \log(1 + u_t)$ is exactly the information the observations $y_1, \dots, y_T$ carry about $f$
+(derived below), and it is at most $\gamma_T$. So
+$\sum_t \sigma_{t-1}^2(\lambdavec_t) \le 2\gamma_T/\log(1 + \sigma_n^{-2})$ and
+
+$$
+\sum_{t=1}^{T} r_t^2 \le \frac{8\beta_T\gamma_T}{\log(1 + \sigma_n^{-2})} = C_1\beta_T\gamma_T.
+$$
+
+**Step 4: from squares to the sum.** By the Cauchy–Schwarz inequality,
+$R_T = \sum_t r_t \cdot 1 \le \sqrt{T\sum_t r_t^2} \le \sqrt{C_1 T \beta_T \gamma_T}$.
+
+<Derivation title="The information in the observations">
+The <NoteLink to="mutual-information">mutual information</NoteLink> between the observations $\yvec_T = (y_1, \dots,
+y_T)$ and $f$ is $I(\yvec_T; f) = h(\yvec_T) - h(\yvec_T \mid f)$, with $h$ the
+<NoteLink to="differential-entropy">differential entropy</NoteLink>. Given $f$, the observations are $f(\lambdavec_t)$
+plus independent noise, so $h(\yvec_T \mid f) = \frac{T}{2}\log(2\pi e\sigma_n^2)$.
+
+By the chain rule, $h(\yvec_T) = \sum_t h(y_t \mid y_1, \dots, y_{t-1})$. Given the earlier observations, $y_t$ is
+Gaussian with variance $\sigma_{t-1}^2(\lambdavec_t) + \sigma_n^2$: the posterior variance of $f(\lambdavec_t)$ plus
+the noise. A Gaussian of variance $v$ has entropy $\frac12\log(2\pi e v)$. Subtracting,
+
+$$
+I(\yvec_T; f) = \frac12\sum_{t=1}^{T}\log\frac{\sigma_{t-1}^2(\lambdavec_t) + \sigma_n^2}{\sigma_n^2}
+= \frac12\sum_{t=1}^{T}\log\paren{1 + \sigma_n^{-2}\sigma_{t-1}^2(\lambdavec_t)}.
+$$
+
+The points $\lambdavec_t$ may depend on earlier observations, but each conditional distribution is still Gaussian with
+that variance, so the identity holds for any sequential rule.
+</Derivation>
+
+## The maximum information gain
+
+The bound depends on the kernel through the **maximum information gain**, the most that any $T$ noisy evaluations can
+reveal about $f$:
+
+$$
+\gamma_T = \max_{A \subseteq \Lambda,\ \abs{A} = T} I(\yvec_A; f) = \max_{A} \frac12\log\det\paren{\eye + \sigma_n^{-2}\Kmat_A},
+$$
+
+where $\Kmat_A$ is the kernel matrix of the points in $A$. A kernel whose functions are smooth makes nearby values
+nearly redundant, so $\gamma_T$ grows slowly. Known rates for inputs in $d$ dimensions are:
+
+| kernel | $\gamma_T$ |
+| --- | --- |
+| linear | $O(d\log T)$ |
+| squared exponential | $O\paren{(\log T)^{d+1}}$ |
+| Matérn with smoothness $\nu$ | $O\paren{T^{d/(2\nu + d)}(\log T)^{2\nu/(2\nu + d)}}$ |
+
+The first two are from Srinivas et al. <Cite id="srinivas2010" />. The Matérn rate is Vakili, Khezeli and Picheny's,
+tight up to logarithmic factors <Cite id="vakili2021" />. In each case $\gamma_T$ grows more slowly than $T$, so
+$R_T/T \le \sqrt{C_1\beta_T\gamma_T/T} \to 0$ and GP-UCB is no-regret. For the <Gloss name="rbf-kernel">squared
+exponential kernel</Gloss> the dimension enters only through the power of $\log T$. For a
+<NoteLink to="covariance-functions">Matérn kernel</NoteLink> the exponent $d/(2\nu + d)$ approaches 1 as $d$ grows,
+which is one form of the curse of dimensionality in
+Bayesian optimisation.
+
+The analysis extends beyond a finite set. For a compact box in $d$ dimensions and a kernel whose sample paths are smooth
+enough, $\beta_t$ gains a term of order $d\log t$. For a fixed function $f$ with a bounded norm in the kernel's
+<NoteLink to="reproducing-kernel-hilbert-space">reproducing kernel Hilbert space</NoteLink> and bounded noise,
+$\beta_t = 2B + 300\gamma_t\log^3(t/\delta)$, with $B$ an upper bound on the squared norm <Cite id="srinivas2010" />.
+Russo and Van Roy turned the same confidence-bound argument into a Bayesian regret bound for
+<Gloss name="thompson-sampling">Thompson sampling</Gloss> <Cite id="russo2014" />.
+
+## Worked example
+
+**The schedule.** On a grid of $\abs{\Lambda} = 201$ candidates with $\delta = 0.1$,
+
+$$
+\beta_1 = 2\log\frac{201 \times 1 \times 9.87}{0.6} = 2\log 3306 = 16.2.
+$$
+
+At $t = 10$ the argument gains a factor of $10^2$ and $\beta_{10} = 16.2 + 2\log 100 = 25.4$; at $t = 100$,
+$\beta_{100} = 16.2 + 2\log 10^4 = 34.6$. The bound therefore sits $4.0$, $5.0$ and $5.9$ standard deviations below
+the mean. A step whose chosen point has posterior standard deviation $0.1$ has, by Step 2, regret at most
+$2 \times 4.0 \times 0.1 = 0.8$ at $t = 1$.
+
+**Regret in practice.** The figure runs the confidence bound on the Forrester function, minimum $-6.02$ at
+$\lambda = 0.757$, with a shallow local minimum near $\lambda = 0.14$ <Cite id="forrester2008" />. Each run starts from
+3 random evaluations and makes 20 more. Over five seeds, the cumulative regret of those 20 evaluations was:
+
+| exploration weight | mean cumulative regret | runs stuck in the local minimum |
+| --- | --- | --- |
+| $\beta = 0$ | 35.6 | 1 of 5 |
+| $\beta = 1$ | 38.8 | 1 of 5 |
+| $\beta = 4$ | 26.1 | 0 of 5 |
+| schedule $\beta_t$, $\delta = 0.1$ | 52.9 | 0 of 5 |
+
+A run stuck in the local minimum adds about 5 to the regret at every step, and its cumulative regret passes 100. The
+theoretical schedule never gets stuck, but it keeps evaluating the ends of the interval and pays about twice the regret
+of $\beta = 4$ over this short horizon. The bound's constants are set to hold for every function the prior can produce,
+which makes them conservative for any one function. Srinivas et al. found by
+<NoteLink to="cross-validation">cross-validation</NoteLink> that dividing their $\beta_t$ by 5 improved results
+<Cite id="srinivas2010" />.
+
+<BoWalkthrough mode="ucb" />
+
+## Assumptions
+
+- **The prior is right.** The finite-set theorem assumes that $f$ is drawn from the same Gaussian process the surrogate
+  uses, with known kernel hyperparameters and noise. Hyperparameters refitted by
+  <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> break the assumption, and
+  no guarantee covers them.
+- **The bound's scale is known.** The RKHS version needs an upper bound $B$ on the function's norm, which is rarely
+  known.
+- **The acquisition is maximised exactly.** The analysis assumes the global minimiser of the lower bound is found at
+  every step.
+
+## Pitfalls
+
+- **Using the theoretical $\beta_t$ verbatim.** It over-explores at practical budgets. A small constant, or the schedule
+  scaled down, is the usual choice; the right value depends on how well calibrated the surrogate is.
+- **Reading the bound as a stopping rule.** The bound involves $\gamma_T$ and constants that are not computed in
+  practice. It shows that the method converges, not when to stop.
+- **Ignoring dimension.** The guarantee weakens as $d$ grows. Bayesian optimisation with a plain Gaussian process works
+  best with fewer than about 20 hyperparameters <Cite id="frazier2018" />, which motivates the methods of
+  <NoteLink to="high-dimensional-bayesian-optimisation">high-dimensional Bayesian optimisation</NoteLink>.

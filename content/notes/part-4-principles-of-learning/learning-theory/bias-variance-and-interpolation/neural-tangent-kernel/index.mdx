@@ -1,0 +1,203 @@
+---
+title: 'Neural tangent kernel'
+kind: concept
+summary: 'The neural tangent kernel $\Theta(\xvec, \xvec'') = \nabla_{\thetavec} f(\xvec)^\top\nabla_{\thetavec} f(\xvec'')$ is the inner product of a network''s parameter gradients at two inputs. As width grows it stays fixed during training, and gradient descent on squared loss becomes kernel regression with it.'
+tags: [learning-theory, neural-networks, kernels, worked-example]
+aliases: [NTK, tangent kernel, lazy training, kernel regime, linearised network, infinite-width limit]
+requires: [multilayer-perceptron, kernel-ridge-regression, gradient-descent]
+related: [implicit-regularisation, benign-overfitting, gaussian-process, reproducing-kernel-hilbert-space, maximal-update-parameterisation, weight-initialisation, early-stopping]
+references: [jacot2018, lee2019, chizat2019, arora2019b, arora2019c, du2019b, yang2021tp4, woodworth2020, lee2018, cho2009]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $f(\xvec; \thetavec)$ be a network with scalar output and parameters $\thetavec \in \reals^P$. Its **neural
+tangent kernel** (<Gloss name="ntk" />) at $\thetavec$ is
+
+$$
+\Theta_{\thetavec}(\xvec, \xvec') = \nabla_{\thetavec} f(\xvec; \thetavec)^\top\nabla_{\thetavec} f(\xvec'; \thetavec).
+$$
+
+Under gradient flow on a loss of the training outputs, the outputs move according to this kernel. Jacot, Gabriel and
+Hongler showed that, as the widths of the hidden layers tend to infinity under the NTK parameterisation, the kernel at
+initialisation converges to a deterministic limit $\Theta^\infty$ and stays equal to it throughout training. Training
+the network on the <NoteLink to="regression-losses">squared loss</NoteLink> is then kernel regression with
+$\Theta^\infty$ <Cite id="jacot2018" />.
+</Definition>
+
+## Intuition
+
+A gradient step on one training example changes every parameter a little, and through them it changes the network's
+output at every input. The neural tangent kernel measures that spill-over: $\Theta(\xvec, \xvec_i)$ is how much the
+output at $\xvec$ moves when the parameters take a small step that raises the output at $\xvec_i$. Inputs whose
+gradients point in similar directions move together.
+
+In a very wide network each parameter has a tiny effect on the output. Fitting the data needs only a tiny change in
+each parameter, so the gradients, and with them the kernel, barely change during training. The network then behaves
+like its first-order Taylor expansion around the initial parameters,
+
+$$
+f(\xvec; \thetavec) \approx f(\xvec; \thetavec_0) + \nabla_{\thetavec} f(\xvec; \thetavec_0)^\top(\thetavec - \thetavec_0),
+$$
+
+a model that is linear in $\thetavec$ with fixed features $\phivec(\xvec) = \nabla_{\thetavec} f(\xvec; \thetavec_0)$
+<Cite id="lee2019" />. A linear model with fixed features is a kernel method, and the kernel of these features is the
+NTK. Training is "lazy": the network fits the data without learning new features.
+
+The NTK connects deep learning to kernel methods. In the kernel regime, the
+<NoteLink to="implicit-regularisation">implicit regularisation</NoteLink> of <NoteLink to="gradient-descent">gradient
+descent</NoteLink> is the minimum norm in the kernel's <NoteLink to="reproducing-kernel-hilbert-space">reproducing
+kernel Hilbert space</NoteLink>, and generalisation can be analysed with kernel tools.
+
+## The dynamics in function space
+
+Let the training set be $(\xvec_i, y_i)_{i=1}^n$ and the loss $L(\thetavec) = \frac12\sum_i(f(\xvec_i; \thetavec) -
+y_i)^2$. Gradient flow is $d\thetavec/dt = -\nabla_{\thetavec} L$. Write $f_t(\xvec) = f(\xvec; \thetavec_t)$ and
+$\Theta_t = \Theta_{\thetavec_t}$.
+
+1. **Parameter velocity.** By the chain rule, $\dfrac{d\thetavec}{dt} = -\sum_i \nabla_{\thetavec} f(\xvec_i;
+   \thetavec_t)\,(f_t(\xvec_i) - y_i)$.
+2. **Output velocity.** The output at any input $\xvec$ changes at the rate
+   $\nabla_{\thetavec} f(\xvec; \thetavec_t)^\top d\thetavec/dt$. Substituting step 1 gives
+
+   $$
+   \frac{d f_t(\xvec)}{dt} = -\sum_{i=1}^n \Theta_t(\xvec, \xvec_i)\,(f_t(\xvec_i) - y_i).
+   $$
+
+   This holds exactly for any network. The kernel is all that links the parameters to the outputs.
+3. **A constant kernel gives a linear equation.** Suppose $\Theta_t = \Theta$ for all $t$. Stack the training residuals
+   into $\uvec_t = f_t(\Xmat) - \yvec$ and write $\Kmat = \Theta(\Xmat, \Xmat)$ for the $n \times n$ kernel matrix.
+   Step 2 at the training inputs reads $d\uvec_t/dt = -\Kmat\uvec_t$, so
+
+   $$
+   \uvec_t = e^{-\Kmat t}\uvec_0.
+   $$
+
+   Along each eigenvector of $\Kmat$ the residual decays at the rate of its eigenvalue. If the smallest eigenvalue is
+   positive, the training loss goes to zero exponentially fast.
+4. **The prediction.** Integrating step 2 at a new input with $\uvec_t$ from step 3 gives
+
+   $$
+   f_t(\xvec) = f_0(\xvec) - \Theta(\xvec, \Xmat)\Kmat^{-1}(\eye - e^{-\Kmat t})\uvec_0.
+   $$
+
+   As $t \to \infty$, $f_\infty(\xvec) = f_0(\xvec) + \Theta(\xvec, \Xmat)\Kmat^{-1}(\yvec - f_0(\Xmat))$. This is
+   <NoteLink to="kernel-ridge-regression">kernel regression</NoteLink> with kernel $\Theta$ and no ridge, fitted to the
+   residual of the network at initialisation. Stopping at a finite $t$ shrinks the directions with small eigenvalues,
+   the analogue of <NoteLink to="early-stopping">early stopping</NoteLink> as a ridge penalty.
+
+## The infinite-width limit
+
+Take a two-layer network $f(\xvec) = \frac{1}{\sqrt M}\sum_{r=1}^M a_r\sigma(\wvec_r^\top\xvec)$ with $M$ hidden units,
+activation $\sigma$, and all parameters drawn independently from $\Gauss(0, 1)$ at initialisation. The factor
+$1/\sqrt M$ in front, rather than in the variance of $a_r$, is the **NTK parameterisation**. Its kernel sums the
+contributions of the output weights $a_r$ and the input weights $\wvec_r$:
+
+$$
+\Theta(\xvec, \xvec') = \frac1M\sum_{r=1}^M\brack{\sigma(\wvec_r^\top\xvec)\sigma(\wvec_r^\top\xvec') +
+a_r^2\,\sigma'(\wvec_r^\top\xvec)\sigma'(\wvec_r^\top\xvec')\,\xvec^\top\xvec'}.
+$$
+
+The kernel is an average of $M$ independent terms. As $M \to \infty$, the <Gloss name="lln">law of large numbers</Gloss>
+gives the deterministic limit
+
+$$
+\Theta^\infty(\xvec, \xvec') = \expect_{\wvec}\brack{\sigma(\wvec^\top\xvec)\sigma(\wvec^\top\xvec')} +
+\xvec^\top\xvec'\,\expect_{\wvec}\brack{\sigma'(\wvec^\top\xvec)\sigma'(\wvec^\top\xvec')}.
+$$
+
+It also stays fixed during training. The gradient with respect to each $\wvec_r$ carries the factor $1/\sqrt M$, so
+fitting the data moves each $\wvec_r$ by $O(1/\sqrt M)$, and the kernel changes by $O(1/\sqrt M)$. Jacot et al. proved
+the convergence for deep <Gloss name="mlp">fully connected networks</Gloss>, and positive-definiteness of
+$\Theta^\infty$ for inputs on the sphere and non-polynomial activations <Cite id="jacot2018" />. Du, Zhai, Póczos and
+Singh showed that finite but polynomially wide two-layer networks reach zero training loss at a linear rate set by the
+smallest eigenvalue of the limiting kernel matrix <Cite id="du2019b" />. Arora et al. gave the first non-asymptotic
+proof that a sufficiently wide trained network matches kernel regression with the NTK <Cite id="arora2019b" />.
+
+At initialisation $f_0$ is itself random. In the infinite-width limit it is a <NoteLink to="gaussian-process">Gaussian
+process</NoteLink> whose covariance is the first term of $\Theta^\infty$, the
+<NoteLink to="gaussian-processes-and-bayesian-linear-regression">neural network Gaussian process</NoteLink> kernel
+<Cite id="lee2018" />. The trained network is $f_0$ plus kernel regression on its residual, so its predictions are also
+Gaussian <Cite id="lee2019" />.
+
+<Derivation title="The ReLU kernel in closed form">
+For <Gloss name="relu" />, $\sigma(z) = \max(0, z)$ and $\sigma'(z) = \indicator[z > 0]$. Let $\xvec$ and $\xvec'$ be
+unit vectors at angle $\varphi$, and $\wvec \sim \Gauss(\zeros, \eye)$. Only the projection of $\wvec$ onto the plane of
+the two inputs matters, and its direction is uniform on the circle.
+
+- **The derivative term.** $\sigma'(\wvec^\top\xvec)\sigma'(\wvec^\top\xvec') = 1$ when $\wvec$ makes an acute angle
+  with both inputs. Those directions form an arc of angle $\pi - \varphi$ out of $2\pi$, so the expectation is
+  $(\pi - \varphi)/(2\pi)$.
+- **The activation term.** $\expect[\sigma(\wvec^\top\xvec)\sigma(\wvec^\top\xvec')] =
+  (\sin\varphi + (\pi - \varphi)\cos\varphi)/(2\pi)$, the first-order arc-cosine kernel <Cite id="cho2009" />.
+
+With $\xvec^\top\xvec' = \cos\varphi$, the two terms add to
+
+$$
+\Theta^\infty(\varphi) = \frac{\sin\varphi + 2(\pi - \varphi)\cos\varphi}{2\pi}.
+$$
+
+It equals 1 at $\varphi = 0$, $1/(2\pi) = 0.159$ at $\varphi = \pi/2$ and 0 at $\varphi = \pi$.
+</Derivation>
+
+## Worked example
+
+Train an infinitely wide two-layer ReLU network, both layers, on two unit inputs at a right angle, $\xvec_1 = (1, 0)$
+and $\xvec_2 = (0, 1)$, with targets $\yvec = (1, -1)$. Take a symmetric initialisation in which every hidden unit has
+a twin with the opposite output weight, so that $f_0 \equiv 0$ and the kernel is unchanged.
+
+1. **The kernel matrix.** From the closed form, $\Theta^\infty(0) = 1$ and $\Theta^\infty(\pi/2) = 0.159$, so
+   $\Kmat = \begin{pmatrix}1 & 0.159\\ 0.159 & 1\end{pmatrix}$.
+2. **Its eigenvectors.** $\Kmat$ has eigenvalue 1.159 along $(1, 1)/\sqrt2$ and 0.841 along $(1, -1)/\sqrt2$. The
+   targets lie along the second.
+3. **Training.** The residual starts at $\uvec_0 = -\yvec$ and shrinks as $e^{-0.841t}$. It falls to 1% of its size at
+   $t = \ln 100/0.841 = 5.5$. Gradient descent with step size 1 multiplies it by $1 - 0.841 = 0.159$ per step and needs
+   three steps.
+4. **Predictions.** At a unit input at angle $\alpha$ from $\xvec_1$, $f_\infty = \Theta^\infty(\alpha) -
+   \Theta^\infty(\pi/2 - \alpha)$ divided by 0.841, because $\yvec$ is an eigenvector. The prediction is 1 at
+   $\alpha = 0°$, 0.574 at $22.5°$, 0 at $45°$, $-0.574$ at $67.5°$ and $-1$ at $90°$. At $\alpha = -45°$, outside the
+   two training inputs, it is 0.841.
+
+No feature of the inputs was learned: the kernel was
+known before the data were seen.
+
+{/* figure pending engine (C5 ntkStudy): the relative change of the empirical NTK, ‖K_t − K_0‖_F/‖K_0‖_F, against the
+width from 16 to 1,024, and the trained network's predictions beside kernel regression with K_0 on a 1-D problem */}
+
+## Lazy training and feature learning
+
+The kernel regime is a consequence of scaling, not of width alone. Chizat, Oyallon and Bach showed that any model whose
+output is multiplied by a large factor $\alpha$, with the loss rescaled by $1/\alpha^2$, trains lazily and behaves like
+its linearisation. In their experiments, deep <NoteLink to="convolutional-networks">convolutional networks</NoteLink>
+trained in the lazy regime performed worse than the same networks trained normally <Cite id="chizat2019" />. For
+diagonal linear networks, the scale of the initialisation moves the implicit bias from the minimum $\ell_2$ norm of the
+kernel regime to a sparsity-favouring bias of the "rich" regime <Cite id="woodworth2020" />.
+
+The NTK parameterisation is not the only infinite-width limit. Yang and Hu classified the parameterisations whose
+infinite-width limits are stable, and found that the NTK limit cannot learn features. Their maximal update
+parameterisation has an infinite-width limit that does learn features
+(<NoteLink to="maximal-update-parameterisation">maximal update parameterisation</NoteLink>) <Cite id="yang2021tp4" />.
+
+The kernel can still be strong. Arora et al. computed the NTK of convolutional architectures exactly; on
+<Gloss name="cifar-10" /> the resulting pure kernel method was 10% more accurate than an earlier kernel benchmark, and
+6% less accurate than the corresponding finite network trained without <NoteLink to="batch-normalisation">batch
+normalisation</NoteLink> <Cite id="arora2019b" />. For two-layer ReLU networks with a trained first layer, a
+generalisation bound of order $\sqrt{\yvec^\top(\Hmat^\infty)^{-1}\yvec/n}$, where $\Hmat^\infty$ is the limiting kernel
+matrix of that layer, separates true from random labels on <Gloss name="mnist" /> and CIFAR: random labels need a large
+kernel norm to fit <Cite id="arora2019c" />.
+
+## Pitfalls
+
+- **The limit needs the right scaling.** The kernel stays fixed under the NTK parameterisation with step sizes of order
+  one. Standard parameterisations with tuned learning rates leave the regime, and practical networks learn features.
+- **Finite width is not infinite width.** The kernel of a finite network changes during training by an amount that
+  shrinks like $1/\sqrt{\text{width}}$. For the widths used in practice the change can be large, especially in deep
+  layers.
+- **The initial function adds variance.** $f_\infty$ includes the random $f_0$ and its residual fit. Without a
+  symmetric initialisation, predictions vary from seed to seed even in the limit.
+- **A positive-definite kernel matrix is required.** Duplicate inputs with different labels make $\Kmat$ singular, and
+  the residual along its null space never decays.
+- **Kernel regression interpolates.** With no ridge, the trained network fits <NoteLink to="label-noise">label
+  noise</NoteLink> exactly. Whether that harms prediction depends on the kernel's spectrum
+  (<NoteLink to="benign-overfitting">benign overfitting</NoteLink>).

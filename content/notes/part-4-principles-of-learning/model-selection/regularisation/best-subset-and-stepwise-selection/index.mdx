@@ -1,0 +1,269 @@
+---
+title: 'Best subset and stepwise selection'
+kind: technique
+summary: 'Subset selection fits least squares on $k$ of the $p$ predictors. Best subset finds the $k$ with the smallest residual sum of squares; forward and backward stepwise add or drop one predictor at a time; forward stagewise moves one coefficient by small steps. Validation picks $k$.'
+tags: [model-selection, regularisation, feature-selection, linear-models, worked-example]
+aliases: [best subset selection, all-subsets regression, forward stepwise selection, backward stepwise selection, stepwise regression, forward stagewise regression]
+requires: [linear-regression, k-fold-cross-validation, effective-degrees-of-freedom]
+related: [wrapper-feature-selection, lasso, least-angle-regression, sparsity-inducing-penalties, regularisation-paths, selection-inside-cross-validation, overfitting-in-model-selection, mallows-cp-and-covariance-penalties]
+references: [hastie2009, furnival1974, bertsimas2016, natarajan1995, efron2004, hastie2007stagewise, hastie2020best, tibshirani2015search, ye1998, freedman1983, miller2002]
+status: draft
+updated: 2026-10-13
+---
+
+import { StagewiseAgainstLasso } from './StagewiseAgainstLasso'
+import { SubsetSearch } from './SubsetSearch'
+
+<Definition>
+Let $\Xmat \in \reals^{n \times p}$ hold $p$ predictors and $\yvec \in \reals^n$ the targets, and for a set
+$S \subseteq \set{1, \dots, p}$ let $\operatorname{RSS}(S)$ be the residual sum of squares of the least-squares fit on
+the columns in $S$. **Best subset selection** of size $k$ returns
+
+$$
+\hat S_k = \argmin_{\abs{S} = k} \operatorname{RSS}(S), \qquad k = 0, 1, \dots, p.
+$$
+
+**Forward stepwise selection** builds a nested sequence instead, adding at each step the predictor that lowers the
+residual sum of squares most; **backward stepwise selection** starts from all $p$ and drops the predictor whose removal
+raises it least. **Forward stagewise regression** moves one coefficient at a time by a small amount towards the
+residual. Each method produces one candidate model per size $k$, and the size is chosen by
+<NoteLink to="cross-validation">cross-validation</NoteLink> or an <NoteLink to="information-criteria">information
+criterion</NoteLink> <Cite id="hastie2009" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="linear-regression">Least squares</NoteLink> on all $p$ predictors is unbiased but can have a large
+variance, and it keeps every predictor however little it contributes. Dropping a predictor whose coefficient is small
+adds a little bias and removes that coefficient's variance. A model on fewer predictors is also easier to read and
+cheaper to measure.
+
+Subset selection makes this trade directly: it restricts the number of nonzero coefficients, the $\ell_0$ "norm"
+$\norm{\wvec}_0 = \#\set{j : w_j \neq 0}$. Best subset of size $k$ is the constrained problem
+
+$$
+\min_{\wvec}\ \norm{\yvec - \Xmat\wvec}^2 \quad \text{subject to} \quad \norm{\wvec}_0 \le k,
+$$
+
+the $\ell_0$ member of the family whose $\ell_1$ member is the <NoteLink to="lasso">lasso</NoteLink> and whose
+$\ell_2$ member is <NoteLink to="ridge-regression">ridge regression</NoteLink> (see
+<NoteLink to="penalised-and-constrained-regularisation">penalised and constrained regularisation</NoteLink>). The
+constraint set is not convex, so none of the convex machinery applies, and the problem is combinatorial.
+
+The methods answer the select question of <NoteLink to="model-selection">model selection</NoteLink> twice over. The
+search chooses a subset for each size, and validation chooses the size. Both choices use the data, so the training
+error of the chosen model is optimistic for two reasons: the fit and the search.
+
+## Best subset
+
+**Residual sums of squares are nested.** Adding a column to a least-squares fit cannot raise its residual sum of
+squares, because the old fit is still available with the new coefficient at zero. The best residual sum of squares
+$\operatorname{RSS}(\hat S_k)$ therefore falls as $k$ grows, reaching the full least-squares value at $k = p$. The
+training error cannot choose $k$; it always prefers $k = p$.
+
+**The best subsets need not be nested.** $\hat S_2$ need not contain $\hat S_1$. Best subset compares every subset of
+each size on its own merits, which is its advantage over the stepwise methods and the source of its cost: there are
+$\binom{p}{k}$ subsets of size $k$ and $2^p$ in all.
+
+**Orthonormal predictors: hard thresholding.** When $\Xmat^\top\Xmat = \eye$, write $z_j = \xvec_j^\top\yvec$ for the
+least-squares coefficient of predictor $j$, where $\xvec_j$ is column $j$. Projecting $\yvec$ onto orthonormal columns
+gives
+
+$$
+\operatorname{RSS}(S) = \norm{\yvec}^2 - \sum_{j \in S} z_j^2,
+$$
+
+so the best subset of size $k$ is the $k$ predictors with the largest $\abs{z_j}$, and each keeps its least-squares
+coefficient $z_j$. In penalised form, $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_0$ separates into one problem
+per coefficient: keeping $w_j = z_j$ costs $\lambda$, and setting $w_j = 0$ costs $z_j^2$ in extra residual. The
+solution is **hard thresholding**,
+
+$$
+\hat w_j = z_j \cdot \indicator\brack{\abs{z_j} > \sqrt\lambda}.
+$$
+
+The lasso on the same design gives soft thresholding, $\sgn(z_j)\max(\abs{z_j} - \lambda/2, 0)$: it selects the same
+kind of set but also shrinks every survivor by $\lambda/2$ (see
+<NoteLink to="sparsity-inducing-penalties">sparsity-inducing penalties</NoteLink>). Best subset keeps the survivors
+unshrunk, which is its strength when the kept effects are large and its weakness when they are small and noisy.
+
+**Exact search.** The leaps-and-bounds algorithm of Furnival and Wilson prunes the tree of subsets with the nesting
+property: a subset whose residual sum of squares already exceeds the best known value for a smaller size cannot contain
+a better subset of that size <Cite id="furnival1974" />. It made best subset practical for about 30 to 35 predictors.
+Bertsimas, King and Mazumder wrote the problem as a mixed-integer quadratic program and solved it with a commercial
+solver, warm-started by a first-order heuristic, reaching certified optima for $p$ in the hundreds and good solutions
+for $p$ in the thousands <Cite id="bertsimas2016" />. In general the problem is NP-hard <Cite id="natarajan1995" />.
+
+## Stepwise methods
+
+**Forward stepwise** starts from the intercept alone and adds one predictor per step. At each step it fits every
+one-predictor extension of the current set $S$ and keeps the one with the smallest residual sum of squares. The cost
+of a step is small because the drop in residual sum of squares has a closed form. Let $\rvec$ be the residual of the
+fit on $S$ and let $\tilde\xvec_j$ be column $j$ with its projection onto the columns of $S$ removed. Adding $j$ adds
+the direction $\tilde\xvec_j$ to the fitted space, and the residual's projection onto it is removed:
+
+$$
+\operatorname{RSS}(S) - \operatorname{RSS}(S \cup \set{j}) = \frac{(\tilde\xvec_j^\top\rvec)^2}{\norm{\tilde\xvec_j}^2}.
+$$
+
+The residual $\rvec$ is orthogonal to the columns of $S$, so $\tilde\xvec_j^\top\rvec = \xvec_j^\top\rvec$. Forward
+stepwise therefore adds the predictor whose correlation with the current residual is largest **after** the predictor
+has been adjusted for those already in the model. A <NoteLink to="qr-decomposition">QR decomposition</NoteLink> updated
+one column at a time gives every $\tilde\xvec_j$ cheaply.
+
+**Backward stepwise** starts from all $p$ predictors and removes, at each step, the one whose removal raises the
+residual sum of squares least; for least squares that is the predictor with the smallest $t$ statistic. It needs $n > p$
+for the first fit to exist.
+
+Both stepwise methods produce nested sequences, one model per size. A predictor added early is never removed by forward
+stepwise, and one removed early never returns in backward stepwise. Hybrid versions consider an addition and a deletion
+at each step. The <NoteLink to="wrapper-feature-selection">wrapper methods</NoteLink> of Part III apply the same
+searches to any learner, scored by a validation estimate instead of the residual sum of squares.
+
+**Classical stopping rules.** Older software stopped forward stepwise when no candidate's $F$ statistic for addition
+exceeded a threshold, an "$F$-to-enter". The $F$ statistic at a step is the maximum over the remaining candidates, so it
+does not have an $F$ distribution, and the nominal <NoteLink to="significance-level">significance level</NoteLink> of
+the threshold is wrong <Cite id="miller2002" />. Choosing $k$ by validation avoids this.
+
+## Forward stagewise and the lasso
+
+**Forward stagewise** makes many small moves instead of a few full refits. Start from $\wvec = \zeros$ with the residual
+$\rvec = \yvec$, on standardised predictors. Repeat:
+
+1. find the predictor $j$ most correlated with the current residual, $j = \argmax_j \abs{\xvec_j^\top\rvec}$;
+2. move its coefficient a small amount $\epsilon$ in the direction of that correlation,
+   $w_j \leftarrow w_j + \epsilon\,\sgn(\xvec_j^\top\rvec)$;
+3. update the residual, $\rvec \leftarrow \rvec - \epsilon\,\sgn(\xvec_j^\top\rvec)\,\xvec_j$.
+
+Unlike forward stepwise, stagewise never refits the coefficients already in the model, and the same predictor can be
+chosen many times. The coefficients grow slowly. After enough steps the fit approaches least squares, and the number of
+steps is the <NoteLink to="regularisation">regularisation</NoteLink> parameter (see
+<NoteLink to="iterative-regularisation">iterative regularisation</NoteLink>).
+
+As $\epsilon \to 0$, the path of forward stagewise is piecewise linear and coincides with a variant of
+<NoteLink to="least-angle-regression">least-angle regression</NoteLink>. When every lasso
+<NoteLink to="regularisation-paths">coefficient path</NoteLink> is monotone it is the lasso path itself
+<Cite id="efron2004" />. In general the infinitesimal stagewise path solves the monotone lasso, the path that reduces
+the residual sum of squares fastest per unit of $\ell_1$ arc length <Cite id="hastie2007stagewise" />. Forward stagewise
+is thus the bridge between greedy selection and the convex $\ell_1$ penalty, and $L_2$ boosting with linear base
+learners is the same algorithm (see <NoteLink to="gradient-boosting">gradient boosting</NoteLink>).
+
+<StagewiseAgainstLasso />
+
+## Choosing the size
+
+Each method gives a sequence of models $\hat S_0, \hat S_1, \dots$; the remaining choice is $k$, a one-dimensional
+selection. The standard tool is $K$-fold cross-validation over $k$ (see <NoteLink to="k-fold-cross-validation">$K$-fold
+cross-validation</NoteLink>), often with the <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink>,
+which prefers the smallest $k$ within one <NoteLink to="standard-error">standard error</NoteLink> of the best. The
+search must run inside each fold: the subsets are refound on the training folds, and the held-out fold scores the subset
+of size $k$ found without it. Scoring the subsets found on all the data by cross-validation reuses the data that chose
+them and is optimistic (see <NoteLink to="selection-inside-cross-validation">selection inside
+cross-validation</NoteLink>).
+
+Mallows' $C_p$, <Gloss name="aic" /> and <Gloss name="bic" /> are the analytic alternatives (see
+<NoteLink to="mallows-cp-and-covariance-penalties">Mallows' $C_p$ and covariance penalties</NoteLink>). They charge for
+$k$ parameters. The search makes that charge too small.
+
+**The search spends degrees of freedom.** The <NoteLink to="effective-degrees-of-freedom">effective degrees of
+freedom</NoteLink> of a fit are $\operatorname{df} = \frac{1}{\sigma^2}\sum_i \cov(\hat y_i, y_i)$. Take orthonormal
+predictors and pure noise, $\yvec = \varepsilonvec$ with $\varepsilonvec \sim \Gauss(\zeros, \sigma^2\eye)$. Best subset
+of size 1 picks the predictor $j^\star$ with the largest $\abs{z_j}$ and fits $\hat\yvec = z_{j^\star}\xvec_{j^\star}$.
+The true mean is zero, so $\cov(\hat y_i, y_i) = \expect[\hat y_i y_i]$, and summing over $i$,
+
+$$
+\sigma^2\operatorname{df} = \expect\brack{\hat\yvec^\top\yvec} = \expect\brack{z_{j^\star}\xvec_{j^\star}^\top\yvec}
+= \expect\brack{\max_j z_j^2}.
+$$
+
+Each $z_j/\sigma$ is standard normal, and the $z_j$ are independent because the columns are orthonormal. With $p = 10$
+the expected maximum of ten $\chi^2_1$ variables is 3.80, so the one-predictor model spends 3.8 degrees of freedom
+rather than one. With $p = 100$ it spends 7.7. A $C_p$ or AIC that counts $k$ parameters understates the
+<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink> by the difference
+<Cite id="ye1998" /> <Cite id="tibshirani2015search" />. Cross-validation with the search inside the folds pays this
+cost automatically.
+
+## Worked example
+
+Take three standardised predictors of unit length. Let $\xvec_1$ and $\xvec_2$ be orthogonal, and let $\xvec_3$ lie
+mostly between them:
+
+$$
+\xvec_3 = 0.9\cdot\frac{\xvec_1 + \xvec_2}{\sqrt2} + \sqrt{0.19}\,\evec,
+$$
+
+with $\evec$ a unit vector orthogonal to both. The target is $\yvec = \xvec_1 + \xvec_2$, with no noise, so
+$\norm{\yvec}^2 = 2$. The inner products are $\xvec_1^\top\xvec_3 = \xvec_2^\top\xvec_3 = 0.9/\sqrt2 = 0.636$, and the
+correlations with the target are $\xvec_1^\top\yvec = \xvec_2^\top\yvec = 1$ and
+$\xvec_3^\top\yvec = 0.9\sqrt2 = 1.273$.
+
+1. **Size 1.** A single unit-length predictor removes $(\xvec_j^\top\yvec)^2$ from $\norm{\yvec}^2$. The residual sums
+   of squares are $2 - 1 = 1$ for $\xvec_1$ or $\xvec_2$ and $2 - 1.62 = 0.38$ for $\xvec_3$. Best subset and forward
+   stepwise both choose $\set{3}$.
+2. **Forward stepwise, size 2.** With $\xvec_3$ in the model, adding $\xvec_1$ fits the two-column least squares with
+   Gram matrix $\begin{pmatrix} 1 & 0.636 \\ 0.636 & 1 \end{pmatrix}$ and correlations $(1, 1.273)$. Its residual sum
+   of squares is 0.319, and adding $\xvec_2$ gives the same by symmetry. Forward stepwise reaches $\set{1, 3}$ with
+   $\operatorname{RSS} = 0.319$.
+3. **Best subset, size 2.** The pair $\set{1, 2}$ fits $\yvec$ exactly: $\operatorname{RSS} = 0$. Forward stepwise
+   cannot reach it, because it committed to $\xvec_3$ at step 1.
+4. **Backward stepwise.** All three predictors fit exactly. Removing $\xvec_3$ leaves the exact fit $\set{1, 2}$, while
+   removing $\xvec_1$ or $\xvec_2$ leaves 0.319, so backward stepwise drops $\xvec_3$ and finds the best pair. At size 1
+   it must drop $\xvec_1$ or $\xvec_2$ and ends at $\operatorname{RSS} = 1$, against the best single predictor's 0.38.
+
+| Size $k$ | Best subset | Forward stepwise | Backward stepwise |
+| --- | --- | --- | --- |
+| 1 | $\set{3}$, 0.38 | $\set{3}$, 0.38 | $\set{1}$, 1.00 |
+| 2 | $\set{1, 2}$, 0 | $\set{1, 3}$, 0.319 | $\set{1, 2}$, 0 |
+| 3 | $\set{1, 2, 3}$, 0 | $\set{1, 2, 3}$, 0 | $\set{1, 2, 3}$, 0 |
+
+Each greedy method is wrong at one size. The predictor that summarises the others best on its own is the wrong
+predictor to build on, which is the failure of forward stepwise. The pair that works only together is invisible to it
+one predictor at a time. Backward stepwise sees the pair, because it starts from a model that contains it.
+
+<SubsetSearch />
+
+## Cost
+
+- **Best subset** fits $2^p$ least-squares problems by brute force, about $10^6$ at $p = 20$. Leaps and bounds cuts this
+  by orders of magnitude for $p$ up to about 35. Mixed-integer solvers reach the hundreds or thousands, at minutes of
+  solver time per size $k$ <Cite id="bertsimas2016" />.
+- **Forward stepwise** to size $k$ evaluates about $kp$ candidates, each in $O(n)$ with an updated QR decomposition, so
+  the whole sequence costs about as much as one least-squares fit. It works for $p > n$, up to $k = n$.
+- **Backward stepwise** costs about the same but needs $n > p$.
+- **Forward stagewise** takes many steps of size $\epsilon$, each costing $O(np)$; the smaller $\epsilon$, the more
+  steps.
+- **Validation** multiplies each cost by the number of folds, since the search reruns inside every fold.
+
+## Trade-offs
+
+Hastie, Tibshirani and Tibshirani compared best subset, forward stepwise, the lasso and the relaxed lasso on simulated
+regressions over a range of <Gloss name="snr">signal-to-noise ratios</Gloss> <Cite id="hastie2020best" />. Their
+findings:
+
+- **The signal-to-noise ratio decides.** Best subset and the lasso each win in a different regime. At high
+  signal-to-noise ratios best subset does better, because its kept coefficients are unshrunk. At low ratios the lasso
+  does better, because its shrinkage reduces variance where the coefficients are hard to estimate.
+- **Forward stepwise is close to best subset.** The exact search buys little over the greedy one on most problems.
+- **The relaxed lasso** refits the lasso's selected set with a blend of the lasso and least-squares coefficients. It
+  matched or beat the others across nearly all settings.
+
+The penalty view explains the pattern. The $\ell_0$ penalty selects and leaves the survivors alone; the $\ell_1$
+penalty selects and shrinks. Shrinkage helps when the noise is large relative to the effects.
+
+## Pitfalls
+
+- **Inference after selection.** The $p$-values and <NoteLink to="confidence-intervals">confidence intervals</NoteLink>
+  that least-squares software reports for the final subset assume the subset was fixed in advance. After a search they
+  are too small. In Freedman's simulation, 50 pure-noise predictors were screened on 100 rows and the survivors
+  refitted; the refitted model had a highly significant overall $F$ test although no predictor was related to the target
+  <Cite id="freedman1983" />.
+- **Instability.** Small changes in the data change which subset is best, especially among correlated predictors,
+  whose subsets fit almost equally well. The chosen predictors are a fragile answer to which predictors matter (see
+  <NoteLink to="stability-of-feature-selection">stability of feature selection</NoteLink>).
+- **Searching outside the folds.** Running the search on all the data and then cross-validating the chosen subset
+  gives an optimistic estimate, often badly so when $p$ is large (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+- **Counting $k$ as the degrees of freedom.** The search spends more than $k$, as above, so $C_p$ and AIC computed
+  with $k$ favour models that are too large.
+- **Standardise for stagewise.** Forward stagewise and the lasso compare correlations, so predictors must be on a
+  common scale. Best subset and stepwise least squares are unaffected by the scale of a predictor.

@@ -1,0 +1,118 @@
+---
+title: Cross-validation
+kind: overview
+summary: 'Cross-validation estimates prediction error by fitting on part of the data and scoring the rest, in rotation: hold-out, K-fold, leave-one-out and GCV, stratified, grouped and blocked folds, and bootstrap estimators. It targets the expected error of a procedure.'
+tags: [model-selection, model-evaluation, resampling, generalisation]
+aliases: [CV]
+requires: [empirical-risk-minimisation, model-selection-and-model-assessment]
+related: [selection-bias-and-nested-cross-validation, information-criteria, bayesian-model-selection, time-series-cross-validation, stacking, bagging, additive-model-smoothing-parameter-selection]
+references: [stone1974, arlot2010, hastie2009, kohavi1995, allen1974, shao1993, efron1997, bates2024, bengio2004, varma2006]
+status: draft
+updated: 2026-10-13
+---
+
+import { KFoldDiagram } from './KFoldDiagram'
+
+<Definition>
+Cross-validation estimates how well a learning procedure predicts new data by fitting it to part of the data and
+scoring it on the rest, with the roles rotated so that every point is scored by a model that did not see it
+<Cite id="stone1974" />. With $K$ folds, $\kappa(i)$ the fold of point $i$ and $\hat f^{-k}$ the fit without fold $k$,
+the estimate is $\operatorname{CV} = \frac1n\sum_{i=1}^n \ell\paren{y_i, \hat f^{-\kappa(i)}(\xvec_i)}$. This topic
+covers the ways of splitting the data, the closed forms for linear smoothers, the bootstrap alternatives, and what the
+estimate measures and how precisely <Cite id="arlot2010" />.
+</Definition>
+
+## What it is for
+
+The training error of a fitted model is optimistic, by an amount that grows with the model's flexibility
+(<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>). Cross-validation answers the
+chapter's first question, how well a candidate will predict, for any learner and any loss. It needs no likelihood and
+no parameter count, which the <NoteLink to="information-criteria">information criteria</NoteLink> need. The price is
+refitting: $K$ fits per candidate.
+
+The estimate serves two jobs. **Selection** computes $\operatorname{CV}$ for each candidate on the same folds and keeps
+the smallest. **Assessment** reports the error of the final model. The two cannot share data: the smallest of many
+cross-validation scores is biased low, which <NoteLink to="selection-bias-and-nested-cross-validation">selection bias
+and nested cross-validation</NoteLink> treats. Current defaults are 5- or 10-fold, stratified for classification,
+grouped when records cluster, nested for assessment on small data, and a single validation set for large models
+<Cite id="kohavi1995" />.
+
+## Main ideas
+
+**Hold out, then rotate.** <NoteLink to="hold-out-validation">Hold-out validation</NoteLink> fits on one part and scores
+the rest. It is unbiased for the model fitted to the smaller part, its <NoteLink to="standard-error">standard
+error</NoteLink> falls as $1/\sqrt{n_\text{val}}$, and it is the default when one fit is expensive.
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink> rotates the held-out part so that every
+point validates once. Each fold model is trained on $n(K - 1)/K$ points, so the estimate is pessimistic while the
+learning curve still falls, and more so for small $K$. After selection, the chosen candidate is refitted on all $n$
+points.
+
+<KFoldDiagram />
+
+**Leave-one-out and its closed forms.** <NoteLink to="leave-one-out-cross-validation">Leave-one-out</NoteLink> is the
+case $K = n$: the least biased scheme, and a high-variance one for unstable learners. For a linear smoother
+$\hat\yvec = \Smat\yvec$, the held-out residual is $(y_i - \hat y_i)/(1 - S_{ii})$, so one fit gives all $n$ and the
+PRESS statistic <Cite id="allen1974" />. <NoteLink to="generalised-cross-validation">Generalised
+cross-validation</NoteLink> replaces each leverage $S_{ii}$ by the mean $\trace\Smat/n$. It needs only the residuals and
+the trace, and no estimate of the noise variance.
+
+**Repetition and resampling.** <NoteLink to="repeated-and-monte-carlo-cross-validation">Repeated and Monte Carlo
+cross-validation</NoteLink> average over fresh random partitions. Repetition removes the variance due to the partition,
+not the variance due to the data. Holding out a fraction of the data that tends to one makes the selection consistent
+<Cite id="shao1993" />. The <NoteLink to="bootstrap-estimates-of-prediction-error">bootstrap estimators</NoteLink>
+score each point on the resamples that did not draw it. The leave-one-out bootstrap is pessimistic, the .632 estimator
+mixes it with the training error, and .632+ corrects that mix when the model overfits heavily <Cite id="efron1997" />.
+
+**The split must match deployment.** A test fold should be as new to the model as deployment data will be.
+<NoteLink to="stratified-cross-validation">Stratified folds</NoteLink> keep the class proportions of the whole data set,
+which keeps rare classes in every fold. <NoteLink to="grouped-cross-validation">Grouped folds</NoteLink> keep all
+records of a patient or user together; record-wise folds let the model recognise the group and make the estimate
+optimistic. <NoteLink to="spatial-and-blocked-cross-validation">Blocked folds</NoteLink> hold out contiguous regions,
+because under autocorrelation random folds measure interpolation error. Every step that learns from data, from scaling
+to target encoding and <NoteLink to="feature-selection">feature selection</NoteLink>, is refitted inside each training
+fold (<NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).
+
+**What the estimate measures.** Cross-validation estimates the expected error $\operatorname{Err}$ of the procedure over
+training sets of its size. It tracks the conditional error $\operatorname{Err}_\Dcal$ of the one model fitted to these
+data only weakly, and for least squares not at all <Cite id="bates2024" />
+(<NoteLink to="what-cross-validation-estimates">what cross-validation estimates</NoteLink>). The fold errors are
+correlated, because the training sets overlap. The naive standard error $s/\sqrt K$ is therefore too small, and no
+unbiased estimator of the variance exists <Cite id="bengio2004" />. Nested schemes give intervals with close to nominal
+coverage (<NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>).
+
+**Selection reuses the data.** The candidate with the smallest cross-validation score won partly by luck on these
+folds, so its score understates its error (<NoteLink to="overfitting-in-model-selection">overfitting in model
+selection</NoteLink>). An honest estimate scores the whole procedure, search included, on data the search never saw:
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink> on small data, a locked test set on large data
+<Cite id="varma2006" />. The <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> makes the
+selection itself less sensitive to fold noise.
+
+## How the notes fit together
+
+- Start with <NoteLink to="hold-out-validation">hold-out validation</NoteLink> and
+  <NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>. Leave-one-out and generalised
+  cross-validation follow, and need <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>
+  for the trace of $\Smat$.
+- The stratified, grouped and blocked notes change how folds are formed; the repeated, Monte Carlo and bootstrap notes
+  change how many fits are averaged.
+- <NoteLink to="what-cross-validation-estimates">What cross-validation estimates</NoteLink> and
+  <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink> describe the
+  estimate's target and precision, and <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>
+  its most common failure.
+- <NoteLink to="cross-validating-a-ridge-penalty">Cross-validating a ridge penalty</NoteLink> compares 10-fold,
+  leave-one-out and GCV on one problem, with the one-standard-error choice.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> and the distinction
+between <NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>; the
+bootstrap estimators also use the Part I <NoteLink to="bootstrap">bootstrap</NoteLink>. Engineering practice for splits
+and leakage is in <NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink> and
+<NoteLink to="data-leakage">data leakage</NoteLink>, and time-ordered data need
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>. The analytic alternatives are the
+<NoteLink to="information-criteria">information criteria</NoteLink>, and the Bayesian one is
+<NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">PSIS leave-one-out</NoteLink>. Cross-validation scores
+are the objective of <NoteLink to="hyperparameter-search">hyperparameter optimisation</NoteLink> and the data of
+<NoteLink to="comparing-learning-algorithms">comparing learning algorithms</NoteLink>. Out-of-fold predictions, kept per
+example, train the combiner in <NoteLink to="stacking">stacking</NoteLink> and give
+<NoteLink to="item-response-theory-for-machine-learning">item response theory</NoteLink> the per-example scores it fits.

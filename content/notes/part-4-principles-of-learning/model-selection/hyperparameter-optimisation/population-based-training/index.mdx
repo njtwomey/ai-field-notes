@@ -1,0 +1,167 @@
+---
+title: 'Population-based training'
+kind: technique
+summary: 'Population-based training trains a population of models in parallel and, at intervals, replaces the weights and hyperparameters of weak members with perturbed copies of strong ones. It finds hyperparameter schedules, not just constants, within the budget of one parallel search.'
+tags: [model-selection, hyperparameters, deep-learning, worked-example]
+aliases: [population based training, exploit and explore, truncation selection, population-based bandits, PB2]
+requires: [hyperparameter-search, random-search]
+related: [evolution-strategies-and-covariance-matrix-adaptation, learning-rate-schedules, early-stopping, successive-halving, asynchronous-successive-halving, gradient-based-hyperparameter-optimisation, tuning-deep-learning-hyperparameters, overfitting-in-model-selection, reinforcement-learning]
+references: [jaderberg2017, parkerholder2020]
+status: draft
+updated: 2026-10-13
+---
+
+import { PbtToy } from './PbtToy'
+
+<Definition>
+**Population-based training** (PBT) trains a population of $P$ models in parallel, each member $k$ with
+its own parameters $\thetavec_k$ and hyperparameters $\hvec_k$ <Cite id="jaderberg2017" />. Every few training steps a
+member is **ready**. It is scored on validation data and compared with the population. If it ranks poorly it
+**exploits**, copying the parameters, and usually the hyperparameters, of a better member. It then **explores**,
+perturbing the copied hyperparameters or resampling them from their prior, and training continues. The hyperparameters
+of each member change during training, so the search returns a **schedule** of hyperparameters along with a trained
+model.
+</Definition>
+
+## Problem
+
+<NoteLink to="random-search">Random search</NoteLink> and <NoteLink to="grid-search">grid search</NoteLink> train $P$
+models in parallel with fixed hyperparameters and keep the best. Two things are lost.
+- **Information during training.** A member that is clearly behind after a tenth of its training keeps its share of
+  the compute until the end.
+- **Schedules.** The best <Gloss name="learning-rate">learning rate</Gloss> early in training is not the best late in
+  training (see <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>). A search over constants
+  cannot find a schedule, and a search over parametrised schedules multiplies the number of hyperparameters.
+
+Population-based training reuses the population's partial training. Weak members restart from strong members'
+parameters instead of from scratch, so the compute already spent on the strong member is not repeated. The
+hyperparameters that a member's lineage used over time form the schedule.
+
+## Mechanism
+
+Each member runs four operations, asynchronously and without a central coordinator <Cite id="jaderberg2017" />.
+
+1. **Step.** Train $\thetavec_k$ for a while with hyperparameters $\hvec_k$: a number of gradient steps, or of
+   environment steps in <NoteLink to="reinforcement-learning">reinforcement learning</NoteLink>.
+2. **Eval.** Score the member on the objective of interest: validation accuracy, <Gloss name="bleu" />, an
+   <NoteLink to="inception-score">Inception score</NoteLink>, or recent episodic reward. The objective need not be
+   differentiable.
+3. **Exploit**, when the member is ready.
+   - **Truncation selection:** rank the population by score; a member in the bottom 20% copies the parameters and
+     hyperparameters of a member drawn uniformly from the top 20%.
+   - **T-test selection:** compare with one random member, and copy it if its recent scores are higher by
+     <NoteLink to="welch-t-test">Welch's t-test</NoteLink>.
+4. **Explore**, after an exploit.
+   - **Perturb:** multiply each hyperparameter independently by 0.8 or 1.2.
+   - **Resample:** draw each hyperparameter from its original prior with some probability.
+
+The population starts like a random search, with hyperparameters drawn from their priors. Exploit concentrates compute
+on good lineages. Explore keeps the population from collapsing onto one setting and lets the hyperparameters drift as
+training progresses. A member's final hyperparameter schedule is read off its **lineage**: the chain of members it
+copied, each with the hyperparameters it held at the time.
+
+**PBT is greedy.** Exploit compares members on their current scores. A setting that helps now and hurts later, such as a
+learning rate decayed too early, wins the comparison and spreads through the population. Jaderberg et al. call the
+method greedy, and found that populations of 10 or fewer suffered higher variance and poorer results, while 20 to 40
+members gave strong and consistent improvements <Cite id="jaderberg2017" />.
+
+**Guided exploration.** Random perturbation needs a large population to find good directions. Population-based bandits
+(PB2) replace it with a <Gloss name="gp">Gaussian-process</Gloss> bandit model of how the score changes with the
+hyperparameters, and match PBT with far fewer members <Cite id="parkerholder2020" />.
+
+## A toy problem: why exploitation helps
+
+Jaderberg et al. illustrate PBT with a problem that grid search cannot solve <Cite id="jaderberg2017" />. The score is
+
+$$
+Q(\thetavec) = 1.2 - \theta_0^2 - \theta_1^2,
+$$
+
+maximised at $\thetavec = \zeros$ with $Q = 1.2$. Training cannot see $Q$. It climbs a surrogate that the
+hyperparameters $\hvec = (h_0, h_1)$ distort,
+
+$$
+\hat Q(\thetavec \mid \hvec) = 1.2 - h_0\theta_0^2 - h_1\theta_1^2,
+$$
+
+by gradient ascent with step size $\alpha$: $\theta_j \leftarrow \theta_j + \alpha\,\partial\hat Q/\partial\theta_j =
+\theta_j(1 - 2\alpha h_j)$. A member with $h_j = 0$ never moves coordinate $j$.
+
+Two members start at $\thetavec = (0.9, 0.9)$, one with $\hvec = (1, 0)$ and one with $\hvec = (0, 1)$. Trained apart,
+the first drives $\theta_0$ to 0 and the second drives $\theta_1$ to 0, and both stall at
+$Q = 1.2 - 0.9^2 = 0.39$. With exploitation, a weak member copies the strong member's parameters but keeps its own
+$\hvec$. It then moves the coordinate that the other member could not. The two take turns, and the population reaches
+the optimum.
+
+<PbtToy />
+
+## Worked example
+
+Run the toy with step size $\alpha = 0.05$, a ready interval of 4 steps and exploration noise $\Gauss(0, 0.1^2)$ added
+to each $h_j$ (clipped at 0). With $P = 2$ and a truncation fraction of 20%, the top and bottom groups each hold
+$\lceil 0.2 \times 2\rceil = 1$ member. Members copy parameters only, as in the paper's toy.
+
+1. **Steps 1–4.** With $h_j = 1$ each step multiplies $\theta_j$ by $1 - 2(0.05)(1) = 0.9$. After four steps, member 0
+   is at $(0.9^5, 0.9) = (0.590, 0.9)$ and member 1 at $(0.9, 0.590)$. Both score
+   $Q = 1.2 - 0.349 - 0.81 = 0.041$.
+2. **First exploit.** The scores tie, and the tie goes to the lower index, so member 1 is the bottom member. It copies
+   member 0's parameters, $(0.590, 0.9)$, and keeps $\hvec = (0, 1)$. Exploration perturbs it to $(0, 0.997)$.
+3. **Steps 5–8.** Member 1 now shrinks $\theta_1$ by a factor $1 - 2(0.05)(0.997) = 0.900$ per step, reaching
+   $(0.590, 0.591)$ with $Q = 1.2 - 0.349 - 0.350 = 0.502$. Member 0 keeps shrinking $\theta_0$ only, reaching
+   $(0.387, 0.9)$ with $Q = 0.240$.
+4. **Second exploit.** Member 0 is now the bottom member. It copies $(0.590, 0.591)$ from member 1 and starts shrinking
+   $\theta_0$ from there.
+5. **After 60 steps.** The best member scores $Q = 1.1996$. The same two members trained apart score $0.39$.
+
+Each exploit passes one member's progress on its coordinate to the member that can make progress on the other. Neither
+setting of $\hvec$ is good alone. The pair is good as a schedule.
+
+## Results reported
+
+Jaderberg et al. compared PBT with random search using the same number of workers <Cite id="jaderberg2017" />.
+- **Reinforcement learning.** On DeepMind Lab, with 40 workers, PBT raised the mean performance of the UNREAL agent
+  across levels from 93% to 106% of human performance.
+- **<Gloss name="machine-translation">Machine translation</Gloss>.** For a small Transformer on WMT 2014 English to
+  German, optimising BLEU on newstest2012, the validation BLEU rose from 23.71 to 24.23 and the test BLEU from 22.30 to
+  22.65. The learnt learning-rate schedule resembled the hand-tuned baseline's: it started small, jumped by three orders
+  of magnitude, then decayed.
+- **<Gloss name="gan" plural />.** On <Gloss name="cifar-10" />, with 45 members, PBT raised the
+  <Gloss name="imagenet" /> Inception score of the best generator from 6.45 to 6.89. The learnt learning rates decayed
+  irregularly, in a way no standard exponential or linear schedule matches.
+
+## Cost
+
+PBT with $P$ members costs about the same as a random search with $P$ parallel trials: $P$ training runs of full length.
+Exploit adds the cost of copying a checkpoint, and each eval costs one validation pass. The search needs $P$ workers at
+once, or a scheduler that time-shares them, and shared storage for checkpoints. Ray Tune and similar libraries implement
+it as a scheduler over trials.
+
+## Trade-offs
+
+- **Against random search.** PBT spends the same compute and usually reaches a better model sooner, because weak
+  members stop wasting it. It returns one schedule tied to one training run, not a constant setting that can be reused
+  to retrain from scratch.
+- **Against successive halving.** <NoteLink to="successive-halving">Successive halving</NoteLink> also stops weak
+  configurations early, but it discards them, and the survivors keep their initial hyperparameters. PBT recycles the
+  discarded workers by restarting them from strong checkpoints with new hyperparameters.
+- **Against evolution strategies.** PBT is an evolutionary algorithm over hyperparameters, with truncation selection
+  and mutation, whose individuals also carry partly trained weights (compare
+  <NoteLink to="evolution-strategies-and-covariance-matrix-adaptation">evolution strategies</NoteLink>).
+- **Which hyperparameters.** PBT suits hyperparameters that can change during training: learning rates,
+  <NoteLink to="regularisation">regularisation</NoteLink> strengths, entropy costs, data-augmentation strengths. It
+  cannot change the architecture of a member in mid-training without a way to transfer the weights.
+
+## Pitfalls
+
+- **Greedy, short-horizon selection.** A short ready interval favours settings that improve the score quickly. A
+  learning rate that is lowered early gives a quick gain and a worse final model. Longer ready intervals and larger
+  populations reduce the effect <Cite id="jaderberg2017" />.
+- **Small populations.** With few members, a few exploits can make every member a copy of one lineage, and exploration
+  then has nothing to compare against.
+- **Selection on noisy scores.** Exploit compares noisy evaluations many times over training. The final member's
+  validation score is the winner of many such comparisons and is optimistic. Jaderberg et al. selected their GANs by the
+  CIFAR Inception score and reported the ImageNet one, to avoid optimising the reported metric directly
+  <Cite id="jaderberg2017" />. Assess the final model on data the population was never scored on (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+- **Schedules do not transfer.** The learnt schedule belongs to the run that found it. Retraining from scratch with the
+  same schedule but a different seed need not reproduce the result.

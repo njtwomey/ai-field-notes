@@ -1,0 +1,217 @@
+---
+title: 'Generalisation gap'
+kind: concept
+summary: 'The generalisation gap of a predictor is its true risk on the data distribution minus its empirical risk on the training sample. For a learned predictor it is positive on average; a large gap is overfitting, and a held-out sample estimates the true risk and so the gap.'
+tags: [learning-theory, generalisation, overfitting, worked-example]
+aliases: [generalization gap, expected generalisation gap, train–test gap]
+requires: [empirical-risk-minimisation]
+related: [test-set-bounds, cross-validation, uniform-convergence, algorithmic-stability, bias-variance-decomposition, learning-curves-and-sample-size, adaptive-data-analysis, statistical-learning-theory]
+references: [shalevshwartz2014, hastie2009, zhang2017, recht2019, dwork2015, mohri2018]
+status: draft
+updated: 2026-10-12
+---
+
+import { GapCurves } from './GapCurves'
+
+<Definition>
+Let $\Dcal$ be a distribution over input–label pairs, $\ell$ a loss, $R(h) = \expect_{(x, y) \sim \Dcal}[\ell(h(x), y)]$
+the true risk of a predictor $h$, and $\hat R_S(h)$ its average loss on a training sample $S$ of $m$ independent draws
+from $\Dcal$. The **generalisation gap** of $h$ on $S$ is
+
+$$
+\mathrm{gap}_S(h) = R(h) - \hat R_S(h).
+$$
+
+For a learning algorithm $A$ that maps a sample to a predictor, the gap of interest is $R(A(S)) - \hat R_S(A(S))$, and
+its average over samples is the **expected generalisation gap**. A learned predictor with a small training error and a
+large gap **overfits** <Cite id="shalevshwartz2014" />.
+</Definition>
+
+## Intuition
+
+A predictor's training error is measured on the same points that were used to choose it. The learner picked the
+predictor because it does well on those points, partly because it fits their noise and their accidents. On fresh
+points the accidents differ, and the error rises. The generalisation gap measures how much the training error flatters
+the predictor.
+
+The gap depends on how much freedom the learner had. A learner that chooses among a few rigid predictors cannot fit
+much noise, and its gap is small. A learner that can fit any labelling, such as a lookup table or a very large network,
+can drive its training error to zero on any data, and its gap is then its whole test error. Statistical learning theory
+is largely a theory of the gap: it bounds $R(h) - \hat R_S(h)$ in terms of the sample size $m$ and a measure of the
+learner's freedom (see <NoteLink to="statistical-learning-theory">statistical learning theory</NoteLink>).
+
+## Training, test and true risk
+
+Three numbers describe a predictor $\hat h = A(S)$ learned from $S$.
+
+- **The true risk** $R(\hat h)$ is its expected loss on a new draw from $\Dcal$. It is the quantity that matters, and it
+  cannot be computed, because $\Dcal$ is unknown.
+- **The training risk** $\hat R_S(\hat h) = \frac1m\sum_{i=1}^m\ell(\hat h(x_i), y_i)$ is its average loss on the
+  training sample. It is known exactly, and it is biased downwards.
+- **The test risk** $\hat R_T(\hat h)$ is its average loss on a held-out sample $T$ of $m_{\text{test}}$ points drawn
+  from $\Dcal$ independently of $S$ and not used in any choice. Conditional on $S$, the predictor $\hat h$ is fixed and
+  the test losses are independent draws with mean $R(\hat h)$, so the test risk is an unbiased estimate of the true
+  risk.
+
+The generalisation gap is the first number minus the second. The test risk is an estimate of the first number, so
+$\hat R_T(\hat h) - \hat R_S(\hat h)$ estimates the gap. Some texts, Shalev-Shwartz and Ben-David's among them, call the
+true risk $R(\hat h)$ itself the generalisation error.
+
+## Why the gap of a learned predictor is biased
+
+For a predictor $h$ fixed before the sample is drawn, each training loss is an independent draw with mean $R(h)$, so
+$\expect_S[\hat R_S(h)] = R(h)$ and the expected gap is zero. A learned predictor depends on the sample, and this
+breaks the argument.
+
+**Empirical risk minimisation is optimistic.** Let $\hat h$ minimise $\hat R_S$ over a class $\Hcal$, and let $h^*$ be
+the member of $\Hcal$ with the smallest true risk. Three steps give the direction of the bias.
+
+1. $\hat R_S(\hat h) \le \hat R_S(h^*)$ on every sample, because $\hat h$ minimises the empirical risk and $h^*$ is one
+   of the candidates.
+2. $\expect_S[\hat R_S(h^*)] = R(h^*)$, because $h^*$ does not depend on $S$.
+3. $R(h^*) \le R(\hat h)$ on every sample, because $h^*$ has the smallest true risk in the class.
+
+Taking expectations of the first and third inequalities and joining them through the second,
+
+$$
+\expect_S\brack{\hat R_S(\hat h)} \le R(h^*) \le \expect_S\brack{R(\hat h)}.
+$$
+
+On average the training error of <Gloss name="erm" /> is below even the best risk achievable in the class, and the
+expected gap is non-negative.
+
+**The gap equals the effect of seeing each point.** A second identity says where the gap comes from for any algorithm.
+Let $S^{(i)}$ be the sample with its $i$-th point $z_i = (x_i, y_i)$ replaced by an independent fresh point. Then
+
+$$
+\expect_S\brack{R(A(S)) - \hat R_S(A(S))} = \frac1m\sum_{i=1}^m \expect\brack{\ell(A(S^{(i)}), z_i) - \ell(A(S), z_i)}
+$$
+
+<Cite id="shalevshwartz2014" />. The right side is the average increase in the loss on a point when that point is
+removed from training. An algorithm whose output barely changes when one point changes has a small expected gap. This is
+the starting point of <NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>.
+
+<Derivation title="The replace-one identity">
+Write $\ell(h, z)$ for the loss of $h$ on the pair $z$. The training risk averages $\ell(A(S), z_i)$ over $i$, so
+$\expect[\hat R_S(A(S))] = \frac1m\sum_i\expect[\ell(A(S), z_i)]$.
+
+For the true risk, draw a fresh point $z_i'$ independent of $S$. Then $\expect[R(A(S))] = \expect[\ell(A(S), z_i')]$ for
+every $i$, because $R$ is the expected loss on an independent draw. Now exchange the names of $z_i$ and $z_i'$. The pair
+$(S, z_i')$ has the same distribution as the pair $(S^{(i)}, z_i)$, because both consist of $m + 1$ independent draws
+from $\Dcal$ with one of them held out. Hence $\expect[\ell(A(S), z_i')] = \expect[\ell(A(S^{(i)}), z_i)]$. Averaging
+over $i$ and subtracting the training risk gives the identity.
+</Derivation>
+
+**An exact gap for least squares.** Fit a linear model with $p$ coefficients by least squares to $m$ points with fixed
+inputs and targets $y_i = f(x_i) + \varepsilon_i$, where the noise has variance $\sigma^2$. Measure the error at the
+same inputs with fresh noise. Whatever the regression function $f$, the expected training error and the expected error
+on fresh noise differ by
+
+$$
+\frac{2p\sigma^2}{m}
+$$
+
+<Cite id="hastie2009" />. The gap grows in proportion to the number of fitted parameters and shrinks in proportion to
+the sample size. With $m = 50$ points, $p = 10$ coefficients, $\sigma^2 = 1$ and a correct linear model, the expected
+training error is $\sigma^2(1 - p/m) = 0.8$, the expected error on fresh noise is $\sigma^2(1 + p/m) = 1.2$, and the gap
+is $0.4$.
+
+<Derivation title="The least-squares gap">
+Stack the inputs into the design $\Xmat$ ($m \times p$, full column rank) and the targets into
+$\yvec = \fvec + \epsilonb$, with $\fvec$ the vector of $f(x_i)$ and $\epsilonb$ independent noise with mean 0 and
+variance $\sigma^2$. Least squares predicts $\hat\yvec = \Hmat\yvec$ with the hat matrix
+$\Hmat = \Xmat(\Xmat^\top\Xmat)^{-1}\Xmat^\top$, an orthogonal projection of rank $p$, so $\trace\Hmat = p$.
+
+The training residual is $(\Imat - \Hmat)\yvec = (\Imat - \Hmat)\fvec + (\Imat - \Hmat)\epsilonb$. The cross term has
+mean 0, and $\expect\norm{(\Imat - \Hmat)\epsilonb}^2 = \sigma^2\trace(\Imat - \Hmat) = \sigma^2(m - p)$. So the
+expected training error is $\frac1m\norm{(\Imat - \Hmat)\fvec}^2 + \sigma^2(m - p)/m$.
+
+On fresh noise $\epsilonb'$ at the same inputs, the error vector is
+$\Hmat\yvec - \fvec - \epsilonb' = -(\Imat - \Hmat)\fvec + \Hmat\epsilonb - \epsilonb'$. The three terms are
+uncorrelated, and $\expect\norm{\Hmat\epsilonb}^2 =
+\sigma^2\trace\Hmat = \sigma^2 p$. So the expected error is $\frac1m\norm{(\Imat - \Hmat)\fvec}^2 + \sigma^2p/m +
+\sigma^2$.
+
+Subtracting, the bias terms cancel and the gap is $\sigma^2 + \sigma^2p/m - \sigma^2(m - p)/m = 2p\sigma^2/m$.
+</Derivation>
+
+**The extreme case.** A model that can fit any labelling has a training error near zero whatever the labels are. Zhang
+et al. trained standard <NoteLink to="convolutional-networks">convolutional networks</NoteLink> on
+<Gloss name="cifar-10" /> images with labels replaced by random ones. The networks fit the random labels exactly, so
+their training error was zero, while their test accuracy could only be chance, 10% <Cite id="zhang2017" />. The gap was
+the whole test error, about $0.9$. The same architectures trained on the true labels had small gaps, so the capacity of
+the class alone does not decide the gap of the trained network. This observation is the subject of
+<NoteLink to="limits-of-uniform-convergence">the limits of uniform convergence</NoteLink>.
+
+## Bounding the gap
+
+A learned predictor's gap cannot be bounded by looking at that predictor alone, because the predictor was chosen using
+$S$. Bounds instead hold for every predictor the learner could have returned. If the learner chooses from a class
+$\Hcal$, then
+
+$$
+R(\hat h) - \hat R_S(\hat h) \le \sup_{h \in \Hcal}\paren{R(h) - \hat R_S(h)},
+$$
+
+whatever rule chose $\hat h$. The right side, the uniform deviation, involves only the class and the sample. For a
+finite class of $N$ predictors and losses in $[0, 1]$, <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink> and the <NoteLink to="union-bound">union bound</NoteLink> give, with probability at least
+$1 - \delta$,
+
+$$
+R(\hat h) - \hat R_S(\hat h) \le \sqrt{\frac{\ln N + \ln(1/\delta)}{2m}}.
+$$
+
+Infinite classes replace $\ln N$ by a capacity such as the <NoteLink to="vapnik-chervonenkis-dimension">VC
+dimension</NoteLink> or the <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink>; the general theory is
+<NoteLink to="uniform-convergence">uniform convergence</NoteLink>. Bounds that use the algorithm rather than the class
+follow from the replace-one identity above (stability) or from a prior over predictors
+(<NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>).
+
+<GapCurves />
+
+## Measuring the gap
+
+A held-out sample measures the gap with a known accuracy. Conditional on $S$, the test losses of $\hat h$ are
+independent and bounded, so for <NoteLink to="surrogate-losses">0–1 loss</NoteLink> Hoeffding's inequality gives, with
+probability at least $1 - \delta$,
+
+$$
+\abs{\hat R_T(\hat h) - R(\hat h)} \le \sqrt{\frac{\ln(2/\delta)}{2m_{\text{test}}}}.
+$$
+
+The training error $\hat R_S(\hat h)$ is known exactly, so the same interval, shifted, covers the gap.
+
+**Worked example.** A classifier has training error $0.02$ on its training set and makes 110 mistakes on a held-out set
+of $m_{\text{test}} = 1\,000$ points, a test error of $0.11$.
+
+1. **The estimate.** The estimated gap is $0.11 - 0.02 = 0.09$.
+2. **Its accuracy.** At $\delta = 0.05$ the Hoeffding radius is $\sqrt{\ln(40)/2\,000} = \sqrt{3.689/2\,000} = 0.043$.
+3. **The interval.** With probability at least $0.95$, the true risk lies in $[0.067, 0.153]$ and the gap in
+   $[0.047, 0.133]$. The gap is positive: the classifier overfits.
+4. **Sample size.** Measuring the gap to within $\pm 0.01$ at the same confidence needs
+   $m_{\text{test}} \ge \ln(40)/(2 \cdot 0.01^2) = 18\,445$ test points.
+
+The exact binomial tail gives a shorter interval than Hoeffding's, especially for small
+<NoteLink to="accuracy-and-balanced-accuracy">error rates</NoteLink> (see <NoteLink to="test-set-bounds">test-set
+bounds</NoteLink>).
+
+<NoteLink to="cross-validation">Cross-validation</NoteLink> reuses the data to estimate the expected risk of the
+algorithm at sample size close to $m$, which is a different quantity from the risk of the one predictor $\hat h$.
+
+## Pitfalls
+
+- **A small gap is not a good model.** A constant predictor has a tiny gap and a large error. The gap measures
+  overfitting; underfitting shows as a large training error with a small gap.
+- **Reusing the test set shrinks the apparent gap.** Each model choice made by looking at the test error makes the test
+  set part of the training data. After many rounds, the test error is optimistic for the same reason the training error
+  is <Cite id="dwork2015" />. The fix is a fresh test set or a protocol from
+  <NoteLink to="adaptive-data-analysis">adaptive data analysis</NoteLink>.
+- **Distribution shift is not overfitting.** A test set drawn from a slightly different distribution adds a second gap.
+  Recht et al. built new <NoteLink to="test-sets">test sets</NoteLink> for CIFAR-10 and <Gloss name="imagenet" />
+  following the original collection process and found accuracy drops of 3–15% and 11–14%; they attribute the drops to
+  harder images rather than to <NoteLink to="test-set-reuse">test-set reuse</NoteLink> <Cite id="recht2019" />.
+- **Leakage hides the gap.** Duplicates between training and test sets, or features computed using test labels, make the
+  test error optimistic (see <NoteLink to="data-leakage">data leakage</NoteLink>).
+- **The gap can be negative on one sample.** $R(\hat h) - \hat R_S(\hat h)$ is a <NoteLink to="random-variable">random
+  variable</NoteLink>. Only its average, for ERM, is guaranteed to be non-negative.

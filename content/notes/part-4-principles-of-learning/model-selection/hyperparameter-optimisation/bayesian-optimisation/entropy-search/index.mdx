@@ -1,0 +1,192 @@
+---
+title: 'Entropy search'
+kind: concept
+summary: 'Entropy search evaluates where an observation is expected to most reduce uncertainty about the optimum: about its location for entropy search and predictive entropy search, or about its value for max-value entropy search, whose score has a closed form under a Gaussian posterior.'
+tags: [model-selection, optimisation, bayesian, information-theory, worked-example]
+aliases: [ES, predictive entropy search, PES, max-value entropy search, MES, information-based acquisition]
+requires: [acquisition-functions, entropy, mutual-information, differential-entropy]
+related: [expected-improvement, gaussian-process-upper-confidence-bound, bayesian-active-learning, thompson-sampling, expectation-propagation, bayesian-optimisation]
+references: [hennig2012, hernandezlobato2014, wang2017mes, garnett2023, shahriari2016, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { MaxValueInformation } from './MaxValueInformation'
+import { BoWalkthrough } from '../_shared/BoWalkthrough'
+
+<Definition>
+**Entropy search** is a family of <NoteLink to="acquisition-functions">acquisition functions</NoteLink> for
+<NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> that score a candidate $\lambdavec$ by the
+<NoteLink to="mutual-information">mutual information</NoteLink> between its observation $y$ and an unknown property of
+the optimum, given the evaluations $\Dcal_t$ so far. For minimising $f$ the property is either the minimiser
+$\lambdavec^\star = \argmin f$ or the minimum value $f^\star = \min f$:
+
+$$
+\alpha^{\text{ES}}_t(\lambdavec) = I\paren{y; \lambdavec^\star \mid \Dcal_t, \lambdavec}, \qquad
+\alpha^{\text{MES}}_t(\lambdavec) = I\paren{y; f^\star \mid \Dcal_t, \lambdavec}.
+$$
+
+Entropy search (ES) and predictive entropy search (PES) target the location <Cite id="hennig2012" />
+<Cite id="hernandezlobato2014" />. Max-value entropy search (MES) targets the value <Cite id="wang2017mes" />.
+</Definition>
+
+## Intuition
+
+<Gloss name="ei">Expected improvement</Gloss> and the confidence bound look for good values now. Entropy search looks
+for evaluations that teach where the optimum is. The two aims differ. A candidate whose value is almost surely mediocre
+can still be informative, if its value would separate two hypotheses about where the minimum lies. A candidate whose
+value is almost surely good may teach nothing new, if the posterior already knows it.
+
+The posterior over $f$ implies a distribution over the minimiser, $p(\lambdavec^\star \mid \Dcal_t)$. Early in a search
+that distribution is spread over $\Lambda$; at the end it should be concentrated on one small region. Its
+<NoteLink to="entropy">entropy</NoteLink> measures the remaining uncertainty. Entropy search chooses the evaluation that
+is expected to shrink that entropy the most. The same idea chooses queries in
+<NoteLink to="bayesian-active-learning">Bayesian active learning</NoteLink>, where the unknown is the model rather than
+the optimum.
+
+The target suits <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>. A search is judged by the
+configuration it recommends at the end, not by the sum of the losses it evaluated on the way. Information about the
+optimum is what improves the final recommendation.
+
+## Two ways to write the information
+
+Mutual information is symmetric, $I(y; \lambdavec^\star) = I(\lambdavec^\star; y)$, so the acquisition has two
+expansions. Writing $\entropy$ for entropy, with everything conditioned on $\Dcal_t$ and the candidate $\lambdavec$:
+
+$$
+I(y; \lambdavec^\star) = \entropy\brack{p(\lambdavec^\star)} - \expect_{y}\entropy\brack{p(\lambdavec^\star \mid y)}
+= \entropy\brack{p(y)} - \expect_{\lambdavec^\star}\entropy\brack{p(y \mid \lambdavec^\star)}.
+$$
+
+**Entropy search** uses the first form: the entropy of the minimiser's distribution now, less its expected entropy after
+the observation <Cite id="hennig2012" />. Both terms involve $p(\lambdavec^\star \mid \Dcal_t)$, a distribution over the
+whole <NoteLink to="hyperparameter-search-spaces">search space</NoteLink> with no closed form. Hennig and Schuler
+approximate it on a set of representer points with <NoteLink to="expectation-propagation">expectation
+propagation</NoteLink>, and approximate the expectation over $y$. The method is accurate but expensive, and the cost
+grows quickly with the dimension.
+
+**Predictive entropy search** uses the second form <Cite id="hernandezlobato2014" />. The first term is the entropy of
+the one-dimensional predictive distribution of $y$, which is Gaussian. The second needs the predictive distribution of
+$y$ given that the minimiser is at $\lambdavec^\star$, averaged over samples of $\lambdavec^\star$. The samples are the
+minimisers of approximate posterior draws built on <NoteLink to="random-fourier-features">random Fourier
+features</NoteLink>, as in <NoteLink to="thompson-sampling">Thompson sampling</NoteLink>. The conditioning is
+approximated by expectation propagation. Every entropy is now of a one-dimensional distribution, which is cheaper and
+more stable than ES.
+
+## Max-value entropy search
+
+Wang and Jegelka replaced the minimiser $\lambdavec^\star \in \Lambda$ by the minimum value $f^\star \in \reals$, a
+single number <Cite id="wang2017mes" />. With noise-free observations $y = f(\lambdavec)$,
+
+$$
+\alpha^{\text{MES}}_t(\lambdavec) = \entropy\brack{p(y \mid \Dcal_t, \lambdavec)}
+- \expect_{f^\star}\entropy\brack{p(y \mid \Dcal_t, \lambdavec, f^\star)}.
+$$
+
+The first distribution is the Gaussian posterior $\Gauss(\mu, \sigma^2)$, with $\mu = \mu_t(\lambdavec)$ and
+$\sigma = \sigma_t(\lambdavec)$. Knowing that the minimum of $f$ is $f^\star$ tells, at least, that
+$f(\lambdavec) \ge f^\star$. MES keeps only that constraint, so the second distribution is the Gaussian truncated to
+$[f^\star, \infty)$. Both entropies then have closed forms.
+
+**Step 1: the truncated density.** Write $u = (f - \mu)/\sigma$ and $\gamma = (\mu - f^\star)/\sigma$, the number of
+standard deviations by which the mean lies above the minimum. The constraint $f \ge f^\star$ is $u \ge -\gamma$, which
+has probability $1 - \Phi(-\gamma) = \Phi(\gamma)$. The truncated density is
+
+$$
+q(f) = \frac{\varphi(u)}{\sigma\,\Phi(\gamma)}, \qquad f \ge f^\star.
+$$
+
+**Step 2: its entropy.** Since $-\log q(f) = \log\sigma + \log\Phi(\gamma) + \frac12\log 2\pi + \frac12 u^2$,
+
+$$
+\entropy[q] = \log\sigma + \log\Phi(\gamma) + \tfrac12\log 2\pi + \tfrac12\expect_q[u^2].
+$$
+
+**Step 3: the second moment.** Integrating by parts with $\varphi'(u) = -u\varphi(u)$, $\int_{-\gamma}^{\infty} u^2\varphi(u)\,du = \brack{-u\varphi(u)}_{-\gamma}^{\infty} + \int_{-\gamma}^{\infty}\varphi(u)\,du
+= -\gamma\varphi(\gamma) + \Phi(\gamma)$, using $\varphi(-\gamma) = \varphi(\gamma)$. Dividing by the mass
+$\Phi(\gamma)$,
+
+$$
+\expect_q[u^2] = 1 - \frac{\gamma\,\varphi(\gamma)}{\Phi(\gamma)}.
+$$
+
+**Step 4: the drop in entropy.** The untruncated Gaussian has entropy $\log\sigma + \frac12\log(2\pi e)$
+(<NoteLink to="differential-entropy">differential entropy</NoteLink>). Subtracting Step 2 with Step 3 inserted,
+
+$$
+\entropy\brack{\Gauss(\mu, \sigma^2)} - \entropy[q] = \frac{\gamma\,\varphi(\gamma)}{2\,\Phi(\gamma)} - \log\Phi(\gamma).
+$$
+
+Averaging over $K$ samples $f^\star_1, \dots, f^\star_K$ of the minimum gives the acquisition,
+
+$$
+\alpha^{\text{MES}}_t(\lambdavec) \approx \frac{1}{K}\sum_{k=1}^{K}\brack{\frac{\gamma_k\varphi(\gamma_k)}{2\Phi(\gamma_k)}
+- \log\Phi(\gamma_k)}, \qquad \gamma_k = \frac{\mu_t(\lambdavec) - f^\star_k}{\sigma_t(\lambdavec)}.
+$$
+
+Each term is non-negative. Truncation shrinks the variance, and among densities with a given variance the Gaussian has
+the largest entropy, so the truncated density has less entropy than the Gaussian it came from. A candidate scores highly
+when its posterior reaches down to the sampled minima, so that the constraint cuts off a large part of its distribution.
+
+<MaxValueInformation />
+
+**Sampling the minimum.** The samples $f^\star_k$ come from the posterior of $\min f$. One way draws functions from the
+posterior and takes their minima. Wang and Jegelka's cheaper way treats the posterior values on a dense set of
+candidates as independent, so that $\prob(\min f > y) \approx \prod_i \paren{1 - \Phi((y - \mu_i)/\sigma_i)}$. They fit
+a Gumbel distribution to this function at its quartiles and sample from the Gumbel by inversion
+<Cite id="wang2017mes" />. Samples above the incumbent are moved down to it, since the minimum cannot exceed a value
+already observed.
+
+**A link to the probability of improvement.** The score for one sample depends on $\gamma$ alone and falls steadily as
+$\gamma$ grows, as the right panel of the figure shows. Maximising it over candidates is therefore the same as
+minimising $\gamma$, that is, maximising $\Phi(-\gamma) = \prob(f(\lambdavec) < f^\star)$. With a single sample, MES is
+the probability of improvement with the target $f^\star$ <Cite id="wang2017mes" />. Averaging over several samples
+gives a rule with no exact equivalent among the simpler acquisitions.
+
+<BoWalkthrough mode="mes" />
+
+## Worked example
+
+The posterior has three samples of the minimum, $f^\star \in \set{-1.2, -1.0, -0.9}$, and the incumbent is $-0.9$. Four
+candidates have posterior means and standard deviations
+
+| candidate | $\mu$ | $\sigma$ | $\gamma$ for the three samples | MES | EI |
+| --- | --- | --- | --- | --- | --- |
+| A | $-0.80$ | $0.10$ | $4.0,\ 2.0,\ 1.0$ | $0.132$ | $0.008$ |
+| B | $0$ | $1.00$ | $1.2,\ 1.0,\ 0.9$ | $0.307$ | $0.100$ |
+| C | $-0.50$ | $0.40$ | $1.75,\ 1.25,\ 1.0$ | $0.225$ | $0.033$ |
+| D | $-0.95$ | $0.05$ | $5.0,\ 1.0,\ -1.0$ | $0.465$ | $0.054$ |
+
+**One term by hand.** For $\gamma = 1$, $\varphi(1) = 0.2420$ and $\Phi(1) = 0.8413$. The first part is
+$0.2420/(2 \times 0.8413) = 0.1438$ and the second is $-\log 0.8413 = 0.1728$, so the term is $0.3166$ nats. Every
+candidate has one sample with $\gamma = 1$ and so shares this term.
+
+**Candidate D.** Its sample $f^\star = -0.9$ gives $\gamma = -1$, with $\Phi(-1) = 0.1587$. The term is
+$(-1)(0.2420)/(2 \times 0.1587) - \log 0.1587 = -0.7625 + 1.8409 = 1.0785$. The posterior puts 84% of D's mass below
+$-0.9$, and that sample says the minimum is no lower than $-0.9$: the constraint would cut away most of the
+distribution. The sample at $-1.2$ gives $\gamma = 5$ and a term of essentially zero. The average is
+$(0.0000 + 0.3166 + 1.0785)/3 = 0.465$.
+
+**The choice.** MES chooses D, whose value would settle whether the minimum lies near $-0.95$ or further down. EI with
+incumbent $-0.9$ chooses B, the wide posterior whose lower tail could reach far below the incumbent. The two rules
+answer different questions: where to look for a low value, and which observation tells most about how low the minimum
+is.
+
+## Assumptions
+
+- **A <Gloss name="gp">Gaussian-process</Gloss> posterior with calibrated variance.** Every entropy is computed from it.
+- **The truncation approximation.** Conditioning on $f^\star$ changes the posterior everywhere, not only at the
+  candidate. MES keeps only $f(\lambdavec) \ge f^\star$ at the candidate. The Gumbel sampler also treats correlated
+  values as independent, which makes the sampled minima lower than the posterior implies.
+- **Noise-free observations.** The derivation truncates the value $f(\lambdavec)$, not the noisy observation $y$. With
+  substantial noise the score needs a correction, which later work supplies <Cite id="garnett2023" />.
+
+## Pitfalls
+
+- **Few samples of the optimum.** With small $K$ the acquisition is noisy and changes from step to step. With $K = 1$
+  MES is the probability of improvement against a random target.
+- **Cost of ES and PES.** Both need expectation propagation and many samples, and are slow beyond a few dimensions. MES
+  costs about as much as expected improvement once the samples are drawn.
+- **Recommending the best observation.** An information-based search evaluates points to learn, not to score well, so
+  its best observed value can lag behind. The recommendation at the end is the minimiser of the posterior mean, which
+  also avoids reporting a value that is low only by noise.

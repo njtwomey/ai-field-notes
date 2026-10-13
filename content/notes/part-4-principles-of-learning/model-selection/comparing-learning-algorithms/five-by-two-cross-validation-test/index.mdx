@@ -1,0 +1,176 @@
+---
+title: '5×2 cross-validation test'
+kind: test
+summary: 'Dietterich''s 5×2cv test runs 2-fold cross-validation five times and divides one fold difference by a variance pooled over the five replications, giving a t statistic with 5 degrees of freedom. Alpaydın''s combined F test uses all ten differences.'
+tags: [model-selection, evaluation, hypothesis-testing, resampling, worked-example]
+aliases: [5x2cv test, 5×2cv paired t-test, 5x2 cross-validated paired t-test, Dietterich's 5x2cv test, combined 5x2cv F test, Alpaydın's F test]
+requires: [paired-t-test, k-fold-cross-validation]
+related: [corrected-resampled-t-test, mcnemars-test, is-one-classifier-better-than-another, comparing-learning-algorithms, variance-of-cross-validation-estimates]
+references: [dietterich1998, alpaydin1999, nadeau2003, bouckaert2004, raschka2018]
+status: draft
+updated: 2026-10-13
+---
+
+import { NumeratorChoice } from './NumeratorChoice'
+import { TypeIErrorRates } from '../_shared/TypeIErrorRates'
+
+<Definition>
+The **5×2 cross-validation test** compares two learning algorithms A and B on one data set. Five times, the data are
+split at random into two halves; each algorithm trains on one half and is tested on the other, then the roles swap. Let
+$p_i^{(j)}$ be A's score minus B's on fold $j \in \{1, 2\}$ of replication $i \in \{1, \dots, 5\}$, $\bar p_i$ the
+mean of replication $i$ and $s_i^2 = (p_i^{(1)} - \bar p_i)^2 + (p_i^{(2)} - \bar p_i)^2$. Dietterich's statistic
+
+$$
+\tilde t = \frac{p_1^{(1)}}{\sqrt{\frac15\sum_{i=1}^5 s_i^2}}
+$$
+
+is approximately t-distributed with 5 degrees of freedom under the null hypothesis of equal
+expected scores <Cite id="dietterich1998" />. Alpaydın's **combined F test**
+replaces the single numerator with all ten differences <Cite id="alpaydin1999" />.
+</Definition>
+
+## What it answers
+
+The test addresses the same question as the <NoteLink to="corrected-resampled-t-test">corrected resampled
+t-test</NoteLink>: trained on data sets of this size from this distribution, does algorithm A score higher than B? The
+difficulty is also the same. Differences computed on overlapping splits of one data set are correlated, and a
+<NoteLink to="paired-t-test">paired t-test</NoteLink> that treats them as independent rejects far too often.
+
+Dietterich's answer is a design that limits the overlap. In 2-fold cross-validation the two training sets are disjoint,
+and each test set is the other fold's training set. Within one replication, no training row is shared. The variance is
+estimated from the disagreement between the two folds of each replication, and five replications give five such
+estimates to pool.
+
+## Hypotheses
+
+$H_0: \mu = 0$, where $\mu$ is the expected difference in score between A and B when each is trained on $n/2$ rows
+from the population. The alternative is $\mu \ne 0$, or a one-sided alternative fixed in advance. The training size is
+half the data, so the test compares the algorithms at $n/2$ rows, not at $n$.
+
+## Assumptions
+
+Dietterich lists the approximations the derivation rests on, and says that two of them are false
+<Cite id="dietterich1998" />:
+
+1. Each difference $p_i^{(j)}$ is approximately normal, which for accuracy needs each half to hold at least about 30
+   rows.
+2. The two differences of one replication are independent. They are not: the two folds swap the same two halves.
+3. The five variance estimates $s_i^2$ are independent. They are not, since all replications use the same data, but
+   Dietterich judged this the least harmful approximation.
+4. The numerator $p_1^{(1)}$ is independent of the denominator. It is one of the terms in $s_1^2$, so it is not
+   exactly independent.
+
+The test is a calibrated approximation, not an exact result. Its justification is the simulations that measured its
+false-rejection rate.
+
+## Test statistic
+
+**Under the approximations.** Let each difference be normal with mean $\mu$ and variance $\sigma^2$, independent
+within a replication. Then:
+
+1. **One replication's variance.** $p_i^{(1)}$ and $p_i^{(2)}$ are two independent draws, and their sample variance with
+   divisor $2 - 1 = 1$ is $s_i^2 = (p_i^{(1)} - p_i^{(2)})^2/2$, because each deviation from the mean of two numbers is
+   half their difference. Their difference $p_i^{(1)} - p_i^{(2)}$ is $\Gauss(0, 2\sigma^2)$ whatever $\mu$ is, so
+   $s_i^2/\sigma^2 = \paren{(p_i^{(1)} - p_i^{(2)})/\sqrt{2}\sigma}^2 \sim \chi^2_1$.
+2. **Pooled over replications.** With the five replications independent, $\sum_i s_i^2/\sigma^2 \sim \chi^2_5$, so
+   $\frac15\sum_i s_i^2$ estimates $\sigma^2$ with 5 degrees of freedom.
+3. **The numerator.** Under $H_0$, $p_1^{(1)}/\sigma \sim \Gauss(0, 1)$.
+4. **The ratio.** A standard normal over the square root of an independent $\chi^2_5/5$ has a t distribution with 5
+   degrees of freedom, which gives $\tilde t \sim t_5$.
+
+**Why a single numerator.** The obvious numerator is the mean of all ten differences. Dietterich found that its
+variance was occasionally very poorly estimated by the pooled $s_i^2$, because the ten differences are correlated
+<Cite id="dietterich1998" />. One difference has the variance $\sigma^2$ that the denominator estimates. He also
+reported that fewer or more than five replications raised the risk of false rejections.
+
+**The combined F test.** The choice of $p_1^{(1)}$ is arbitrary: relabelling the replications or the folds puts any of
+the ten differences in the numerator, and the verdict can change <Cite id="alpaydin1999" />. Alpaydın uses all ten.
+Under $H_0$ each $p_i^{(j)}/\sigma$ is standard normal, so under the same independence approximations $N = \sum_{i,j}
+\paren{p_i^{(j)}}^2/\sigma^2 \sim \chi^2_{10}$, while $M = \sum_i s_i^2/\sigma^2 \sim \chi^2_5$. The ratio of each to
+its degrees of freedom is
+
+$$
+f = \frac{N/10}{M/5} = \frac{\sum_{i=1}^5\sum_{j=1}^2 \paren{p_i^{(j)}}^2}{2\sum_{i=1}^5 s_i^2} \sim F(10, 5),
+$$
+
+in which $\sigma^2$ cancels. Large $f$ is evidence against $H_0$. The test is two-sided by construction, since it
+squares the differences.
+
+## Decision rule
+
+- **5×2cv t:** reject at level $\alpha$ when $\abs{\tilde t} \ge t_{1 - \alpha/2,\, 5}$, which is 2.571 at
+  $\alpha = 0.05$.
+- **Combined F:** reject when $f \ge F_{1 - \alpha}(10, 5)$, which is 4.74 at $\alpha = 0.05$
+  <Cite id="alpaydin1999" />.
+
+<NumeratorChoice />
+
+The figure shows the arbitrariness on one simulated data set where B is handicapped. Dietterich's statistic, with
+difference 1.1 in the numerator, does not reject. Three of the other nine choices do. The combined F test gives one
+verdict and rejects at $p = 0.047$. Alpaydın reported the same pattern on real data: comparing a linear model with a
+<Gloss name="mlp">multilayer perceptron</Gloss>, the number of the ten t statistics that rejected ranged from 0 on two
+data sets to 10 on another <Cite id="alpaydin1999" />.
+
+## Worked example
+
+Two learners on a data set of $n = 200$ rows, with five replications of 2-fold cross-validation. Each fold trains on 100
+rows and tests on the other 100, so the accuracy differences are multiples of 0.01. This is the data set of
+<NoteLink to="is-one-classifier-better-than-another">is one classifier better than another?</NoteLink>, on which the two
+learners are equally good.
+
+| Replication $i$ | $p_i^{(1)}$ | $p_i^{(2)}$ | $\bar p_i$ | $s_i^2 = (p_i^{(1)} - p_i^{(2)})^2/2$ |
+| --------------- | ----------- | ----------- | ---------- | ------------------------------------- |
+| 1               | 0.030       | 0.100       | 0.065      | 0.00245                               |
+| 2               | 0.000       | 0.040       | 0.020      | 0.00080                               |
+| 3               | −0.010      | −0.080      | −0.045     | 0.00245                               |
+| 4               | 0.030       | 0.030       | 0.030      | 0                                     |
+| 5               | 0.070       | 0.050       | 0.060      | 0.00020                               |
+
+1. **Pooled variance.** $\sum_i s_i^2 = 0.0059$, so $\frac15\sum_i s_i^2 = 0.00118$ and its square root is 0.0344.
+2. **Dietterich's t.** $\tilde t = 0.030/0.0344 = 0.87$. With 5 degrees of freedom, $p = 0.42$. No difference.
+3. **Combined F.** The squared differences sum to 0.0282, so $f = 0.0282/(2 \times 0.0059) = 2.39$. Against $F(10,
+   5)$, $p = 0.17$. No difference.
+4. **Reading.** Seven of the ten differences are positive and their mean is 0.026, which looks like a 3-point advantage
+   for A. The replications disagree among themselves by as much (replication 3 favours B), and both tests say the
+   evidence is weak. The paired t-test on the 100 differences of 10 repeats of 10-fold cross-validation on the same data
+   gives $p = 0.002$, the <Gloss name="fp">false positive</Gloss> that the
+   <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink> removes.
+
+## How well it works
+
+<TypeIErrorRates highlight={['fiveByTwoT', 'combinedF']} />
+
+- **Level.** In Dietterich's simulations the 5×2cv test held its nominal level in most settings, and its quantiles were
+  somewhat conservative in the tails <Cite id="dietterich1998" />. It can fail when the
+  <NoteLink to="accuracy-and-balanced-accuracy">error rates</NoteLink> vary widely between replications. Alpaydın found
+  that the combined F test had a lower false-rejection rate than the 5×2cv t and more power <Cite id="alpaydin1999" />.
+  In the figure both stay near or below 5% when the learners are equal.
+- **Power.** Each model trains on half the data, and the variance estimate has only 5 degrees of freedom. Among the
+  tests with an acceptable false-rejection rate, Dietterich found 5×2cv slightly more powerful than
+  <NoteLink to="mcnemars-test">McNemar's test</NoteLink>. Nadeau and Bengio found it the least powerful of the
+  procedures they compared, and at times too liberal <Cite id="nadeau2003" />.
+- **Replicability.** Bouckaert and Frank re-ran each test on ten random partitions of the same data. The 5×2cv test
+  changed its verdict most often, and the corrected test on 10 repeats of 10-fold cross-validation least often
+  <Cite id="bouckaert2004" />. A test whose answer depends on the seed of the partition is hard to report.
+
+Current practice follows from these results. Raschka's survey recommends the combined F test for small data sets
+<Cite id="raschka2018" />. When the algorithms are cheap enough for 100 fits, the corrected resampled t-test on
+10 repeats of 10-fold cross-validation is more powerful and more replicable.
+
+## Effect size
+
+Report the mean of the ten differences, here 0.026, with the caution that its <NoteLink to="standard-error">standard
+error</NoteLink> is not $s/\sqrt{10}$: the ten differences are correlated. The test supplies a verdict, not an interval.
+For an interval, use the <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink>.
+
+## Pitfalls
+
+- **Half-size training sets.** The comparison is at $n/2$ rows. Two algorithms whose ranking changes with the amount of
+  data, such as a flexible model that overtakes a simple one as $n$ grows, can rank differently at $n$.
+- **Averaging the ten differences into a t-test.** A t-test of the ten differences against $s/\sqrt{10}$ ignores their
+  correlation, which is the problem the design exists to avoid.
+- **Different partitions for A and B.** Both algorithms must be trained and tested on the same five pairs of halves.
+- **Choosing the numerator after seeing the data.** Reporting the most favourable of the ten t statistics inflates the
+  <Gloss name="fpr">false-positive rate</Gloss>; use $p_1^{(1)}$ as defined, or the combined F test.
+- **Few rows.** With fewer than about 60 rows each half is too small for the normal approximation, and the variance
+  estimate is very noisy.

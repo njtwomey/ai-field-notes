@@ -1,0 +1,98 @@
+---
+title: 'Comparing learning algorithms'
+kind: overview
+summary: 'Tests of whether one model or learning algorithm beats another: McNemar''s test on one test set, the corrected resampled and 5×2cv tests on one data set, Friedman and Nemenyi ranks across data sets, Bayesian posteriors with a practical-equivalence region, and fair tuning budgets.'
+tags: [model-selection, evaluation, hypothesis-testing]
+aliases: [algorithm comparison, statistical comparison of learning algorithms]
+requires: [cross-validation, hypothesis-testing]
+related: [model-selection, metric-confidence-intervals, selection-bias-and-nested-cross-validation, evaluation-metrics]
+references: [dietterich1998, demsar2006, benavoli2017]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+Comparing learning algorithms is the statistics of deciding whether a difference in score between two or more models,
+or the algorithms that produced them, is larger than the noise in its measurement. The noise comes from the test set,
+the training set, the learners' internal randomness and the tuning. Which test is valid depends on what is being
+compared and on how the scores were resampled.
+</Definition>
+
+## What it is for
+
+Every claim that a method improves on another rests on a comparison: a new architecture against a baseline, a tuned
+model against the one in production, a family of algorithms across a benchmark suite. A score difference on its own is
+not evidence. Two runs of the same algorithm with different seeds or splits differ too, and the comparison is
+informative only when the difference is large against that spread.
+
+The question also comes in three sizes, and each needs its own test <Cite id="dietterich1998" />:
+
+- **Two fitted models on one test set.** Is this model more accurate than that one on the cases it will face?
+- **Two algorithms on one data set.** Trained on data sets of this size from this distribution, does one algorithm
+  score higher on average? Resampling the training data is then part of the experiment.
+- **Algorithms across many data sets.** Does one algorithm tend to win across problems? The data set becomes the unit of
+  replication.
+
+## Main ideas
+
+**Pair the comparison.** Score both models on the same test cases and both algorithms on the same splits. The
+differences then cancel what the two have in common, such as easy and hard cases or lucky and unlucky splits.
+<NoteLink to="mcnemars-test">McNemar's test</NoteLink> takes this to its limit for two classifiers on one test set: only
+the cases on which they disagree carry information, and under equal accuracy each disagreement is a fair coin.
+
+**Resampled scores are correlated.** Cross-validation folds of one data set share their training rows, so their score
+differences rise and fall together. A <NoteLink to="paired-t-test">paired t-test</NoteLink> that treats them as
+independent understates the <NoteLink to="standard-error">standard error</NoteLink>, more so the more folds it is given,
+and declares differences that are not there. The <NoteLink to="corrected-resampled-t-test">corrected resampled
+t-test</NoteLink> inflates the variance by a term for the overlap, $n_2/n_1$; the
+<NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink> limits the overlap by design. The
+reason is the one behind the <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation
+estimates</NoteLink>: one data set cannot reveal how much its own luck moves the result. The
+<NoteLink to="is-one-classifier-better-than-another">worked example</NoteLink> runs all of these tests on one pair of
+equally good classifiers.
+
+**Across data sets, use ranks.** Scores on different data sets are not on one scale. The Wilcoxon signed-rank test
+compares two algorithms, and the Friedman test with the Nemenyi critical difference compares several, on their ranks
+within each data set <Cite id="demsar2006" />; see <NoteLink to="comparing-classifiers-over-multiple-datasets">comparing
+classifiers over multiple data sets</NoteLink>.
+
+**Ask about practical differences.** A significance test cannot conclude that two algorithms are equivalent, and with
+enough data it rejects any difference, however small. <NoteLink to="bayesian-comparison-of-classifiers">Bayesian
+comparison</NoteLink> reports the posterior probabilities that one algorithm is practically better, that the other is,
+or that the two lie within a region of practical equivalence fixed in advance <Cite id="benavoli2017" />.
+
+**Measure the variance you are comparing against.** Seeds, splits, initialisation, data order and the
+<NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> all move a score. A single run per method cannot
+tell progress from luck; randomising every source over several runs can (see
+<NoteLink to="variance-in-machine-learning-benchmarks">variance in machine learning benchmarks</NoteLink>).
+
+**Compare methods with equal effort.** A method's score is the score of the configuration its search found, so a
+longer search wins on its own. Equal tuning budgets, or curves of performance against budget, keep the comparison about
+the methods (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+
+## How the notes fit together
+
+- Start with <NoteLink to="mcnemars-test">McNemar's test</NoteLink>, the simplest valid comparison, and the question it
+  leaves open: what if the training set had been different?
+- The two resampling tests, the <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink> and the
+  <NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink>, answer it on one data set. The
+  first is the usual choice when the algorithms can be run 100 times.
+- <NoteLink to="comparing-classifiers-over-multiple-datasets">Comparing classifiers over multiple data sets</NoteLink>
+  moves to benchmark suites, and <NoteLink to="bayesian-comparison-of-classifiers">Bayesian comparison of
+  classifiers</NoteLink> revisits both levels with posterior probabilities.
+- <NoteLink to="variance-in-machine-learning-benchmarks">Variance in machine learning benchmarks</NoteLink> and
+  <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink> cover the
+  <NoteLink to="experimental-design">experimental design</NoteLink> that any test depends on.
+- <NoteLink to="is-one-classifier-better-than-another">Is one classifier better than another?</NoteLink> works every
+  test on one data set.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="hypothesis-testing">hypothesis testing</NoteLink>, the
+<NoteLink to="p-value">p-value</NoteLink>, the <NoteLink to="paired-t-test">paired t-test</NoteLink> and
+<NoteLink to="cross-validation">cross-validation</NoteLink>. Uncertainty about a single model's score, without a
+comparison, is in <NoteLink to="metric-confidence-intervals">metric confidence intervals</NoteLink>. Selecting among
+many candidates by their scores, rather than testing one difference, brings its own optimism, treated in
+<NoteLink to="selection-bias-and-nested-cross-validation">selection bias and nested cross-validation</NoteLink>. Online
+comparisons of deployed models with live traffic are <Gloss name="ab-test" plural />, a separate design with its own
+<NoteLink to="multiple-testing">multiple-testing</NoteLink> and sequential-testing issues.

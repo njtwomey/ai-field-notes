@@ -1,0 +1,189 @@
+---
+title: 'Comparing classifiers over multiple data sets'
+kind: concept
+summary: 'Scores on different data sets are not on a common scale, so comparisons over many data sets use ranks: the Wilcoxon signed-rank test for two algorithms, and the Friedman test with the Nemenyi critical difference for several, drawn as a critical difference diagram.'
+tags: [model-selection, evaluation, hypothesis-testing, nonparametric, worked-example]
+aliases: [Friedman test, Nemenyi test, Iman–Davenport test, Demšar's tests, average ranks, Wilcoxon signed-rank test over data sets]
+requires: [comparing-learning-algorithms, paired-t-test, multiple-testing]
+related: [bayesian-comparison-of-classifiers, corrected-resampled-t-test, binomial-test, variance-in-machine-learning-benchmarks, tuning-budgets-in-comparisons]
+references: [demsar2006, wilcoxon1945, friedman1937, iman1980, nemenyi1963, benavoli2016, garcia2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { CriticalDifference } from './CriticalDifference'
+
+<Definition>
+A comparison over multiple data sets scores $k$ learning algorithms on each of $N$ data sets and asks whether some
+algorithms perform better than others across data sets. The scores of different data sets are not on a common scale, so
+the recommended tests work with ranks within each data set <Cite id="demsar2006" />. Two algorithms are compared with
+the **Wilcoxon signed-rank test** on their per-data-set differences <Cite id="wilcoxon1945" />. Several are compared
+with the **Friedman test** on their average ranks <Cite id="friedman1937" />, followed, if it rejects, by the **Nemenyi
+test**, which declares two algorithms different when their average ranks differ by at least a critical difference
+$\operatorname{CD}$ <Cite id="nemenyi1963" />.
+</Definition>
+
+## Intuition
+
+A new algorithm is usually evaluated on a suite of benchmark data sets: twenty UCI tables, a dozen
+<NoteLink to="text-classification">text classification</NoteLink> tasks, a set of
+<NoteLink to="tabular-benchmark-datasets">tabular benchmarks</NoteLink>. Each data set gives one score per algorithm,
+and the question is whether the new algorithm wins across data sets, not on one of them. The unit of replication is the
+data set, and $N$ is the sample size.
+
+Averaging the accuracies over data sets and running a <NoteLink to="paired-t-test">paired t-test</NoteLink> on the $N$
+differences looks natural, and it has three problems <Cite id="demsar2006" />:
+
+- **Commensurability.** A difference of 0.02 on a data set where every method scores 0.99 is not the same as 0.02 on
+  one where they score 0.60. The t-test adds them as if they were.
+- **Normality.** With $N$ below about 30 the t-test needs the differences to be normal, and differences across
+  heterogeneous data sets rarely are.
+- **Outliers.** One data set with a huge difference inflates the <NoteLink to="standard-error">standard error</NoteLink>
+  and can hide a consistent small advantage, or create a false one.
+
+Ranks remove all three. Within each data set, only the order of the algorithms counts, and every data set has the same
+weight.
+
+The comparison here is across data sets. Within one data set, the per-data-set score should itself be a careful
+estimate, such as a cross-validated accuracy, but its own uncertainty is not used: the variation between data sets
+supplies the noise. The tests within one data set are the <NoteLink to="corrected-resampled-t-test">corrected resampled
+t-test</NoteLink> and its relatives.
+
+## Two algorithms: sign and signed-rank tests
+
+Let $d_i$ be the difference of the two algorithms' scores on data set $i$, for $i = 1, \dots, N$.
+
+**Sign test.** Count the data sets each algorithm wins. If the two are equally good, each wins any data set with
+probability 1/2, so the number of wins is $\Binom(N, 1/2)$: the <NoteLink to="binomial-test">binomial test</NoteLink>
+of $p_0 = 1/2$. Demšar tabulates the wins needed at $\alpha = 0.05$: 11 of 14 data sets, 15 of 20, 18 of 25. Ties are
+split evenly between the two algorithms <Cite id="demsar2006" />. The sign test uses only the direction of each
+difference, so it has low power.
+
+**Wilcoxon signed-rank test.** Rank the $\abs{d_i}$ from 1 (smallest) to $N$ (largest), giving tied values the average
+of their ranks, and let $R^+$ be the sum of the ranks of the positive differences and $R^-$ that of the negative ones.
+Under the null hypothesis that the differences are symmetric about 0, each rank is equally likely to carry either sign,
+independently of the others. Then $R^+ = \sum_{i=1}^N i\,S_i$, where $S_i$ is 1 or 0 with probability 1/2 each, so
+
+$$
+\expect[R^+] = \frac12\sum_{i=1}^N i = \frac{N(N + 1)}{4}, \qquad \var(R^+) = \frac14\sum_{i=1}^N i^2 = \frac{N(N +
+1)(2N + 1)}{24}.
+$$
+
+The test statistic is $T = \min(R^+, R^-)$. Exact critical values are tabulated for small $N$; for larger $N$,
+$z = (T - N(N + 1)/4)/\sqrt{N(N + 1)(2N + 1)/24}$ is approximately standard normal. Large differences get large ranks,
+so the test uses magnitudes, but a single outlier can only take rank $N$. Demšar splits the ranks of zero differences
+evenly between $R^+$ and $R^-$ <Cite id="demsar2006" />.
+
+## Several algorithms: Friedman and Nemenyi
+
+Comparing $k > 2$ algorithms by running every pairwise test makes $k(k - 1)/2$ tests and inflates the
+<Gloss name="fpr">false-positive rate</Gloss> (see <NoteLink to="multiple-testing">multiple testing</NoteLink>). The
+Friedman test asks one question first: are all $k$ algorithms equally good?
+
+**Average ranks.** On each data set rank the algorithms from 1 (best) to $k$, with ties sharing the average rank. Let
+$R_j$ be algorithm $j$'s rank averaged over the $N$ data sets.
+
+**The null distribution.** If all algorithms are equally good, the ranks on each data set are a uniformly random
+permutation of $1, \dots, k$. One rank then has mean $(k + 1)/2$ and variance $(k^2 - 1)/12$, and two ranks on the same
+data set have covariance $-(k + 1)/12$: the $k$ ranks always sum to $k(k + 1)/2$, so the variance of their sum is 0,
+which forces $k$ variances plus $k(k - 1)$ equal covariances to cancel. Averaging over $N$ independent data sets divides
+both by $N$.
+
+**Friedman's statistic.** The average ranks should all be near $(k + 1)/2$, and
+
+$$
+\chi^2_F = \frac{12N}{k(k + 1)}\sum_{j=1}^k \paren{R_j - \frac{k + 1}{2}}^2 = \frac{12N}{k(k + 1)}\paren{\sum_{j=1}^k
+R_j^2 - \frac{k(k + 1)^2}{4}}
+$$
+
+measures their spread. Under the null it is approximately $\chi^2_{k - 1}$, one degree of freedom fewer than $k$ because
+the average ranks are tied by their fixed sum <Cite id="friedman1937" />. Demšar gives $N > 10$ and $k > 5$ as a rule of
+thumb for the approximation <Cite id="demsar2006" />.
+
+**Iman–Davenport.** The χ² approximation is conservative. Iman and Davenport's transformation
+
+$$
+F_F = \frac{(N - 1)\chi^2_F}{N(k - 1) - \chi^2_F}
+$$
+
+follows an $F$ distribution with $k - 1$ and $(k - 1)(N - 1)$ degrees of freedom <Cite id="iman1980" />, and Demšar
+recommends it <Cite id="demsar2006" />.
+
+**Nemenyi post-hoc test.** If the Friedman test rejects, the next question is which algorithms differ. By the variances
+and covariance above, the difference of two average ranks has
+
+$$
+\var(R_i - R_j) = \frac{2(k^2 - 1)}{12N} + \frac{2(k + 1)}{12N} = \frac{k(k + 1)}{6N}
+$$
+
+under the null. Two algorithms differ significantly when their average ranks differ by at least
+
+$$
+\operatorname{CD} = q_\alpha\sqrt{\frac{k(k + 1)}{6N}},
+$$
+
+where $q_\alpha$ is the upper-$\alpha$ point of the studentized range of $k$ independent standard normals, divided by
+$\sqrt2$ <Cite id="nemenyi1963" />. The range, the gap between the largest and smallest of $k$ means, controls the error
+over all pairs at once. At $\alpha = 0.05$, $q_\alpha$ is 1.960, 2.343, 2.569, 2.728 and 2.850 for $k = 2$ to 6
+<Cite id="demsar2006" />. For comparing every algorithm with one control, such as a new method against baselines, the
+Bonferroni–Dunn test with a smaller $q_\alpha$ is more powerful.
+
+## Critical difference diagrams
+
+Demšar's critical difference diagram draws the average ranks on one axis, with a bar of length $\operatorname{CD}$ for
+scale, and joins with a thick line every group of algorithms that are not significantly different from each other
+<Cite id="demsar2006" />. The figure draws an equivalent picture: each algorithm's average rank with
+$\operatorname{CD}/2$ on either side, so two algorithms differ exactly when their bars do not overlap.
+
+<CriticalDifference />
+
+With five algorithms whose true accuracies differ by 3 points from the worst to the best, 20 data sets and the default
+draw, the Friedman test rejects ($p < 0.001$) and the Nemenyi test separates the worst algorithm from the two best and
+the second worst from the best, but adjacent algorithms overlap. Other draws from the same truth can fail to reject at
+all (draw 3 gives $p = 0.34$): 20 data sets are few for differences of this size. Raising $N$ shrinks the critical
+difference as $1/\sqrt N$. Setting the spread to 0 shows the null: the average ranks still differ by chance, and the
+tests rarely reject.
+
+## Worked example
+
+Demšar compares four variants of the C4.5 <NoteLink to="decision-tree">decision tree</NoteLink> on 14 UCI data sets:
+plain C4.5, C4.5 with the minimum number of examples per leaf $m$ tuned, with the confidence level $c_f$ for pruning
+tuned, and with both tuned <Cite id="demsar2006" />.
+
+**Two algorithms.** For C4.5 against C4.5 with $m$ tuned, scored by <Gloss name="auroc">area under the ROC
+curve</Gloss>, the signed-rank sums are $R^+ = 93$ and $R^- = 12$, so $T =
+12$. The critical value for $N = 14$ at $\alpha = 0.05$ is 21, and $T \le 21$ rejects: tuning $m$ helps. The normal
+approximation agrees: $z = (12 - 52.5)/\sqrt{253.75} = -2.54$. The sign test also rejects, since tuned $m$ wins 11 of
+the 14 data sets, counting a tie as half, and 11 is the number needed.
+
+**Four algorithms.**
+
+1. **Average ranks.** C4.5 3.143, C4.5 with $m$ 2.000, C4.5 with $c_f$ 2.893, C4.5 with both 1.964.
+2. **Friedman.** $\sum_j R_j^2 = 26.10$ and $k(k + 1)^2/4 = 25$, so $\chi^2_F = (12 \times 14/20)(26.10 - 25) = 9.28$.
+3. **Iman–Davenport.** $F_F = 13 \times 9.28/(42 - 9.28) = 3.69$ on $(3, 39)$ degrees of freedom. The 5% critical
+   value is 2.85, so the null of equal performance is rejected.
+4. **Nemenyi at 5%.** $\operatorname{CD} = 2.569\sqrt{20/84} = 1.25$. The largest gap, plain C4.5 against both tuned, is
+   $3.143 - 1.964 = 1.18 < 1.25$. No pair is significantly different, although the omnibus test rejected.
+5. **Nemenyi at 10%.** $\operatorname{CD} = 2.291\sqrt{20/84} = 1.12$. Plain C4.5 is now worse than C4.5 with $m$ (gap
+   1.14) and C4.5 with both (gap 1.18). The data cannot place C4.5 with $c_f$ in either group.
+
+The example shows the usual outcome with modest $N$: the omnibus test detects that something differs before the
+post-hoc test can say what.
+
+## Pitfalls
+
+- **Post-hoc results that depend on the other algorithms.** The average ranks of A and B change when other algorithms
+  are added to or removed from the comparison, so the Nemenyi verdict on A against B depends on the rest of the pool.
+  Benavoli, Corani and Mangili construct examples where it does, and recommend pairwise sign or signed-rank tests with a
+  correction for multiple comparisons <Cite id="benavoli2016" />. García and Herrera give more powerful procedures for
+  all pairwise comparisons, the Shaffer and Bergmann–Hommel methods <Cite id="garcia2008" />.
+- **The choice of data sets.** The tests treat the data sets as a random sample from a population of problems. A suite
+  chosen because the new method does well on it is not one, and the p-value then says nothing about other problems.
+- **Losing the within-data-set uncertainty.** A difference of 0.001 counts as a full win in the sign test. Rounding
+  scores before ranking creates ties and costs power; ignoring that one data set's difference was well inside its noise
+  counts noise as signal. The <NoteLink to="bayesian-comparison-of-classifiers">Bayesian comparisons</NoteLink> add a
+  region of practical equivalence for this reason.
+- **Different tuning for different algorithms.** Ranks inherit any unfairness in how each algorithm was tuned on each
+  data set (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+- **Significance as the decision.** Demšar recommends against letting <NoteLink to="statistical-tests">statistical
+  tests</NoteLink> be the deciding factor for whether a method is worth publishing <Cite id="demsar2006" />.

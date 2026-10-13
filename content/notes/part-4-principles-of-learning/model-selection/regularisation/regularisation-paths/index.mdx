@@ -1,0 +1,202 @@
+---
+title: 'Regularisation paths'
+kind: technique
+summary: 'A regularisation path is the fitted coefficient vector as a function of the penalty $\lambda$, computed on a decreasing grid from the $\lambda$ that zeroes every coefficient, each fit warm-started from the last. The ridge path is smooth; the lasso path is piecewise linear.'
+tags: [model-selection, regularisation, linear-models, sparsity, worked-example]
+aliases: [regularization path, solution path, coefficient path, lasso path, ridge path, warm starts, pathwise coordinate descent]
+requires: [penalised-and-constrained-regularisation, ridge-regression, lasso, effective-degrees-of-freedom]
+related: [least-angle-regression, elastic-net, coordinate-descent, choosing-the-regularisation-strength, validation-curves, best-subset-and-stepwise-selection, steins-unbiased-risk-estimate, iterative-regularisation]
+references: [hastie2009, efron2004, friedman2007, friedman2010, tibshirani2012strong, zou2007, tibshirani2012lasso, hastie2015sparsity]
+status: draft
+updated: 2026-10-13
+---
+
+import { PathAgainstError } from './PathAgainstError'
+
+<Definition>
+Let $\hat\wvec_\lambda$ minimise a penalised objective $L(\wvec) + \lambda\Omega(\wvec)$ for each penalty
+$\lambda \ge 0$. The **regularisation path** is the map $\lambda \mapsto \hat\wvec_\lambda$. In practice it is computed
+on a decreasing grid $\lambda_1 > \lambda_2 > \dots > \lambda_m$ that starts at the smallest $\lambda$ whose solution is
+known, such as the $\lambda_{\max}$ at which every lasso coefficient is zero. Each fit starts from the previous
+solution, a **warm start** <Cite id="friedman2007" />.
+</Definition>
+
+## Problem
+
+The penalty $\lambda$ is a hyperparameter. Choosing it by <NoteLink to="cross-validation">cross-validation</NoteLink>,
+<Gloss name="gcv">generalised cross-validation</Gloss> or an information criterion needs the fit at many values of
+$\lambda$, typically 50 to 100 on a logarithmic grid, and in every fold. Fitting each one from scratch multiplies the
+cost of one fit by the grid size and the number of folds.
+
+The path also answers a descriptive question that a single fit cannot: how the fit changes as the constraint loosens.
+It shows which coefficients enter first, which shrink fastest, and where the fit stops changing. Plotted beside the
+validation error, it shows what the chosen $\lambda$ keeps and discards (see
+<NoteLink to="validation-curves">validation curves</NoteLink>).
+
+The shape of the path is known for the two standard penalties, and that shape makes the whole path cheap: a closed form
+for ridge, a piecewise-linear form for the lasso.
+
+## Mechanism
+
+### The ridge path is smooth
+
+Ridge regression minimises $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$, with $\Xmat \in \reals^{n \times p}$
+centred and $\yvec$ centred. Write the <NoteLink to="singular-value-decomposition">singular value
+decomposition</NoteLink> $\Xmat = \Umat\Dmat\Vmat^\top$, with singular values $d_1 \ge \dots \ge d_p$, left singular
+vectors $\uvec_j$ and right singular vectors $\vvec_j$. The solution at every $\lambda$ is
+
+$$
+\hat\wvec_\lambda = \sum_{j=1}^p \frac{d_j}{d_j^2 + \lambda}\,(\uvec_j^\top\yvec)\,\vvec_j
+$$
+
+(see <NoteLink to="ridge-regression">ridge regression</NoteLink>). One decomposition, costing $O(np^2)$ for $n \ge p$,
+gives the whole path; each further $\lambda$ costs $O(p^2)$. Every coordinate of $\hat\wvec_\lambda$ is a rational
+function of $\lambda$, so the path is smooth. No coefficient reaches zero at a finite $\lambda$ except by coincidence,
+and a single coefficient need not shrink monotonically: with correlated predictors it can grow or change sign as the
+weight moves between directions.
+
+### The lasso path is piecewise linear
+
+Write the lasso as
+
+$$
+\hat\wvec_\lambda = \argmin_{\wvec}\ \tfrac12\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_1,
+$$
+
+with standardised columns $\xvec_j$. This scaling makes $\lambda$ a correlation: scikit-learn's and glmnet's $\alpha$,
+which divide the squared error by $n$, equal $\lambda/n$. The optimality conditions say that a coefficient is nonzero
+only when its predictor's correlation with the residual reaches $\lambda$ (see <NoteLink to="lasso">lasso</NoteLink>):
+
+$$
+\xvec_j^\top(\yvec - \Xmat\hat\wvec_\lambda) = \lambda\,\sgn(\hat w_j) \ \text{ if } \hat w_j \neq 0,
+\qquad
+\abs{\xvec_j^\top(\yvec - \Xmat\hat\wvec_\lambda)} \le \lambda \ \text{ if } \hat w_j = 0.
+$$
+
+Three facts follow.
+
+1. **The start.** At $\wvec = \zeros$ the residual is $\yvec$, so $\zeros$ is optimal exactly when
+   $\lambda \ge \lambda_{\max} = \max_j \abs{\xvec_j^\top\yvec}$. The path starts there.
+2. **Linear between events.** Fix an interval of $\lambda$ on which the active set
+   $\Acal = \set{j : \hat w_j \neq 0}$ and the signs $\svec_\Acal$ of its coefficients do not change. On $\Acal$ the
+   first condition is a linear system, $\Xmat_\Acal^\top(\yvec - \Xmat_\Acal\wvec_\Acal) = \lambda\svec_\Acal$, so
+   $$
+   \hat\wvec_\Acal(\lambda) = (\Xmat_\Acal^\top\Xmat_\Acal)^{-1}\paren{\Xmat_\Acal^\top\yvec - \lambda\svec_\Acal}.
+   $$
+   This is linear in $\lambda$, with slope $-(\Xmat_\Acal^\top\Xmat_\Acal)^{-1}\svec_\Acal$.
+3. **Knots.** The interval ends when an inactive predictor's correlation with the residual reaches $\lambda$ (it
+   joins), or when an active coefficient reaches zero (it leaves). Both are found by solving a linear equation in
+   $\lambda$. Between knots the path is a straight line.
+
+The path is therefore determined by its finitely many knots, which <NoteLink to="least-angle-regression">least-angle
+regression</NoteLink> computes one after another at about the cost of one least-squares fit <Cite id="efron2004" />. The
+same argument applies to any problem with a piecewise-quadratic loss and a piecewise-linear penalty. The
+<NoteLink to="elastic-net">elastic net</NoteLink> adds $\lambda_2\norm{\wvec}^2$, which changes the matrix to
+$\Xmat_\Acal^\top\Xmat_\Acal + \lambda_2\eye$; with the mixing ratio fixed, $\lambda_2$ moves with $\lambda$ and the
+path is piecewise smooth rather than linear. For the <NoteLink to="surrogate-losses">logistic loss</NoteLink> the path
+is also only piecewise smooth, and it is computed on a grid.
+
+## Warm starts
+
+The lasso, the elastic net and their <Gloss name="glm" /> versions are fitted along a grid by
+<NoteLink to="coordinate-descent">coordinate descent</NoteLink> <Cite id="friedman2007" />
+<Cite id="friedman2010" />. The recipe:
+
+1. **The grid.** Compute $\lambda_{\max}$ and take $m$ values log-spaced from $\lambda_{\max}$ down to
+   $\epsilon\lambda_{\max}$. glmnet's defaults are $m = 100$, with $\epsilon = 10^{-4}$ when $n > p$ and $0.01$ when
+   $n \le p$; scikit-learn's are $m = 100$ and $\epsilon = 10^{-3}$.
+2. **Warm starts.** Solve at $\lambda_1 = \lambda_{\max}$, where the answer is $\zeros$, then start each fit from the
+   previous solution. Neighbouring solutions on a fine grid are close, so a few sweeps of coordinate descent suffice.
+3. **Active sets.** Sweep only the nonzero coefficients until they converge, then sweep all predictors once to check
+   the optimality conditions, and repeat if any predictor violates them. Most predictors stay at zero along most of a
+   sparse path and are touched once per fit.
+4. **Screening.** Discard in advance the predictors that are unlikely to enter at the next $\lambda$. The sequential
+   strong rule drops predictor $j$ at $\lambda_k$ when
+   $\abs{\xvec_j^\top\rvec(\lambda_{k-1})} < 2\lambda_k - \lambda_{k-1}$, where $\rvec(\lambda_{k-1})$ is the residual
+   at the previous grid point. The rule can be wrong, so the optimality conditions are checked on the discarded
+   predictors afterwards <Cite id="tibshirani2012strong" />.
+
+Starting from $\lambda_{\max}$ is a choice, not an accident. The solutions there are sparse and cheap, and each step
+adds at most a few active predictors. Starting at a small $\lambda$ would begin with the densest, worst-conditioned
+problem, which has no unique solution when $p > n$.
+
+On a simulated problem with $n = 100$ rows and $p = 200$ predictors, 10 of them active, the 100-point lasso path took
+2,494 coordinate sweeps with warm starts and 3,905 with every fit started from $\zeros$, at a relative tolerance of
+$10^{-6}$. Active-set iteration makes the warm-started sweeps cheaper as well as fewer, since most of them touch only
+the active coefficients.
+
+## Degrees of freedom along the path
+
+The path is indexed by $\lambda$, but $\lambda$ means different things for different penalties and different data. The
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>
+$\operatorname{df} = \frac{1}{\sigma^2}\sum_i \cov(\hat y_i, y_i)$ put every path on a common scale.
+
+- **Ridge.** The fit is linear in $\yvec$, and
+  $\operatorname{df}(\lambda) = \sum_j d_j^2/(d_j^2 + \lambda)$, falling smoothly from $p$ at $\lambda = 0$ to 0.
+- **Lasso.** The fit is not linear in $\yvec$, because the active set depends on $\yvec$. Yet the number of nonzero
+  coefficients $\abs{\Acal_\lambda}$ is an unbiased estimate of the degrees of freedom at every fixed $\lambda$
+  <Cite id="zou2007" />. For a general design the unbiased estimate is the rank of $\Xmat_{\Acal_\lambda}$
+  <Cite id="tibshirani2012lasso" />. The lasso's selection spends extra degrees of freedom, as best subset's does (see
+  <NoteLink to="best-subset-and-stepwise-selection">best subset and stepwise selection</NoteLink>), and its shrinkage
+  of the selected coefficients gives exactly that amount back.
+
+With $\operatorname{df}$ in hand, Mallows' $C_p$ or <Gloss name="aic" /> can be evaluated along the path at no extra
+cost, as $\operatorname{RSS}(\lambda)/n + 2\hat\sigma^2\operatorname{df}(\lambda)/n$ (see
+<NoteLink to="mallows-cp-and-covariance-penalties">Mallows' $C_p$ and covariance penalties</NoteLink> and
+<NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink>). Plotting paths against
+$\operatorname{df}$, or against the shrinkage factor $\norm{\hat\wvec_\lambda}_1/\norm{\hat\wvec_0}_1$, compares
+penalties at equal complexity <Cite id="hastie2009" />.
+
+<PathAgainstError />
+
+## Worked example
+
+Take two standardised predictors of unit length with correlation $\xvec_1^\top\xvec_2 = 0.5$, and correlations with the
+target $\xvec_1^\top\yvec = 0.8$ and $\xvec_2^\top\yvec = 0.5$. The Gram matrix is
+$\Gmat = \begin{pmatrix} 1 & 0.5 \\ 0.5 & 1 \end{pmatrix}$, and the least-squares solution is
+$\Gmat^{-1}(0.8, 0.5)^\top = (0.733, 0.133)$.
+
+1. **Start.** $\lambda_{\max} = \max(0.8, 0.5) = 0.8$. For $\lambda \ge 0.8$ both coefficients are zero.
+2. **First segment.** Below 0.8, predictor 1 is active with a positive sign. Its condition is
+   $0.8 - w_1 = \lambda$, so $w_1 = 0.8 - \lambda$. Predictor 2's correlation with the residual is
+   $0.5 - 0.5\,w_1 = 0.1 + 0.5\lambda$.
+3. **Knot.** Predictor 2 joins when $0.1 + 0.5\lambda = \lambda$, at $\lambda = 0.2$, where $w_1 = 0.6$.
+4. **Second segment.** With both active and both signs positive,
+   $\wvec(\lambda) = \Gmat^{-1}\paren{(0.8, 0.5)^\top - \lambda(1, 1)^\top}$. The inverse is
+   $\Gmat^{-1} = \frac{1}{0.75}\begin{pmatrix} 1 & -0.5 \\ -0.5 & 1 \end{pmatrix}$, so
+   $w_1 = (0.55 - 0.5\lambda)/0.75$ and $w_2 = (0.1 - 0.5\lambda)/0.75$. At $\lambda = 0.2$ these give $(0.6, 0)$,
+   joining the first segment, and at $\lambda = 0$ they give the least-squares $(0.733, 0.133)$.
+
+| $\lambda$ | 0.8 | 0.5 | 0.2 | 0.1 | 0 |
+| --- | --- | --- | --- | --- | --- |
+| lasso $w_1$ | 0 | 0.300 | 0.600 | 0.667 | 0.733 |
+| lasso $w_2$ | 0 | 0 | 0 | 0.067 | 0.133 |
+| lasso $\operatorname{df}$ estimate | 0 | 1 | 1 | 2 | 2 |
+| ridge $w_1$ | 0.398 | 0.475 | 0.597 | 0.656 | 0.733 |
+| ridge $w_2$ | 0.167 | 0.175 | 0.168 | 0.156 | 0.133 |
+| ridge $\operatorname{df}$ | 1.04 | 1.25 | 1.60 | 1.77 | 2 |
+
+The ridge row uses the same scaling, $\tfrac12\norm{\yvec - \Xmat\wvec}^2 + \tfrac{\lambda}{2}\norm{\wvec}^2$, whose
+solution is $(\Gmat + \lambda\eye)^{-1}(0.8, 0.5)^\top$; its degrees of freedom come from the eigenvalues 1.5 and 0.5 of
+$\Gmat$. Two contrasts stand out. The lasso keeps $w_2$ at exactly zero until $\lambda = 0.2$, and ridge never does.
+Ridge's $w_2$ is not monotone in $\lambda$: it is 0.073 at $\lambda = 5$, peaks at 0.176 near $\lambda = 0.42$ and
+falls to 0.133 at $\lambda = 0$, because ridge moves weight between the two correlated predictors as $\lambda$
+changes.
+
+## Pitfalls
+
+- **A grid that is too short.** If the validation error is smallest at the end of the grid, the best $\lambda$ may lie
+  beyond it. Extend the grid until the minimum is interior.
+- **Different scalings of $\lambda$.** Libraries divide the squared error by 1, 2, $n$ or $2n$, so the same number is a
+  different penalty in different software. Compare paths by $\operatorname{df}$ or by the shrinkage factor, not by the
+  raw value.
+- **Standardisation changes the path.** The penalty treats all coefficients alike, so rescaling a predictor changes
+  when it enters. Standardise inside each cross-validation fold, as part of the pipeline (see
+  <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).
+- **One grid for all folds.** Each fold's $\lambda_{\max}$ differs slightly. Fit every fold on the grid of the full
+  data, so that the fold errors are averaged at the same $\lambda$; glmnet's `cv.glmnet` does this.
+- **Order of entry is not importance.** A predictor enters when its correlation with the current residual reaches
+  $\lambda$, which depends on the predictors already in. A predictor that enters late can matter as much as one that
+  enters early.
+- **More predictors than rows.** With $p > n$ the lasso path has at most $n$ active predictors at any $\lambda$, and
+  at small $\lambda$ the solution may not be unique.

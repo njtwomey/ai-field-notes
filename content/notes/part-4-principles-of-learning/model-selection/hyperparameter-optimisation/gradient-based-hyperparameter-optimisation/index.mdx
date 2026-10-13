@@ -1,0 +1,244 @@
+---
+title: 'Gradient-based hyperparameter optimisation'
+kind: technique
+summary: 'Gradient-based hyperparameter optimisation descends on continuous hyperparameters along the gradient of the validation loss, taken through training by the implicit function theorem or by unrolling the optimiser. Each hypergradient costs about one extra linear solve.'
+tags: [model-selection, hyperparameters, optimisation, worked-example]
+aliases: [hypergradient, hypergradient descent, implicit differentiation of hyperparameters, unrolled differentiation, bilevel hyperparameter optimisation, reversible learning]
+requires: [hyperparameter-search, automatic-differentiation]
+related: [empirical-bayes-for-hyperparameters, meta-learning, ridge-regression, backpropagation, forward-mode-autodiff, gradient-checkpointing, overfitting-in-model-selection, gaussian-process-hyperparameter-learning, neural-architecture-search, learning-rate-schedules, choosing-the-regularisation-strength]
+references: [bengio2000, pedregosa2016, maclaurin2015hyper, franceschi2017, lorraine2020, shaban2019]
+status: draft
+updated: 2026-10-13
+---
+
+import { RidgeHyperDescent } from './RidgeHyperDescent'
+
+<Definition>
+Let $\wvec^\star(\lambdavec)$ be the parameters that training produces with continuous hyperparameters $\lambdavec \in
+\reals^D$, and let $L(\lambdavec) = L_\text{val}\paren{\wvec^\star(\lambdavec)}$ be the resulting validation loss.
+**Gradient-based hyperparameter optimisation** computes the **hypergradient** $\nabla_{\lambdavec} L$ by differentiating
+through training, and minimises $L$ by <NoteLink to="gradient-descent">gradient descent</NoteLink> on $\lambdavec$. The
+hypergradient is computed either by the **implicit function theorem** at a minimiser of the training loss
+<Cite id="bengio2000" />, or by **unrolled differentiation** through the steps of the training algorithm
+<Cite id="maclaurin2015hyper" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="hyperparameter-search">Hyperparameter search</NoteLink> treats $L$ as a black box.
+<NoteLink to="grid-search">Grid search</NoteLink>, <NoteLink to="random-search">random search</NoteLink> and Bayesian
+optimisation need a number of trials that grows with the number of hyperparameters that matter, so they handle tens of
+hyperparameters at most. Some models have far more: a separate penalty on each weight, a
+<Gloss name="learning-rate">learning rate</Gloss> for each step of a schedule, the weights of a network that augments
+the training data. These hyperparameters are continuous, and training depends smoothly on them. For such
+hyperparameters, the hypergradient points downhill in all $D$ dimensions at once, at the cost of about one extra
+training-sized computation.
+
+## Mechanism
+
+### The bilevel problem
+
+Hyperparameter optimisation is a **bilevel** problem: an outer minimisation over $\lambdavec$ whose objective contains
+an inner minimisation over $\wvec$,
+
+$$
+\min_{\lambdavec} L_\text{val}\paren{\wvec^\star(\lambdavec)}, \qquad \wvec^\star(\lambdavec) = \argmin_{\wvec}
+L_\text{tr}(\wvec, \lambdavec),
+$$
+
+where $L_\text{tr}$ is the training objective with its penalties and $L_\text{val}$ is the loss on validation data.
+Write $p$ for the number of parameters. By the chain rule,
+
+$$
+\nabla_{\lambdavec} L = \paren{\frac{\partial\wvec^\star}{\partial\lambdavec}}^\top\nabla_{\wvec} L_\text{val},
+$$
+
+where $\partial\wvec^\star/\partial\lambdavec$ is the $p \times D$ Jacobian of the trained parameters. When
+$L_\text{val}$ depends on $\lambdavec$ directly as well, its partial derivative
+$\partial L_\text{val}/\partial\lambdavec$ is added. The two methods differ in how they get
+$\partial\wvec^\star/\partial\lambdavec$.
+
+### Implicit differentiation
+
+Assume training reaches a minimiser of $L_\text{tr}$ at which the Hessian is invertible. Then for every $\lambdavec$
+near the current one,
+
+$$
+\nabla_{\wvec} L_\text{tr}\paren{\wvec^\star(\lambdavec), \lambdavec} = \zeros.
+$$
+
+Differentiating this identity in $\lambdavec$ gives
+
+$$
+\Hmat\,\frac{\partial\wvec^\star}{\partial\lambdavec} + \Jmat = \zeros, \qquad \Hmat =
+\nabla^2_{\wvec}L_\text{tr}, \qquad \Jmat = \frac{\partial^2 L_\text{tr}}{\partial\wvec\,\partial\lambdavec^\top},
+$$
+
+where $\Hmat$ is the $p \times p$ Hessian and $\Jmat$ is the $p \times D$ matrix of mixed derivatives, both at
+$\paren{\wvec^\star(\lambdavec), \lambdavec}$. The implicit function theorem guarantees that $\wvec^\star$ is
+differentiable when $\Hmat$ is invertible, and solving gives
+
+$$
+\frac{\partial\wvec^\star}{\partial\lambdavec} = -\Hmat^{-1}\Jmat.
+$$
+
+Substituting into the chain rule,
+
+$$
+\nabla_{\lambdavec} L = -\Jmat^\top\Hmat^{-1}\nabla_{\wvec} L_\text{val} = -\Jmat^\top\vvec, \qquad \text{where }
+\Hmat\vvec = \nabla_{\wvec} L_\text{val}.
+$$
+
+The order of operations matters for the cost. Forming $\Hmat^{-1}\Jmat$ needs $D$ solves with $\Hmat$. Solving for the
+single vector $\vvec$ first needs one, whatever $D$ is. This is reverse-mode differentiation applied to the optimality
+condition (see <NoteLink to="backpropagation">backpropagation</NoteLink>). The result needs only the trained parameters,
+not the path that training took to reach them.
+
+### Ridge regression
+
+<NoteLink to="ridge-regression">Ridge regression</NoteLink> makes every quantity explicit. Take
+
+$$
+L_\text{tr}(\wvec, \lambda) = \norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2, \qquad L_\text{val}(\wvec) =
+\frac1m\norm{\yvec_v - \Xmat_v\wvec}^2,
+$$
+
+with $n$ training rows in $\Xmat$ and $m$ validation rows in $\Xmat_v$. The gradient of the training objective is
+$\nabla_{\wvec} L_\text{tr} = -2\Xmat^\top(\yvec - \Xmat\wvec) + 2\lambda\wvec$. Its derivative in $\wvec$ is
+$\Hmat = 2(\Xmat^\top\Xmat + \lambda\Imat)$, and its derivative in $\lambda$ is $\Jmat = 2\wvec$. Hence
+
+$$
+\frac{d\wvec^\star}{d\lambda} = -(\Xmat^\top\Xmat + \lambda\Imat)^{-1}\wvec^\star, \qquad \frac{dL}{d\lambda} =
+-\gvec^\top(\Xmat^\top\Xmat + \lambda\Imat)^{-1}\wvec^\star,
+$$
+
+where $\gvec = \nabla_{\wvec} L_\text{val} = -\frac2m\Xmat_v^\top(\yvec_v - \Xmat_v\wvec^\star)$. The Cholesky factor of
+$\Xmat^\top\Xmat + \lambda\Imat$ from the fit serves for the extra solve.
+
+Now give each weight its own penalty, $\sum_j \lambda_j w_j^2$, so that $D = p$. Then
+$\Jmat = 2\operatorname{diag}(\wvec)$, and with $\vvec = (\Xmat^\top\Xmat + \operatorname{diag}(\lambdavec))^{-1}\gvec$,
+
+$$
+\frac{\partial L}{\partial\lambda_j} = -v_j w^\star_j, \qquad j = 1, \dots, p.
+$$
+
+All $p$ hypergradients come from one solve. A grid over $p$ penalties would need $r^p$ fits.
+
+### Unrolled differentiation
+
+Training is often stopped before it converges, and some hyperparameters, such as the learning rate, do not change the
+minimiser at all, only the path to it. Unrolled differentiation treats the $T$ steps of the training algorithm,
+
+$$
+\wvec_{t+1} = \Phi_t(\wvec_t, \lambdavec), \qquad t = 0, \dots, T - 1,
+$$
+
+as one long differentiable computation from $\lambdavec$ to $L_\text{val}(\wvec_T)$. For gradient descent with learning
+rate $\eta_t$, $\Phi_t(\wvec, \lambdavec) = \wvec - \eta_t\nabla_{\wvec} L_\text{tr}(\wvec, \lambdavec)$, and the
+$\eta_t$ themselves can be hyperparameters.
+- **Reverse mode** backpropagates from $L_\text{val}(\wvec_T)$ through all $T$ steps. Its cost is a small multiple of
+  training, but it must store or recompute every $\wvec_t$, $O(pT)$ memory. Maclaurin, Duvenaud and Adams recompute the
+  trajectory backwards by exactly reversing <Gloss name="sgd">stochastic gradient descent</Gloss> with momentum, and
+  tuned thousands of hyperparameters, including <NoteLink to="learning-rate-schedules">step-size schedules</NoteLink>
+  and initialisation scales <Cite id="maclaurin2015hyper" />.
+- **Forward mode** carries the $p \times D$ Jacobian $\Zmat_t = \partial\wvec_t/\partial\lambdavec$ along with training,
+  using $\Zmat_{t+1} = \Amat_t\Zmat_t + \Bmat_t$ with $\Amat_t = \partial\Phi_t/\partial\wvec$ and
+  $\Bmat_t = \partial\Phi_t/\partial\lambdavec$. Its memory is $O(pD)$ and does not grow with $T$, so it suits few
+  hyperparameters and long training, and it gives a hypergradient at every step, which allows the hyperparameters to be
+  updated during training <Cite id="franceschi2017" /> (see <NoteLink to="forward-mode-autodiff">forward-mode
+  differentiation</NoteLink>).
+- **Truncation** backpropagates through only the last $k$ steps. Shaban et al. found that a few steps often perform
+  about as well as the full unroll with much less memory <Cite id="shaban2019" />.
+
+### Approximate solves
+
+For a neural network, $\Hmat$ is too large to form or factor. Implicit differentiation then solves $\Hmat\vvec = \gvec$
+approximately, using only Hessian-vector products, which cost about two gradient evaluations each.
+- **<Gloss name="cg">Conjugate gradients</Gloss>.** Pedregosa's HOAG solves the inner problem and the linear system only
+  approximately, with tolerances that shrink over the outer iterations, and proves that the outer iterates still
+  converge <Cite id="pedregosa2016" />.
+- **The Neumann series.** If $\norm{\Imat - \alpha\Hmat} < 1$ for a step size $\alpha$, then
+  $\Hmat^{-1} = \alpha\sum_{j=0}^\infty(\Imat - \alpha\Hmat)^j$, and truncating after $k$ terms gives an approximation
+  that needs $k$ Hessian-vector products. Lorraine, Vicol and Duvenaud used it to tune millions of hyperparameters,
+  among them the weights of a network that augments the training data <Cite id="lorraine2020" />.
+
+The truncated Neumann series and truncated unrolling are closely related: $k$ terms of the series match $k$ steps of
+gradient descent unrolled from the optimum.
+
+<RidgeHyperDescent />
+
+## Worked example
+
+Fit ridge regression without an intercept to three training points, $x = (1, 2, 3)$ and $y = (1, 3, 2)$, and validate
+on two, $x_v = (1, 2)$ and $y_v = (0.5, 1.5)$, with the <Gloss name="mse">mean squared error</Gloss>.
+
+1. **The trained weight.** With one feature, $\Xmat^\top\Xmat = 1 + 4 + 9 = 14$ and $\Xmat^\top\yvec = 1 + 6 + 6 = 13$,
+   so $w^\star(\lambda) = 13/(14 + \lambda)$.
+2. **The validation loss.** $L = \frac12\brack{(0.5 - w)^2 + (1.5 - 2w)^2}$, with derivative
+   $dL/dw = -(0.5 - w) - 2(1.5 - 2w) = 5w - 3.5$.
+3. **The implicit derivative.** The ridge formula gives $dw^\star/d\lambda = -w^\star/(14 + \lambda)$.
+4. **At $\lambda = 1$.** The weight is $w^\star = 13/15 = 0.8667$. The loss is
+   $\frac12(0.3667^2 + 0.2333^2) = 0.0944$. The two derivatives are $dL/dw = 5(0.8667) - 3.5 = 0.8333$ and
+   $dw^\star/d\lambda = -0.8667/15 = -0.0578$. Their product is the hypergradient,
+   $dL/d\lambda = 0.8333 \times (-0.0578) = -0.0481$. It is negative, so a larger penalty lowers the validation loss.
+5. **One step on $\ln\lambda$.** Penalties are searched on a log scale, so descend on $\ln\lambda$, whose derivative is
+   $dL/d\ln\lambda = \lambda\,dL/d\lambda = -0.0481$. With step size $\eta = 10$,
+   $\ln\lambda \leftarrow 0 + 10 \times 0.0481 = 0.481$, so $\lambda = 1.62$.
+6. **Further steps.** Repeating the computation gives $\lambda = 2.86$ after two steps and $4.55$ after three, with
+   validation losses $0.0688$, $0.0376$ and $0.0250$.
+7. **The optimum.** The loss is smallest where $dL/dw = 0$, at $w = 0.7$, so
+   $\lambda^\star = 13/0.7 - 14 = 4.57$ with $L = \frac12(0.2^2 + 0.1^2) = 0.025$. Three hypergradient steps have nearly
+   reached it, each costing one fit and one extra solve.
+
+A central <Gloss name="finite-difference">finite difference</Gloss> confirms step 4:
+$\paren{L(1 + h) - L(1 - h)}/2h = -0.0481$ for $h = 10^{-5}$.
+
+## Cost
+
+- **Implicit differentiation:** one training run to (near) convergence, plus one linear solve with the Hessian, or $k$
+  Hessian-vector products for a $k$-term approximation. The cost does not grow with $D$.
+- **Reverse-mode unrolling:** about two to three times the cost of training, and memory for $T$ copies of the
+  parameters unless the trajectory is reversed or recomputed (see <NoteLink to="gradient-checkpointing">gradient
+  checkpointing</NoteLink>).
+- **Forward-mode unrolling:** about $D$ times the cost of training, with memory $O(pD)$.
+
+Every outer step retrains, so a run of $S$ outer steps costs $S$ trainings. Warm-starting each training from the
+previous $\wvec^\star$ cuts this sharply when $\lambdavec$ changes little between steps.
+
+## Trade-offs
+
+- **Many hyperparameters.** Gradients scale to thousands or millions of continuous hyperparameters, where black-box
+  search cannot <Cite id="lorraine2020" />. With one or two hyperparameters, a grid or
+  <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> is simpler and finds the global minimum more
+  reliably.
+- **Continuous, differentiable hyperparameters only.** The number of layers, the choice of optimiser and a tree's
+  depth have no gradient. Relaxing such choices to continuous weights is the route taken by differentiable
+  <NoteLink to="neural-architecture-search">neural architecture search</NoteLink>.
+- **Local minima.** $L(\lambdavec)$ is not convex in general, even for ridge regression. Descent finds the minimum
+  downhill from its start, so starts are often chosen by a coarse search.
+- **The evidence as an alternative.** For a Bayesian model, the
+  <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> can be differentiated in
+  the hyperparameters with no validation data at all (see <NoteLink to="empirical-bayes-for-hyperparameters">empirical
+  Bayes for hyperparameters</NoteLink> and <NoteLink to="gaussian-process-hyperparameter-learning">Gaussian-process
+  hyperparameter learning</NoteLink>).
+- **Meta-learning.** The same bilevel calculus, with an initialisation in place of $\lambdavec$, gives MAML and implicit
+  MAML (see <NoteLink to="meta-learning">meta-learning</NoteLink>).
+
+## Pitfalls
+
+- **Overfitting the validation set.** With $D$ hyperparameters tuned on $m$ validation points, the validation set has
+  become a training set. Lorraine et al. tuned a separate <Gloss name="weight-decay">weight decay</Gloss> for each of
+  the more than 50 million parameters of AlexNet on 50 validation examples, reached 100% validation accuracy, and saw
+  much lower test accuracy <Cite id="lorraine2020" />. Report the final error on data the hyperparameters never saw (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+- **An inexact inner solution.** The implicit formula assumes $\nabla_{\wvec} L_\text{tr} = \zeros$. Stopping training
+  early makes the hypergradient wrong by an amount that grows with the remaining training gradient; HOAG controls this
+  by tightening the tolerance as it goes <Cite id="pedregosa2016" />.
+- **A singular Hessian.** Without a penalty, or with more parameters than data, $\Hmat$ can be singular and
+  $\wvec^\star$ is not a function of $\lambdavec$. A small fixed penalty or damping, $\Hmat + \epsilon\Imat$, restores a
+  solve.
+- **Short-horizon bias.** A hypergradient through a truncated unroll measures the effect of $\lambdavec$ over the last
+  few steps only. It can favour a learning rate that helps now and hurts later, the same greediness that affects
+  <NoteLink to="population-based-training">population-based training</NoteLink>.
+- **Scale of the step.** The hypergradient has the units of the loss divided by those of $\lambdavec$. Descending on
+  $\ln\lambda$ and scaling the step by the size of the loss keeps one step size usable across problems.

@@ -1,0 +1,171 @@
+---
+title: 'Natarajan dimension'
+kind: concept
+summary: 'The Natarajan dimension extends the VC dimension to classifiers with $k$ labels: a set is shattered when each point has two candidate labels and the class realises every choice between them. With $k$ finite it characterises PAC learnability, up to a factor $\ln k$ in sample complexity.'
+tags: [learning-theory, capacity, multiclass, worked-example]
+aliases: [N-dimension, Natarajan's lemma]
+requires: [vapnik-chervonenkis-dimension, growth-function-and-sauer-shelah-lemma, massarts-finite-class-lemma]
+related: [fundamental-theorem-of-statistical-learning, multiclass-classification, one-versus-rest, ordinal-regression, pseudo-dimension-and-fat-shattering-dimension, realisable-and-agnostic-learning, sample-complexity-lower-bounds]
+references: [natarajan1989, bendavid1995, daniely2015, brukhim2022, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { NatarajanOrdinal } from './NatarajanOrdinal'
+
+<Definition>
+Let $\Hcal$ be a class of functions from $\Xcal$ to a label set $\Ycal$ with $k = \abs{\Ycal}$ labels. A set
+$C = \set{x_1, \dots, x_d} \subseteq \Xcal$ is **N-shattered** by $\Hcal$ if there are two labellings
+$f_0, f_1 : C \to \Ycal$ with $f_0(x_i) \ne f_1(x_i)$ for every $i$, such that for every pattern
+$b \in \set{0, 1}^d$ some $h \in \Hcal$ has $h(x_i) = f_{b_i}(x_i)$ for all $i$. The **Natarajan dimension**
+$d_N(\Hcal)$ is the size of the largest N-shattered set <Cite id="natarajan1989" />. For $k = 2$ it equals the
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>.
+</Definition>
+
+## Intuition
+
+A binary class shatters a set when it realises every labelling of it. A multiclass class can rarely realise all $k^d$
+labellings, and asking it to would be too strong a notion of richness. The Natarajan dimension asks for a binary
+choice at each point instead: offer each point two candidate labels, and require the class to realise every way of
+picking one of the two at every point.
+
+On an N-shattered set the multiclass problem contains a binary problem of VC dimension $d$: learn which of the two
+candidates is correct at each point. So every lower bound for binary classes of VC dimension $d$ applies to $\Hcal$.
+In the other direction, a class with small Natarajan dimension has few distinct labellings on any sample, which is what
+a uniform bound needs. The two directions meet up to a factor $\ln k$.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, the Natarajan
+dimension is the capacity measure for the third move, making the bound uniform, when the labels are not binary.
+
+## Definition and its relatives
+
+**The graph dimension.** A set $C$ is **G-shattered** if there is one labelling $f : C \to \Ycal$ such that for every
+subset $T \subseteq C$ some $h$ agrees with $f$ on $T$ and disagrees with it on $C \setminus T$. The graph dimension
+$d_G(\Hcal)$ is the size of the largest G-shattered set. It is the VC dimension of the binary class of indicators
+$(x, y) \mapsto \indicator[h(x) = y]$, so the binary theory applies to it directly. The two dimensions satisfy
+<Cite id="bendavid1995" />
+
+$$
+d_N(\Hcal) \le d_G(\Hcal) \le 4.67\log_2(k)\,d_N(\Hcal).
+$$
+
+**Natarajan's lemma.** For every finite set $C \subseteq \Xcal$, the number of distinct labellings that $\Hcal$
+realises on $C$ satisfies <Cite id="natarajan1989" /><Cite id="daniely2015" />
+
+$$
+\abs{\Hcal_{|C}} \le \abs{C}^{d_N}\,k^{2d_N}.
+$$
+
+This is the multiclass counterpart of the <NoteLink to="growth-function-and-sauer-shelah-lemma">Sauer–Shelah
+lemma</NoteLink>. It bounds the growth function by $\Pi_{\Hcal}(m) \le m^{d_N}k^{2d_N}$: polynomial in $m$, with the
+number of labels entering through a factor $k^{2d_N}$. For $k = 2$ it gives $m^d 4^d$, which is cruder than Sauer's
+$(em/d)^d$ by about $(4d/e)^d$.
+
+## Multiclass sample complexity
+
+### A uniform bound, derived
+
+The bound follows the binary route: count the labellings of the sample, bound their Rademacher complexity
+with Massart's lemma, and pass to a generalisation bound. Use the <NoteLink to="surrogate-losses">0–1 loss</NoteLink>
+$\ell(h, (x, y)) = \indicator[h(x) \ne y]$ and an <Gloss name="iid" /> sample $S$ of size $m$.
+
+1. **Count the loss patterns (Natarajan's lemma).** On $S$, the vector of losses $(\ell(h, z_1), \dots,
+   \ell(h, z_m))$ is determined by the labels $h$ gives to $x_1, \dots, x_m$. The loss class therefore has at most
+   $N = m^{d_N}k^{2d_N}$ distinct patterns on $S$.
+2. **Centre the losses.** Each loss vector lies in $\set{0, 1}^m$ and can be written $(1 - \svec)/2$ with
+   $\svec \in \set{-1, +1}^m$. A constant shift has zero correlation with random signs on average, and the sign flip
+   does not change the distribution of $\sigmavec$, so the empirical <NoteLink to="rademacher-complexity">Rademacher
+   complexity</NoteLink> of the losses is half that of the vectors $\svec$.
+3. **Bound the complexity of the patterns (Massart).** Each $\svec$ has Euclidean norm $\sqrt m$, so
+   <NoteLink to="massarts-finite-class-lemma">Massart's lemma</NoteLink> bounds their complexity by
+   $\sqrt{2\ln N/m}$. The losses have complexity at most $\frac12\sqrt{2\ln N/m}$.
+4. **Generalise (Rademacher bound).** With probability at least $1 - \delta$, every $h$ has
+   $R(h) \le \hat R_S(h) + 2\Rad_m + \sqrt{\ln(1/\delta)/(2m)}$. Substituting step 3,
+
+   $$
+   R(h) \le \hat R_S(h) + \sqrt{\frac{2(d_N\ln m + 2d_N\ln k)}{m}} + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+   $$
+
+The labels cost $2d_N\ln k$ in the numerator, the sample size $d_N\ln m$. Removing the $\ln m$ needs
+<NoteLink to="chaining-and-dudley-entropy-integral">chaining</NoteLink>.
+
+### The multiclass fundamental theorem
+
+The sharp statement brackets the sample complexity between the Natarajan dimension and the Natarajan dimension times
+$\ln k$. There are absolute constants $C_1, C_2$ such that, for every class with $k$ labels and Natarajan dimension
+$d_N$, the sample complexities $m(\epsilon, \delta)$ of PAC learning and of <Gloss name="erm" /> satisfy <Cite id="daniely2015" />
+
+$$
+C_1\frac{d_N + \ln(1/\delta)}{\epsilon} \le m_{\text{realisable}} \le C_2\frac{d_N\ln(k)\ln(1/\epsilon) +
+\ln(1/\delta)}{\epsilon},
+$$
+
+$$
+C_1\frac{d_N + \ln(1/\delta)}{\epsilon^2} \le m_{\text{agnostic}} \le C_2\frac{d_N\ln(k) + \ln(1/\delta)}{\epsilon^2}.
+$$
+
+The lower bounds come from the binary problem embedded in an N-shattered set. The upper bounds come from the graph
+dimension and its comparison with $d_N$. With finitely many labels, a class is <Gloss name="pac" /> learnable if and
+only if its Natarajan dimension is finite, which extends the
+<NoteLink to="fundamental-theorem-of-statistical-learning">fundamental theorem of statistical learning</NoteLink> to
+multiclass problems. The $\ln k$ gap between the bounds is real for some learners: there are classes on which one ERM
+learner needs about $d_N/\epsilon$ examples and another needs about $d_N\ln(k)/\epsilon$ <Cite id="daniely2015" />.
+
+## Examples
+
+### Ordinal thresholds
+
+Let $\Ycal = \set{1, \dots, k}$ and let $\Hcal$ be the non-decreasing step functions on $\reals$: each $h$ has
+thresholds $t_1 \le \dots \le t_{k-1}$ and assigns $x$ the label $1 + \#\set{j : x \ge t_j}$. These are the
+predictions of an <NoteLink to="ordinal-regression">ordinal regression</NoteLink> model with a single score. For
+$k = 2$ they are the thresholds on a line, of VC dimension 1. In general $d_N(\Hcal) = k - 1$.
+
+- **$k - 1$ points are N-shattered.** Take $x_1 < \dots < x_{k-1}$, $f_0(x_i) = i$ and $f_1(x_i) = i + 1$. For any
+  pattern, the labels $i + b_i$ never decrease, because $i + b_i \le i + 1 \le (i + 1) + b_{i+1}$. A non-decreasing
+  step function realises them.
+- **$k$ points are not.** Suppose $x_1 < \dots < x_d$ are N-shattered, and write $a_i < c_i$ for the two candidate
+  labels at $x_i$. Any choice at each point is realised, including $c_i$ at $x_i$ and $a_{i+1}$ at $x_{i+1}$, so
+  monotonicity forces $c_i \le a_{i+1}$. Then $1 \le a_1 < c_1 \le a_2 < \dots < c_d \le k$, a chain of $d + 1$
+  distinct labels, so $d \le k - 1$.
+
+<NatarajanOrdinal />
+
+### Linear multiclass predictors
+
+A multiclass linear predictor scores each label with its own weight vector and predicts the best score:
+$h_{\Wmat}(\xvec) = \argmax_{j}\wvec_j^\top\xvec$ with $\xvec \in \reals^n$. Its Natarajan dimension is at most $nk$,
+the number of parameters <Cite id="shalevshwartz2014" />. The same holds for any class of the form
+$\argmax_y\wvec^\top\Psi(\xvec, y)$ with a feature map $\Psi$ into $\reals^p$: the dimension is at most $p$.
+
+## Worked example: ordinal labels with ten classes
+
+Take ordinal thresholds with $k = 10$ labels, so $d_N = 9$, a sample of $m = 10{,}000$ and $\delta = 0.05$.
+
+1. **Count with Natarajan's lemma.** $\ln N \le 9\ln 10{,}000 + 18\ln 10 = 82.9 + 41.4 = 124.3$.
+2. **Evaluate the bound.** $\sqrt{2 \times 124.3/10{,}000} = 0.158$ and $\sqrt{\ln 20/20{,}000} = 0.012$, so every
+   hypothesis has $R(h) \le \hat R_S(h) + 0.170$.
+3. **Count exactly.** A non-decreasing labelling of $m$ distinct sorted points into 10 labels is fixed by where its 9
+   steps fall, and there are $\binom{m + 9}{9}$ of them. Here $\ln\binom{10{,}009}{9} = 70.1$, and the bound becomes
+   $\sqrt{140.2/10{,}000} + 0.012 = 0.131$. Natarajan's lemma overcounts by a factor of about $e^{54}$, of which
+   $e^{41}$ comes from $k^{2d_N}$.
+4. **Sample size.** A gap of $0.05$ needs $m \approx 136{,}000$ with Natarajan's lemma and $85{,}000$ with the exact
+   count.
+5. **Against the binary case.** Binary thresholds ($k = 2$, VC dimension 1) give $\sqrt{2\ln(10{,}001)/10{,}000} +
+   0.012 = 0.055$ at the same $m$. Ten ordered labels cost between 2.4 and 3.1 times the gap of two.
+
+The bound is not vacuous, but it is loose in the way all worst-case counting bounds are. Its $\ln k$ dependence is
+the part that the fundamental theorem says can be necessary.
+
+## Pitfalls
+
+- **Infinitely many labels.** With infinite $\Ycal$, finite Natarajan dimension no longer implies learnability. There
+  is a class of Natarajan dimension 1 that is not PAC learnable, and the DS dimension of Daniely and Shalev-Shwartz is
+  the measure that characterises multiclass learnability in general <Cite id="brukhim2022" />. With infinite labels,
+  some learnable classes are not learnable by every ERM <Cite id="daniely2015" />.
+- **Not every ERM is equal.** For binary classes every ERM learner has the optimal rate up to constants. For multiclass
+  classes, different ways of breaking ties between empirical risk minimisers can differ by a factor $\ln k$ in sample
+  complexity.
+- **Graph or Natarajan.** Upper bounds stated with the graph dimension can be larger by $\log_2 k$. Check which
+  dimension a bound uses before comparing classes.
+- **The count is crude.** Natarajan's lemma ignores the structure of the label set. For structured classes, counting
+  labellings directly, as in the worked example, is often much tighter.

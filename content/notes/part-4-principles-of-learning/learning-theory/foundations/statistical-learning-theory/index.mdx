@@ -1,0 +1,261 @@
+---
+title: 'Statistical learning theory'
+kind: overview
+summary: 'Statistical learning theory asks when a rule learned from a finite sample predicts well on new data, and how many examples that takes. Its bounds follow one recipe: decompose the error, concentrate, make it uniform over the class, exploit structure, then invert.'
+tags: [learning-theory, generalisation, worked-example]
+aliases: [SLT, learning theory, generalisation theory, theory of generalisation]
+requires: [empirical-risk-minimisation, hoeffdings-inequality]
+related: [probably-approximately-correct-learning, generalisation-gap, uniform-convergence, deriving-a-generalisation-bound, vapnik-chervonenkis-dimension, rademacher-complexity]
+references: [vapnik1998, shalevshwartz2014, mohri2018, bousquet2004, devroye1996, vapnik1971, valiant1984, bartlett2002]
+status: draft
+updated: 2026-10-12
+---
+
+import { RecipeDiagram } from './RecipeDiagram'
+
+<Definition>
+**Statistical learning theory** studies learning from examples drawn independently from an unknown distribution. A
+learner sees a sample $S$ of $m$ labelled examples from a distribution $\Dcal$, chooses a predictor $h$, and is judged
+by its risk $R(h)$, the expected loss on a new example from $\Dcal$. The theory asks which learners have small risk, how
+fast the risk falls as $m$ grows, and how many examples a target accuracy needs. Its answers are bounds that hold with
+probability at least $1 - \delta$ over the sample, for every distribution in a stated family <Cite id="vapnik1998" />.
+</Definition>
+
+## The learning problem
+
+The setting has five ingredients.
+
+- **Data.** Pairs $(x, y)$ in $\Xcal \times \Ycal$ drawn from a distribution $\Dcal$ that the learner does not know. The
+  sample $S = ((x_i, y_i))_{i=1}^m$ consists of $m$ independent draws from $\Dcal$
+  (<Gloss name="iid" />).
+- **A loss.** $\ell(h(x), y) \ge 0$ measures the cost of predicting $h(x)$ when the label is $y$: the
+  <NoteLink to="surrogate-losses">0–1 loss</NoteLink> $\indicator[h(x) \ne y]$ for classification, the
+  <NoteLink to="regression-losses">squared loss</NoteLink> $(h(x) - y)^2$ for regression.
+- **Risks.** The true risk $R(h) = \expect_{(x, y) \sim \Dcal}[\ell(h(x), y)]$ is the quantity the learner is judged by
+  and cannot be computed.
+  The empirical risk $\hat R_S(h) = \frac1m\sum_{i=1}^m\ell(h(x_i), y_i)$ can be computed. The
+  <NoteLink to="bayes-decision-rule">Bayes risk</NoteLink> $R^* = \inf_h R(h)$, over all measurable predictors, is the
+  best any predictor can do.
+- **A class.** A set $\Hcal$ of predictors the learner chooses from. The class encodes the learner's
+  <NoteLink to="inductive-bias">inductive bias</NoteLink>.
+- **A learning algorithm.** A map $A$ from samples to predictors. The central example is
+  <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> (<Gloss name="erm" />), which
+  returns $\hat h = \argmin_{h \in \Hcal}\hat R_S(h)$.
+
+Two quantities describe how well a learned predictor $\hat h$ does. The <NoteLink to="generalisation-gap">generalisation
+gap</NoteLink> $R(\hat h) - \hat R_S(\hat h)$ measures how far the risk of $\hat h$ exceeds its empirical risk. The
+excess risk $R(\hat h) - R^*$ says how far it is from the best possible predictor. The theory bounds both, in terms of
+$m$, the confidence $\delta$ and a measure of the size of $\Hcal$.
+
+## The questions
+
+- **Consistency.** Does the risk converge to the Bayes risk as $m \to \infty$? For every distribution? Some rules are
+  universally consistent, such as $k$-nearest neighbours with $k \to \infty$ and $k/m \to 0$ (see
+  <NoteLink to="consistency-of-learning-algorithms">consistency of learning algorithms</NoteLink>).
+- **Learnability.** For which classes does some learner reach the best risk in the class, for every distribution, from
+  finitely many examples? For binary classification the answer is the classes of finite
+  <NoteLink to="vapnik-chervonenkis-dimension">Vapnik–Chervonenkis (VC) dimension</NoteLink>
+  (see <NoteLink to="fundamental-theorem-of-statistical-learning">the fundamental theorem of statistical
+  learning</NoteLink>).
+- **Sample complexity.** How many examples are needed for accuracy $\epsilon$ with confidence $1 - \delta$? This is the
+  question of <NoteLink to="probably-approximately-correct-learning">probably approximately correct (PAC)
+  learning</NoteLink> <Cite id="valiant1984" />.
+- **Rates.** How fast does the excess risk fall with $m$: like $1/\sqrt m$, like $1/m$, or more slowly? What conditions
+  on $\Dcal$ decide it? (see <NoteLink to="rates-and-consistency">excess risk and rates</NoteLink>)
+- **Lower bounds.** Can any learner do better than a given bound? Matching lower bounds show which upper bounds are
+  tight (see <NoteLink to="sample-complexity-lower-bounds">sample complexity lower bounds</NoteLink> and
+  <NoteLink to="minimax-lower-bounds">minimax lower bounds</NoteLink>).
+- **Computation.** Which learnable classes can be learned in polynomial time? (see
+  <NoteLink to="efficient-pac-learning">efficient PAC learning</NoteLink>)
+
+## The recipe for a bound
+
+Nearly every generalisation bound is built by the same five moves.
+
+<RecipeDiagram />
+
+**1. Decompose.** Split the excess risk of ERM into an approximation error, which depends only on the class, and an
+estimation error, which depends on the sample. The estimation error is at most twice the uniform deviation of the class:
+
+$$
+R(\hat h) - R^* = \underbrace{R(h^*_\Hcal) - R^*}_{\text{approximation}} + \underbrace{R(\hat h) - R(h^*_\Hcal)}_{\le\, 2\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)}},
+$$
+
+where $h^*_\Hcal$ is the best member of the class. The derivation is in the
+<NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> note; an optimiser that stops early
+adds a third term (<NoteLink to="approximation-estimation-optimisation-trade-off">the approximation, estimation and
+optimisation trade-off</NoteLink>). From here on, the task is to bound the uniform deviation.
+
+**2. Concentrate.** For one predictor $h$ fixed before the data are seen, $\hat R_S(h)$ is an average of $m$ independent
+losses with mean $R(h)$. For losses in $[0, 1]$, <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>
+gives $\prob(\abs{\hat R_S(h) - R(h)} \ge \epsilon) \le 2e^{-2m\epsilon^2}$.
+<NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink> and the exact binomial tail are sharper when the
+risk is small. Applied to a held-out set, this step alone is a complete bound: the
+<NoteLink to="test-set-bounds">test-set bound</NoteLink>.
+
+**3. Make it uniform.** The learner's predictor depends on the sample, so the bound must hold for every $h \in \Hcal$ at
+once.
+
+- For a finite class, the <NoteLink to="union-bound">union bound</NoteLink> multiplies the failure probability by
+  $\abs\Hcal$. The deviation becomes $\sqrt{(\ln\abs\Hcal + \ln(2/\delta))/(2m)}$ (see
+  <NoteLink to="realisable-and-agnostic-learning">realisable and agnostic learning</NoteLink> and the
+  <NoteLink to="occam-bound">Occam bound</NoteLink>).
+- For an infinite class, <NoteLink to="symmetrisation">symmetrisation</NoteLink> replaces the true risk by the risk on
+  a second, ghost sample, so only the finitely many labellings that $\Hcal$ produces on $2m$ points matter. Their number
+  is the <NoteLink to="growth-function-and-sauer-shelah-lemma">growth function</NoteLink> $\Pi_\Hcal(2m)$, which is
+  polynomial in $m$ when the VC dimension is finite <Cite id="vapnik1971" />.
+- The <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> $\Rad_m(\Hcal)$ measures how well the class
+  correlates with random signs, and bounds the expected uniform deviation directly <Cite id="bartlett2002" />.
+  <NoteLink to="covering-numbers-and-metric-entropy">Covering numbers</NoteLink> and
+  <NoteLink to="chaining-and-dudley-entropy-integral">chaining</NoteLink> refine it further.
+
+**4. Exploit structure.** Counting labellings ignores how the class is used. Finer bounds use more information:
+
+- the margin and norm of the returned predictor (<NoteLink to="margin-bounds">margin bounds</NoteLink>);
+- the algorithm's insensitivity to one example (<NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>);
+- a prior over predictors (<NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>);
+- a small subset of the sample that determines the output (<NoteLink to="sample-compression-bounds">sample
+  compression</NoteLink>);
+- low noise near the decision boundary, which gives fast rates (<NoteLink to="fast-rates-and-noise-conditions">fast
+  rates and noise conditions</NoteLink>).
+
+**5. Invert and read.** A bound of the form $\prob(\text{deviation} \ge \epsilon) \le f(m, \epsilon)$ is solved for
+$\epsilon$ at a chosen $\delta$, or for the sample size $m$ that a target $\epsilon$ needs. The resulting number is
+compared with a measured test error. A bound above the trivial value (1 for the 0–1 loss) is **vacuous**: true, but
+uninformative.
+
+## The recipe in numbers
+
+Thresholds on the real line, $h_t(x) = \indicator[x \ge t]$, classify with 0–1 loss. Take $m = 500$ and $\delta = 0.05$.
+
+1. **A finite grid of 100 thresholds.** Concentration and the union bound give a uniform deviation of
+   $\epsilon = \sqrt{\ln(2 \cdot 100/0.05)/(2 \cdot 500)} = \sqrt{8.29/1\,000} = 0.091$. ERM's estimation error is at
+   most $2\epsilon = 0.18$. To bring the estimation error down to $0.05$ (so $\epsilon = 0.025$) the bound needs
+   $m = \ln(4\,000)/(2 \cdot 0.025^2) = 6\,635$ examples.
+2. **All thresholds.** The class is infinite, so the union bound fails, but it produces only $m + 1$ labellings of $m$
+   points: $\Pi_\Hcal(m) = m + 1$ and the VC dimension is 1. The Vapnik–Chervonenkis inequality in the form
+   $\prob(\sup_h\abs{\hat R_S(h) - R(h)} > \epsilon) \le 8\,\Pi_\Hcal(m)\,e^{-m\epsilon^2/32}$ <Cite id="devroye1996" />
+   gives $\epsilon = \sqrt{32\ln(8 \cdot 501/0.05)/500} = 0.85$ at $m = 500$. The estimation-error bound $2\epsilon$ is
+   above 1 and vacuous. Reaching $\epsilon = 0.025$ needs about $965\,000$ examples.
+3. **Reading the numbers.** The two classes are almost the same: a grid of 100 thresholds approximates every threshold
+   to within $0.01$ in risk when the inputs are spread evenly. The 145-fold difference in sample size comes from the
+   constants of the symmetrisation argument, not from the classes. Sharper uniform laws for this class, such as the
+   <NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality">Dvoretzky–Kiefer–Wolfowitz inequality</NoteLink>, close
+   most of the gap.
+
+The note <NoteLink to="deriving-a-generalisation-bound">deriving a generalisation bound</NoteLink> works through every
+move on one problem, with each bound evaluated against the measured gap.
+
+## The main themes
+
+- **Capacity controls generalisation.** The gap of a learner choosing from $\Hcal$ is bounded by a capacity of $\Hcal$
+  divided by $\sqrt m$: $\ln\abs\Hcal$, the VC dimension or the Rademacher complexity. The theory's long-running
+  question is which capacity is the right one.
+- **Assumptions are unavoidable.** Without restricting the class or the distribution, no learner generalises (the
+  <NoteLink to="no-free-lunch-theorem">no free lunch theorem</NoteLink>), and no learner has a uniform rate of
+  convergence (see <NoteLink to="consistency-of-learning-algorithms">consistency of learning algorithms</NoteLink>).
+- **Uniform convergence is sufficient and, for ERM over a class, necessary.** For binary classification, finite VC
+  dimension, uniform convergence, learnability and the success of ERM are equivalent
+  <Cite id="shalevshwartz2014" />. Beyond ERM, bounds that depend on the algorithm (stability, PAC-Bayes, compression,
+  <NoteLink to="mutual-information">mutual information</NoteLink>) can be much tighter.
+- **Two rates.** Agnostic learning gives excess risk of order $1/\sqrt m$; the realisable case and low-noise conditions
+  give order $1/m$. Variance-sensitive concentration (Bernstein) and <NoteLink to="local-rademacher-complexity">local
+  Rademacher complexity</NoteLink> explain the difference.
+- **<NoteLink to="model-selection">Model selection</NoteLink> is part of the theory.** Penalising the empirical risk by
+  a capacity term turns a bound into a learning rule (<NoteLink to="structural-risk-minimisation">structural risk
+  minimisation</NoteLink>, <NoteLink to="oracle-inequalities">oracle inequalities</NoteLink>,
+  <NoteLink to="minimum-description-length">minimum description length</NoteLink>).
+- **Modern models strain the classical picture.** Large networks fit random labels and still generalise on real ones.
+  Classical capacity bounds are vacuous for them, test error can fall again past the interpolation threshold, and
+  uniform convergence can provably fail to explain their generalisation (see
+  <NoteLink to="limits-of-uniform-convergence">the limits of uniform convergence</NoteLink>). This motivates
+  <NoteLink to="non-vacuous-generalisation-bounds">non-vacuous bounds</NoteLink>,
+  <NoteLink to="benign-overfitting">benign overfitting</NoteLink> and
+  <NoteLink to="implicit-regularisation">implicit regularisation</NoteLink>.
+
+## Map of the chapter
+
+**Foundations: the learning problem.** The setting and the questions:
+<NoteLink to="generalisation-gap">generalisation gap</NoteLink>,
+<NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink>,
+<NoteLink to="approximation-estimation-optimisation-trade-off">approximation, estimation and optimisation
+trade-off</NoteLink>, <NoteLink to="inductive-bias">inductive bias</NoteLink>,
+<NoteLink to="no-free-lunch-theorem">no free lunch theorem</NoteLink>,
+<NoteLink to="consistency-of-learning-algorithms">consistency of learning algorithms</NoteLink> and the worked example
+<NoteLink to="deriving-a-generalisation-bound">deriving a generalisation bound</NoteLink>.
+
+**The concentration toolkit (Part I).** The probability behind move 2:
+<NoteLink to="markov-and-chebyshev-inequalities">Markov and Chebyshev inequalities</NoteLink>,
+<NoteLink to="chernoff-bounds">Chernoff bounds</NoteLink>, <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink>, <NoteLink to="sub-gaussian-random-variables">sub-Gaussian random variables</NoteLink>,
+<NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink>,
+<NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink>,
+<NoteLink to="maximal-inequalities">maximal inequalities</NoteLink> and the
+<NoteLink to="union-bound">union bound</NoteLink>.
+
+**PAC learning: finite classes and the first bounds.**
+<NoteLink to="probably-approximately-correct-learning">Probably approximately correct learning</NoteLink>,
+<NoteLink to="test-set-bounds">test-set bounds</NoteLink>,
+<NoteLink to="realisable-and-agnostic-learning">realisable and agnostic learning</NoteLink>,
+<NoteLink to="occam-bound">the Occam bound</NoteLink>,
+<NoteLink to="sample-complexity-lower-bounds">sample complexity lower bounds</NoteLink>,
+<NoteLink to="fundamental-theorem-of-statistical-learning">the fundamental theorem of statistical learning</NoteLink>,
+<NoteLink to="weak-and-strong-learnability">weak and strong learnability</NoteLink> and
+<NoteLink to="efficient-pac-learning">efficient PAC learning</NoteLink>.
+
+**<NoteLink to="uniform-convergence-and-capacity">Uniform convergence and capacity</NoteLink>: infinite classes.**
+<NoteLink to="uniform-convergence">Uniform convergence</NoteLink>,
+<NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality">the Glivenko–Cantelli theorem and DKW inequality</NoteLink>,
+<NoteLink to="symmetrisation">symmetrisation</NoteLink>, <NoteLink to="growth-function-and-sauer-shelah-lemma">the
+growth function and Sauer–Shelah lemma</NoteLink>, <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>,
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink>,
+<NoteLink to="massarts-finite-class-lemma">Massart's finite class lemma</NoteLink>, <NoteLink to="contraction-lemma">the
+contraction lemma</NoteLink>, <NoteLink to="covering-numbers-and-metric-entropy">covering numbers and metric
+entropy</NoteLink>, <NoteLink to="chaining-and-dudley-entropy-integral">chaining and Dudley's entropy
+integral</NoteLink>, <NoteLink to="pseudo-dimension-and-fat-shattering-dimension">pseudo-dimension and fat-shattering
+dimension</NoteLink>, <NoteLink to="natarajan-dimension">Natarajan dimension</NoteLink> and
+<NoteLink to="measuring-capacity-empirically">measuring capacity empirically</NoteLink>.
+
+**<NoteLink to="margins-and-norms">Margins and norms</NoteLink>: scale-sensitive bounds.**
+<NoteLink to="margin-bounds">Margin bounds</NoteLink>, <NoteLink to="margin-theory-of-boosting">the margin theory of
+boosting</NoteLink> and <NoteLink to="norm-based-bounds-for-neural-networks">norm-based bounds for neural
+networks</NoteLink>.
+
+**<NoteLink to="algorithm-dependent-bounds">Algorithm-dependent bounds</NoteLink>.**
+<NoteLink to="algorithmic-stability">Algorithmic stability</NoteLink>,
+<NoteLink to="stability-of-regularised-empirical-risk-minimisation">stability of regularised ERM</NoteLink>,
+<NoteLink to="stability-of-stochastic-gradient-descent">stability of stochastic gradient descent</NoteLink>,
+<NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>,
+<NoteLink to="non-vacuous-generalisation-bounds">non-vacuous generalisation bounds</NoteLink>,
+<NoteLink to="sample-compression-bounds">sample compression bounds</NoteLink>,
+<NoteLink to="information-theoretic-generalisation-bounds">information-theoretic generalisation bounds</NoteLink> and
+<NoteLink to="adaptive-data-analysis">adaptive data analysis</NoteLink>.
+
+**Rates and consistency.** <NoteLink to="rates-and-consistency">Excess risk and rates</NoteLink>,
+<NoteLink to="classification-calibrated-losses">classification-calibrated losses</NoteLink>,
+<NoteLink to="nearest-neighbour-consistency">nearest-neighbour consistency</NoteLink>,
+<NoteLink to="fast-rates-and-noise-conditions">fast rates and noise conditions</NoteLink>,
+<NoteLink to="local-rademacher-complexity">local Rademacher complexity</NoteLink>,
+<NoteLink to="minimax-lower-bounds">minimax lower bounds</NoteLink> and
+<NoteLink to="minimax-rates-for-nonparametric-regression">minimax rates for nonparametric regression</NoteLink>.
+
+**<NoteLink to="complexity-regularisation">Complexity regularisation</NoteLink>.**
+<NoteLink to="structural-risk-minimisation">Structural risk minimisation</NoteLink>,
+<NoteLink to="oracle-inequalities">oracle inequalities</NoteLink> and <NoteLink to="minimum-description-length">minimum
+description length</NoteLink>.
+
+**Bias, variance and interpolation.** <NoteLink to="bias-variance-decomposition">The bias–variance
+decomposition</NoteLink>, <NoteLink to="double-descent">double descent</NoteLink>,
+<NoteLink to="benign-overfitting">benign overfitting</NoteLink>,
+<NoteLink to="implicit-regularisation">implicit regularisation</NoteLink>,
+<NoteLink to="neural-tangent-kernel">the neural tangent kernel</NoteLink>,
+<NoteLink to="flat-minima-and-sharpness">flat minima and sharpness</NoteLink> and
+<NoteLink to="limits-of-uniform-convergence">the limits of uniform convergence</NoteLink>.
+
+<NoteLink to="online-learning">Online learning</NoteLink>, where data arrive one at a time and may be chosen by an
+adversary, has its own theory of regret; its link to this chapter is
+<NoteLink to="online-to-batch-conversion">online-to-batch conversion</NoteLink>.
+
+Textbook treatments of the whole chapter are Shalev-Shwartz and Ben-David <Cite id="shalevshwartz2014" />, Mohri,
+Rostamizadeh and Talwalkar <Cite id="mohri2018" />, and the shorter survey of Bousquet, Boucheron and Lugosi
+<Cite id="bousquet2004" />.

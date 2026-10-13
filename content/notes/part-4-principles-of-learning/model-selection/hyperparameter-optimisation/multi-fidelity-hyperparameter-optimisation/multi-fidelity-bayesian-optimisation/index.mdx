@@ -1,0 +1,214 @@
+---
+title: 'Multi-fidelity Bayesian optimisation'
+kind: technique
+summary: 'Multi-fidelity Bayesian optimisation models the validation loss over configuration and fidelity, such as the data-set fraction, with one surrogate, and picks each evaluation''s configuration and fidelity by what it reveals about the full-fidelity optimum per unit cost.'
+tags: [model-selection, hyperparameters, bayesian, gaussian-processes, worked-example]
+aliases: [multi-fidelity Bayesian optimization, MF-BO, FABOLAS, MF-GP-UCB, BOCA, autoregressive multi-fidelity model, co-kriging, cost-aware Bayesian optimisation]
+requires: [bayesian-optimisation, multi-fidelity-hyperparameter-optimisation, gaussian-process]
+related: [bayesian-optimisation-and-hyperband, entropy-search, gaussian-process-upper-confidence-bound, learning-curve-extrapolation, warm-starting-hyperparameter-optimisation, multi-task-learning]
+references: [kennedy2000, klein2017fabolas, swersky2013mtbo, kandasamy2016mfgpucb, kandasamy2017boca, swersky2014freezethaw, li2020asha, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { ForresterFidelities } from './ForresterFidelities'
+
+<Definition>
+**Multi-fidelity Bayesian optimisation** extends <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink>
+to an objective $f(\lambdavec, z)$ that can be evaluated at several **fidelities** $z$, such as a fraction of the
+training set, a number of epochs or a coarser simulation, at a cost $c(\lambdavec, z)$ that grows with $z$. The target
+is the full-fidelity loss $f(\lambdavec, z_{\max})$. One probabilistic surrogate models $f$ over configurations and
+fidelities jointly, so a cheap evaluation informs the prediction at full fidelity. An
+<NoteLink to="acquisition-functions">acquisition function</NoteLink> then chooses both the next configuration and the
+fidelity to evaluate it at, by trading what the evaluation reveals about the full-fidelity optimum against its cost.
+</Definition>
+
+## Problem
+
+The schedules of <NoteLink to="successive-halving">successive halving</NoteLink> and
+<NoteLink to="hyperband">Hyperband</NoteLink> fix in advance how much budget each configuration gets.
+<NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> adds a model but fits a separate one at each budget
+and uses only one of them at a time. Neither learns how the fidelities relate to each other, and neither decides, for a
+particular configuration, whether a cheap evaluation is worth more than an expensive one.
+
+Low-fidelity results are also biased. A model trained on 10% of the data prefers smaller models and stronger
+regularisation than the same model trained on all of it, so the best configuration at low fidelity is not the best at
+full fidelity. Optimising the cheap objective alone converges to the wrong configuration. Using it well requires a model
+of how it differs from the expensive one.
+
+## Mechanism
+
+### A joint surrogate: the autoregressive model
+
+Kennedy and O'Hagan's autoregressive model links two fidelities, a cheap $f_{\text{lo}}$ and an
+expensive $f_{\text{hi}}$, by <Cite id="kennedy2000" />
+
+$$
+f_{\text{hi}}(\lambdavec) = \rho\, f_{\text{lo}}(\lambdavec) + \delta(\lambdavec),
+$$
+
+with a scale $\rho$, and with $f_{\text{lo}} \sim \GP(0, k_{\text{lo}})$ and a discrepancy
+$\delta \sim \GP(0, k_\delta)$ independent <NoteLink to="gaussian-process">Gaussian processes</NoteLink>. The expensive
+function is the cheap one, rescaled, plus a correction that a Gaussian process can learn from a few expensive
+evaluations.
+
+The model defines one Gaussian process over pairs $(\lambdavec, z)$ with $z \in \set{\text{lo}, \text{hi}}$. Its
+covariances follow from bilinearity of covariance and the independence of $f_{\text{lo}}$ and $\delta$:
+
+$$
+\begin{aligned}
+\cov\paren{f_{\text{lo}}(\lambdavec), f_{\text{lo}}(\lambdavec')} &= k_{\text{lo}}(\lambdavec, \lambdavec'), \\
+\cov\paren{f_{\text{hi}}(\lambdavec), f_{\text{lo}}(\lambdavec')} &= \cov\paren{\rho f_{\text{lo}}(\lambdavec) +
+\delta(\lambdavec), f_{\text{lo}}(\lambdavec')} = \rho\, k_{\text{lo}}(\lambdavec, \lambdavec'), \\
+\cov\paren{f_{\text{hi}}(\lambdavec), f_{\text{hi}}(\lambdavec')} &= \rho^2 k_{\text{lo}}(\lambdavec, \lambdavec') +
+k_\delta(\lambdavec, \lambdavec').
+\end{aligned}
+$$
+
+The cross term $\rho\, k_{\text{lo}}$ is what transfers information: an observation of $f_{\text{lo}}$ at $\lambdavec'$
+changes the posterior of $f_{\text{hi}}$ at every $\lambdavec$ near $\lambdavec'$. Stacking all observations at both
+fidelities, the posterior mean and variance of $f_{\text{hi}}$ come from the standard Gaussian process regression
+formulas with this kernel. The hyperparameters, including $\rho$, are fitted by maximising the
+<NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> (see
+<NoteLink to="gaussian-process-hyperparameter-learning">Gaussian-process hyperparameter learning</NoteLink>).
+
+### Continuous fidelities: kernels over the budget
+
+When the fidelity is continuous, the kernel takes it as an input. FABOLAS treats the fraction $s \in (0, 1]$ of the
+training set as a fidelity and uses a product kernel <Cite id="klein2017fabolas" />
+
+$$
+k\paren{(\lambdavec, s), (\lambdavec', s')} = k_\lambda(\lambdavec, \lambdavec') \cdot \phi(s)^\top \Sigmamat\, \phi(s'),
+\qquad \phi(s) = \paren{1, (1 - s)^2}^\top,
+$$
+
+with $\Sigmamat$ a $2 \times 2$ <Gloss name="positive-semi-definite">positive semi-definite</Gloss> matrix. For a fixed
+configuration, the loss as a function of $s$ is then a <NoteLink to="bayesian-linear-regression">Bayesian linear
+regression</NoteLink> on the basis $1$ and $(1 - s)^2$: it changes most for small subsets and flattens as $s \to 1$. A
+second model of the same form, with basis $(1, s)$ on the logarithm of the cost, predicts how long an evaluation will
+take. Swersky, Snoek and Adams's multi-task Bayesian optimisation handles a discrete set of related tasks or data
+subsets with a kernel that is a product of a configuration kernel and a task covariance matrix
+<Cite id="swersky2013mtbo" />.
+
+### Choosing the configuration and the fidelity
+
+With a joint surrogate, an acquisition function scores pairs $(\lambdavec, z)$. Two families are common.
+
+**Information per unit cost.** Let $\lambdavec^\star$ be the minimiser of the full-fidelity loss, unknown, and
+$p(\lambdavec^\star \mid \Dcal)$ its posterior distribution under the surrogate. An evaluation at $(\lambdavec, z)$
+returns a loss $y$ and changes that posterior. FABOLAS chooses the pair that maximises <Cite id="klein2017fabolas" />
+
+$$
+\alpha(\lambdavec, z) = \frac{\expect_{y}\brack{\KL\paren{p(\lambdavec^\star \mid \Dcal \cup \set{(\lambdavec, z, y)})
+\,\|\, u}}}{c(\lambdavec, z) + c_{\text{overhead}}},
+$$
+
+with $u$ the uniform distribution over the <NoteLink to="hyperparameter-search-spaces">search space</NoteLink>. The
+numerator is the <NoteLink to="entropy-search">entropy-search</NoteLink> measure of how concentrated the belief about
+the optimum's location will be after the evaluation, averaged over its possible outcomes $y$ under the surrogate.
+Information about $\lambdavec^\star$ is measured at full fidelity, while the cost is paid at the fidelity evaluated. A
+cheap evaluation wins when it is nearly as informative, and loses when the model already knows what it would show. The
+overhead term $c_{\text{overhead}}$, the time the optimiser itself takes, stops it from choosing evaluations so cheap
+that they cost less than deciding on them.
+
+**Confidence bounds with a known bias.** MF-GP-UCB assumes a bound on how far each fidelity $m$ can be from the target
+fidelity $M$, $\sup_{\lambdavec}\abs{f^{(M)}(\lambdavec) - f^{(m)}(\lambdavec)} \le \zeta^{(m)}$, with $\zeta^{(M)} = 0$
+<Cite id="kandasamy2016mfgpucb" />. Written for minimisation, the derivation takes two steps.
+
+**Step 1: a lower bound from each fidelity.** With a separate Gaussian process per fidelity, posterior mean
+$\mu^{(m)}_t$ and standard deviation $\sigma^{(m)}_t$ after $t$ evaluations, the usual confidence argument of
+<NoteLink to="gaussian-process-upper-confidence-bound">GP-UCB</NoteLink> gives, with high probability,
+$f^{(m)}(\lambdavec) \ge \mu^{(m)}_t(\lambdavec) - \beta_t^{1/2}\sigma^{(m)}_t(\lambdavec)$. The bias bound gives
+$f^{(M)} \ge f^{(m)} - \zeta^{(m)}$. Together,
+
+$$
+f^{(M)}(\lambdavec) \ge \mu^{(m)}_t(\lambdavec) - \beta_t^{1/2}\sigma^{(m)}_t(\lambdavec) - \zeta^{(m)}
+\quad \text{for every } m.
+$$
+
+**Step 2: the tightest bound.** Every fidelity's bound holds, so the largest of them does:
+$\varphi_t(\lambdavec) = \max_m \brack{\mu^{(m)}_t - \beta_t^{1/2}\sigma^{(m)}_t - \zeta^{(m)}}(\lambdavec)$. The
+next configuration minimises this optimistic estimate of the target loss, $\lambdavec_{t+1} = \argmin_{\lambdavec}
+\varphi_t(\lambdavec)$.
+
+The fidelity is chosen separately: the cheapest $m$ at which the model is still uncertain at $\lambdavec_{t+1}$,
+$\beta_t^{1/2}\sigma^{(m)}_t(\lambdavec_{t+1}) \ge \gamma^{(m)}$ for a threshold $\gamma^{(m)}$, or $M$ if there is none
+<Cite id="kandasamy2016mfgpucb" />. A cheap fidelity is used while it can still teach something at the chosen
+configuration. Once it is known there to within $\gamma^{(m)}$, it cannot say more about $f^{(M)}$ than its bias
+$\zeta^{(m)}$ allows, and the next fidelity up is used. BOCA extends the idea to a continuous fidelity space
+<Cite id="kandasamy2017boca" />.
+
+### Across training time
+
+Epochs are a fidelity too. Freeze-thaw Bayesian optimisation models every configuration's learning curve with a
+Gaussian process over training time and decides which paused run to continue; it is described with the other curve
+models in <NoteLink to="learning-curve-extrapolation">learning-curve extrapolation</NoteLink>
+<Cite id="swersky2014freezethaw" />.
+
+<ForresterFidelities />
+
+{/* figure pending engine (multiFidelityGp and multiFidelityBayesianOptimisationSteps, see logs/ms-multi-fidelity.md): two-fidelity autoregressive GP posterior on Forrester, and a cost-aware run choosing x and the fidelity */}
+
+## Worked example
+
+The Forrester function $f(x) = (6x - 2)^2\sin(12x - 4)$ on $[0, 1]$ plays the full-fidelity validation loss, and its
+standard cheap version $f_{\text{lo}}(x) = 0.5f(x) + 10(x - 0.5) + 5$ plays a
+<NoteLink to="multi-fidelity-hyperparameter-optimisation">low-fidelity evaluation</NoteLink>
+<Cite id="forrester2008" />. Suppose a low-fidelity evaluation costs one tenth of a full one.
+
+1. **The trap.** $f$ has its minimum $-6.021$ at $x = 0.757$. $f_{\text{lo}}$ has its minimum $0.665$ at $x = 0.092$,
+   because the tilt $10(x - 0.5)$ favours small $x$. Optimising the cheap function alone returns $x = 0.092$, where the
+   full-fidelity loss is $f(0.092) = -0.518$, a regret of $5.50$. The two functions have a correlation of $0.74$ over a
+   fine grid, so they are related, but the relation is not a monotone one.
+2. **The structure.** Rearranging the definition, $f(x) = 2f_{\text{lo}}(x) - 20(x - 0.5) - 10 = 2f_{\text{lo}}(x) -
+   20x$. This is the autoregressive model with $\rho = 2$ and a linear discrepancy $\delta(x) = -20x$.
+3. **Learning the relation.** Suppose $f_{\text{lo}}$ is known well, from cheap evaluations, and the discrepancy is
+   modelled as linear, $\delta(x) = d_0 + d_1x$. Three expensive evaluations, at $x = 0, 0.5, 1$, give
+   $f = 3.027, 0.909, 15.830$, where $f_{\text{lo}} = 1.514, 5.455, 17.915$. The three equations
+   $f(x) = \rho f_{\text{lo}}(x) + d_0 + d_1 x$ are $3.027 = 1.514\rho + d_0$, $0.909 = 5.455\rho + d_0 + 0.5d_1$ and
+   $15.830 = 17.915\rho + d_0 + d_1$. Their solution is $\rho = 2$, $d_0 = 0$, $d_1 = -20$: substituting,
+   $2 \times 1.514 = 3.027$, $2 \times 5.455 - 10 = 0.909$ and $2 \times 17.915 - 20 = 15.830$, up to rounding.
+4. **The payoff.** The model $2f_{\text{lo}}(x) - 20x$ is now exactly $f$, and its minimiser is $x = 0.757$. The full
+   fidelity was evaluated three times. The cheap evaluations cost a tenth each, so twenty of them add the cost of two
+   full evaluations.
+
+The example is idealised: the discrepancy really is linear here, and a Gaussian process with a smooth kernel only
+approximates such structure from data. The lesson carries over. The cheap fidelity is useful through a learned
+relation, not as a stand-in for the target.
+
+## Cost
+
+A Gaussian-process surrogate costs time cubic in the number of evaluations, and cheap evaluations are many.
+Multi-fidelity models therefore hit that cost sooner than single-fidelity Bayesian optimisation. Information-based
+acquisitions such as entropy search add Monte Carlo approximations of the posterior over the optimum at each step, which
+is why FABOLAS includes the optimiser's own overhead in the cost <Cite id="klein2017fabolas" />. The payoff is in the
+evaluations: Klein et al. report that FABOLAS often finds high-quality solutions 10 to 100 times faster than Bayesian
+optimisation at full fidelity and than Hyperband on <Gloss name="svm">support vector machines</Gloss> and neural
+networks <Cite id="klein2017fabolas" />.
+
+## Trade-offs
+
+- **Model against schedule.** A joint model decides per configuration how much to spend and can exploit a strong
+  relation between fidelities. A fixed schedule needs no model and is robust when the relation is weak or changes across
+  the search space. In Li et al.'s comparisons, the most aggressive bracket of Hyperband tended to outperform FABOLAS
+  with lower variance across trials <Cite id="li2020asha" />.
+- **Discrete against continuous fidelities.** A few discrete fidelities suit the autoregressive and multi-task models. A
+  continuous budget, such as a data fraction, suits a kernel over the budget and lets the acquisition choose any
+  fidelity.
+- **Information against confidence bounds.** Entropy-based acquisitions measure what a cheap evaluation teaches about
+  the optimum directly but are expensive to compute. MF-GP-UCB is cheap and has regret guarantees, but needs the bias
+  bounds $\zeta^{(m)}$ and thresholds $\gamma^{(m)}$, which are rarely known.
+
+## Pitfalls
+
+- **Assuming the cheap fidelity is a noisy copy.** Low fidelities are biased, not just noisy. A model that treats
+  them as unbiased observations of the target, with extra noise, inherits the trap of the worked example.
+- **Learning curves that cross.** When configurations change rank between small and large budgets, the correlation
+  between fidelities is low, and the model gains little from cheap evaluations. It should then learn to spend on
+  full-fidelity evaluations; a misspecified kernel that forces a high correlation will not.
+- **Costs that the model gets wrong.** Choosing by information per unit cost needs a cost model. If the cost depends on
+  the configuration, as training time does on the model size, a cost model that ignores this favours expensive
+  configurations at small budgets.
+- **The incumbent's loss.** The surrogate's recommendation is selected using noisy validation results, and its predicted
+  or observed loss is optimistic (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>).

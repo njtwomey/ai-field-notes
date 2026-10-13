@@ -1,0 +1,138 @@
+---
+title: 'Grouped cross-validation'
+kind: technique
+summary: 'Grouped cross-validation keeps all records of a group, such as one patient or one user, in the same fold. When deployment meets new groups, splitting records instead of groups lets the model recognise the group and makes the estimate optimistic.'
+tags: [model-selection, evaluation, leakage, resampling, worked-example]
+aliases: [group k-fold, group k-fold cross-validation, leave-one-group-out, leave-one-group-out cross-validation, LOGO, subject-wise cross-validation, leave-one-subject-out, cluster cross-validation]
+requires: [k-fold-cross-validation]
+related: [matching-the-split-to-deployment, train-validation-and-test-splits, data-leakage, spatial-and-blocked-cross-validation, hierarchical-models, stratified-cross-validation, nested-cross-validation]
+references: [saeb2017, roberts2017cv, kish1965]
+status: draft
+updated: 2026-10-13
+---
+
+import { RecordOrSubject } from './RecordOrSubject'
+
+<Definition>
+Let each record $i$ carry a group label $g(i) \in \set{1, \dots, G}$: the patient, user, device or site it comes from.
+**Grouped cross-validation** assigns whole groups to folds, so that every group lies in exactly one fold and no group
+contributes records to both a training set and its test fold. **Group $K$-fold** forms $K$ folds of groups;
+**leave-one-group-out** uses $K = G$, one group per fold. The estimate is computed as in
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>.
+</Definition>
+
+## Problem
+
+Records of one group resemble each other more than records of different groups: several scans of one patient share
+the patient's anatomy, many sessions of one user share the user's habits. Random folds put some of a group's records in
+training and others in the test fold. A flexible model can then predict a test record from its siblings, by recognising
+the group, and score well without learning anything that carries over to a new group.
+
+Whether that is wrong depends on what will be new in use. If the model will meet new records of the groups it was
+trained on, record-wise folds imitate deployment. If it will meet new groups, as a diagnostic model meets new patients,
+record-wise folds are optimistic and grouped folds imitate deployment (see
+<NoteLink to="matching-the-split-to-deployment">matching the split to deployment</NoteLink>). In a comparison on
+wearable-sensor data and a simulation, record-wise cross-validation often massively overestimated the accuracy that
+subject-wise cross-validation reported, and almost half of the clinical prediction studies reviewed alongside had used
+the record-wise method <Cite id="saeb2017" />.
+
+## Mechanism
+
+1. **Choose the grouping variable**: the unit that will be new in use. For a model deployed to new patients at the same
+   hospitals, the patient; for a model deployed to new hospitals, the hospital.
+2. **Assign groups to folds.** Group $K$-fold balances the folds by number of records: scikit-learn's `GroupKFold`
+   takes groups largest first and puts each into the fold with the fewest records so far. Leave-one-group-out gives
+   each group its own fold. `GroupShuffleSplit` draws random sets of groups, the grouped form of
+   <NoteLink to="repeated-and-monte-carlo-cross-validation">Monte Carlo cross-validation</NoteLink>.
+3. **Cross-validate** as usual, with every data-dependent step fitted inside the training folds.
+4. **Group the inner loop too.** Hyperparameters tuned by record-wise cross-validation inside a grouped outer loop are
+   tuned for the wrong deployment.
+
+## Subject-wise and record-wise splits
+
+A random-intercept model shows how far the two estimates can part. Let record $i$ of group $j$ be
+
+$$
+y_{ij} = f(\xvec_{ij}) + u_j + \varepsilon_{ij},
+$$
+
+with a group effect $u_j$ of mean zero and variance $\tau^2$, and record noise $\varepsilon_{ij}$ of mean zero and
+variance $\sigma^2$, all independent. The **intraclass correlation** $\rho = \tau^2/(\tau^2 + \sigma^2)$ is the
+correlation between two records of the same group. Consider a model that knows $f$ and estimates a group's effect by
+the mean residual of its $m$ training records, $\hat u_j = u_j + \bar\varepsilon_j$, where $\bar\varepsilon_j$ is the
+mean of their $m$ noise terms.
+
+- **A new record of a seen group** is predicted by $f(\xvec) + \hat u_j$. The error is
+  $\varepsilon - \bar\varepsilon_j$, a difference of independent terms, with expected square $\sigma^2(1 + 1/m)$.
+- **A record of a new group** has no $\hat u_j$, so the prediction is $f(\xvec)$. The error is $u + \varepsilon$, with
+  expected square $\tau^2 + \sigma^2$.
+
+Record-wise $K$-fold cross-validation leaves about $m(K-1)/K$ siblings of each test record in training, so it estimates
+the first quantity. Grouped cross-validation estimates the second. Their ratio,
+
+$$
+\frac{\tau^2 + \sigma^2}{\sigma^2\paren{1 + K/(m(K-1))}} = \frac{1}{(1 - \rho)\paren{1 + K/(m(K-1))}},
+$$
+
+grows without bound as $\rho \to 1$: when records of a group are near copies, the record-wise estimate describes
+memorisation. When $\rho = 0$ the groups carry no information and the two estimates agree up to the factor for the
+missing siblings.
+
+The same correlation sets the precision of a grouped estimate. The variance of a mean over $n = Gm$ records in $G$
+groups of $m$ is the independent-records variance multiplied by the **design effect** $1 + (m - 1)\rho$
+<Cite id="kish1965" />. The effective number of independent records is $n/(1 + (m-1)\rho)$, which for $\rho$ near one
+is close to the number of groups $G$. A grouped estimate on 20 patients with 50 scans each is about as precise as one
+on 20 independent scans, not 1,000.
+
+<RecordOrSubject />
+
+## Worked example
+
+Twenty patients each contribute $m = 6$ records to a regression with group variance $\tau^2 = 1$ and record noise
+$\sigma^2 = 0.25$, so $\rho = 1/1.25 = 0.8$. The model learns patient effects, as a flexible model on patient-specific
+features can.
+
+1. **Record-wise 5-fold.** Each test record has on average $6 \times 4/5 = 4.8$ siblings in training. The estimated
+   <Gloss name="mse">mean squared error</Gloss> is about $0.25 \times (1 + 1/4.8) = 0.30$.
+2. **Group 5-fold.** Each test patient is absent from training. The estimate is about $\tau^2 + \sigma^2 = 1.25$.
+3. **Deployment to new patients** has error $1.25$. The record-wise estimate is too small by a factor of four.
+4. **Precision.** The design effect is $1 + 5 \times 0.8 = 5$, so the 120 records carry the information of about 24
+   independent ones, a little more than the 20 patients.
+
+The figure shows the same pattern for classification. With 30 entities of 6 rows, a small spread of rows around each
+entity's centre and a 1-nearest-neighbour classifier, record-wise 5-fold cross-validation estimates an accuracy of
+0.89 on average over 12 datasets, matching the accuracy of 0.88 on new rows of the entities seen. Group 5-fold and
+leave-one-group-out give 0.73 and 0.72, close to the accuracy of 0.71 on new entities.
+
+## Trade-offs
+
+- **Few groups, high variance.** The estimate's precision follows the number of groups. With ten groups,
+  leave-one-group-out averages ten numbers, each from one group.
+- **Pessimism from fewer groups in training.** Each fold model sees $(K - 1)/K$ of the groups. When groups are few,
+  this is the main bias of the grouped estimate.
+- **Unequal folds.** Groups of different sizes make folds of different sizes. Averaging over records weights large
+  groups more; averaging the per-group scores of leave-one-group-out weights groups equally. Report the one that
+  matches how the model will be judged, and look at the spread of per-group scores, which shows the groups the model
+  fails on.
+- **Stratification and grouping conflict.** Balancing classes across folds while keeping groups whole is possible only
+  approximately; scikit-learn's `StratifiedGroupKFold` does it greedily.
+- **Other dependence.** Groups are one kind of dependence. Dependence through space or time calls for blocks or
+  forward-only splits (see <NoteLink to="spatial-and-blocked-cross-validation">spatial and blocked
+  cross-validation</NoteLink> and <NoteLink to="time-series-cross-validation">time-series
+  cross-validation</NoteLink>). Blocking on random-effect structure is one of the strategies reviewed for ecological
+  data, where random folds badly underestimated predictive error <Cite id="roberts2017cv" />.
+
+## Pitfalls
+
+- **Grouping on the wrong level.** Grouping by visit when a patient has several visits still leaks the patient.
+  Hierarchies (hospital, patient, visit) are grouped at the level that is new in use.
+- **Unknown groups.** Duplicate or near-duplicate records without a shared identifier defeat grouping (see
+  <NoteLink to="detecting-leakage">detecting leakage</NoteLink>).
+- **Group statistics computed on all data.** A feature such as a patient's mean over all records, or a target encoding
+  by user, computed before splitting carries test records into training (see
+  <NoteLink to="data-leakage">data leakage</NoteLink>).
+- **Record-wise tuning inside a grouped evaluation.** The inner loop of
+  <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink> must be grouped as well, or the selected
+  hyperparameters favour memorisation.
+- **Reporting the record-wise score for a new-group deployment.** It estimates the error on new records of known groups,
+  a different quantity.

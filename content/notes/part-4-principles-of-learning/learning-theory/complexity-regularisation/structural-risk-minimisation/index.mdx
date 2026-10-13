@@ -1,0 +1,213 @@
+---
+title: 'Structural risk minimisation'
+kind: concept
+summary: 'Structural risk minimisation picks a hypothesis from nested classes $\Hcal_1 \subset \Hcal_2 \subset \cdots$ by minimising training error plus the generalisation bound of the smallest class containing it, at confidence $\delta\pi_k$ for class $k$. It learns any countable union of learnable classes.'
+tags: [learning-theory, model-selection, regularisation, worked-example]
+aliases: [structural risk minimization, nonuniform learnability, nonuniform learning, penalised empirical risk minimisation, penalized ERM]
+requires: [occam-bound, vapnik-chervonenkis-dimension, empirical-risk-minimisation]
+related: [oracle-inequalities, minimum-description-length, regularisation, information-criteria, cross-validation, approximation-estimation-optimisation-trade-off, rademacher-complexity, contraction-lemma, margin-bounds]
+references: [vapnik1998, shalevshwartz2014, mohri2018, shawetaylor1998, bartlett2002model, lugosi1996]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\Hcal_1 \subset \Hcal_2 \subset \cdots$ be a nested sequence of hypothesis classes, fixed before the data, and let
+$\pi_1, \pi_2, \dots \ge 0$ be weights with $\sum_k \pi_k \le 1$. Let $\epsilon_k(m, \delta)$ be a
+<NoteLink to="uniform-convergence">uniform convergence</NoteLink> bound for $\Hcal_k$: with probability at least
+$1 - \delta$ over a sample $S$ of size $m$, every $h \in \Hcal_k$ has $R(h) \le \hat R_S(h) + \epsilon_k(m, \delta)$.
+**Structural risk minimisation** (SRM) returns
+
+$$
+\hat h = \argmin_{k \ge 1,\ h \in \Hcal_k} \brack{\hat R_S(h) + \epsilon_k(m, \delta\pi_k)}.
+$$
+
+With probability at least $1 - \delta$, the bound $R(h) \le \hat R_S(h) + \epsilon_k(m, \delta\pi_k)$ holds for every
+class $k$ and every $h \in \Hcal_k$ at once, so it holds for $\hat h$ <Cite id="vapnik1998" />
+<Cite id="shalevshwartz2014" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="empirical-risk-minimisation">Empirical risk minimisation</NoteLink> needs a class chosen in advance. A
+small class has a small estimation error and may contain no good predictor. A large class contains good predictors and
+has a large estimation error. This is the
+<NoteLink to="approximation-estimation-optimisation-trade-off">approximation–estimation trade-off</NoteLink>, and the
+right class depends on the unknown distribution.
+
+SRM lets the data choose the class. It orders the candidate classes by capacity, for example polynomials of increasing
+degree, and gives each class a generalisation bound. A hypothesis from a larger class can have a lower training error
+but carries a larger capacity term. The selected hypothesis minimises the bound itself, so the bound that justified the
+choice also certifies the result.
+
+SRM takes the <NoteLink to="occam-bound">Occam bound</NoteLink> one level up. The Occam bound gives each hypothesis a
+share $\delta\pi(h)$ of the failure probability. SRM gives each class a share $\delta\pi_k$ and pays for the class with
+its capacity and for the choice of class with $\ln(1/\pi_k)$. In the <NoteLink to="statistical-learning-theory">recipe
+for a generalisation bound</NoteLink>, this is the third move, making a bound uniform, applied a second time: first
+over the hypotheses of each class, then over the classes.
+
+## Nested classes and weights
+
+A **structure** is the sequence of classes together with a capacity for each:
+
+- polynomial threshold classifiers $x \mapsto \sgn(p(x))$ on the real line with $\deg p \le k$, whose VC dimension is
+  $d_k = k + 1$;
+- linear predictors $\set{\xvec \mapsto \inner{\wvec}{\xvec} : \norm{\wvec} \le B_k}$ with growing radii $B_k$, whose
+  <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> grows with $B_k$;
+- <NoteLink to="decision-tree">decision trees</NoteLink> with at most $k$ leaves;
+- neural networks with $k$ hidden units.
+
+The weights $\pi_k$ encode which classes the analyst expects to need. Two common choices are $\pi_k = 2^{-k}$, which
+favours small classes strongly, and $\pi_k = 6/(\pi^2 k^2)$, which charges only $\ln(1/\pi_k) \approx 2\ln k$ for class
+$k$. The weights must be fixed before the sample is seen, like the weights of the Occam bound.
+
+The classes need not be nested for the bound to hold. Nesting makes the structure an ordering by capacity, and it lets
+each hypothesis be charged for the smallest class that contains it, $k(h) = \min\set{k : h \in \Hcal_k}$.
+
+## The SRM bound
+
+The bound follows from two union bounds.
+
+1. **One class, its own confidence.** Fix $k$. The uniform convergence bound of $\Hcal_k$ at confidence $\delta\pi_k$
+   states that
+
+   $$
+   \prob\paren{\exists h \in \Hcal_k : R(h) > \hat R_S(h) + \epsilon_k(m, \delta\pi_k)} \le \delta\pi_k.
+   $$
+
+2. **Union over the classes.** By the <NoteLink to="union-bound">union bound</NoteLink>, the probability that the bound
+   fails for some class is at most $\sum_k \delta\pi_k \le \delta$.
+3. **Charge the smallest class.** On the complementary event, every $h$ satisfies the bound of every class that
+   contains it. The tightest of these is usually that of $k(h)$, so with probability at least $1 - \delta$, for every
+   $h \in \bigcup_k \Hcal_k$,
+
+   $$
+   R(h) \le \hat R_S(h) + \epsilon_{k(h)}(m, \delta\pi_{k(h)}).
+   $$
+
+The bound holds for all hypotheses simultaneously, so it holds for any hypothesis chosen after seeing the data. SRM
+chooses the one with the smallest right-hand side. In practice SRM runs empirical risk minimisation (ERM) in each class,
+giving $\hat h_k$, and then picks the class $\hat k$ that minimises $\hat R_S(\hat h_k) + \epsilon_k(m, \delta\pi_k)$.
+
+With the <NoteLink to="vapnik-chervonenkis-dimension">VC bound</NoteLink>, a class of VC dimension
+$d_k \le m$ has $\epsilon_k(m, \delta) = \sqrt{2d_k\ln(em/d_k)/m} + \sqrt{\ln(1/\delta)/(2m)}$
+(<NoteLink to="massarts-finite-class-lemma">Massart's lemma</NoteLink> and Sauer–Shelah). The SRM penalty of class $k$
+is then
+
+$$
+\operatorname{pen}_k = \sqrt{\frac{2d_k\ln(em/d_k)}{m}} + \sqrt{\frac{\ln(1/\pi_k) + \ln(1/\delta)}{2m}}.
+$$
+
+The first term is the capacity of the class. The second is the confidence term with the extra cost $\ln(1/\pi_k)$ of
+not knowing in advance which class to use.
+
+### SRM competes with the best class
+
+The bound certifies the output. A second inequality compares the output with the best hypothesis of any class.
+
+Fix any class $k$ and any $h \in \Hcal_k$ chosen without the data. On the event of the SRM bound,
+
+$$
+R(\hat h) \le \hat R_S(\hat h) + \operatorname{pen}_{k(\hat h)} \le \hat R_S(h) + \operatorname{pen}_k.
+$$
+
+The first inequality is the SRM bound and the second is the definition of $\hat h$ as the minimiser. Because $h$ is
+fixed, <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> gives
+$\hat R_S(h) \le R(h) + \sqrt{\ln(1/\delta)/(2m)}$ with probability at least $1 - \delta$. Together, with probability
+at least $1 - 2\delta$,
+
+$$
+R(\hat h) \le \inf_{k}\ \brack{\inf_{h \in \Hcal_k} R(h) + \operatorname{pen}_k} + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The right side is what an oracle that knew the distribution would get by choosing the class with the best trade-off of
+approximation error and penalty. A statement of this form is an <NoteLink to="oracle-inequalities">oracle
+inequality</NoteLink> <Cite id="bartlett2002model" /> <Cite id="lugosi1996" />.
+
+### Nonuniform learnability
+
+The union $\Hcal = \bigcup_k \Hcal_k$ may have infinite VC dimension. Polynomial threshold classifiers of every degree
+shatter any finite set of points on the line, so by the
+<NoteLink to="fundamental-theorem-of-statistical-learning">fundamental theorem of statistical learning</NoteLink>
+$\Hcal$ is not <Gloss name="pac" /> learnable. SRM still gives a guarantee whose sample size depends on the hypothesis
+it competes with: to come within $\epsilon$ of the best $h \in \Hcal_k$, it needs the $m$ at which
+$\operatorname{pen}_k + \sqrt{\ln(1/\delta)/(2m)}$ falls below $\epsilon$. This weaker guarantee is **nonuniform
+learnability**. A class of binary classifiers is nonuniformly learnable if and only if it is a countable union of
+classes of finite VC dimension <Cite id="shalevshwartz2014" />.
+
+## Worked example
+
+Take polynomial threshold classifiers of degree $k \ge 1$ on the line, with $d_k = k + 1$ and weights
+$\pi_k = 2^{-k}$, which sum to 1. Take $m = 2{,}000$ and $\delta = 0.05$, so $\sqrt{\ln(1/\delta)/(2m)} = 0.0274$. The
+training errors in the table are illustrative values of ERM in each class.
+
+| Degree $k$ | $d_k$ | Capacity term | Confidence term | Training error | SRM bound |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2 | 0.126 | 0.030 | 0.300 | 0.456 |
+| 2 | 3 | 0.150 | 0.033 | 0.210 | 0.393 |
+| 3 | 4 | 0.170 | 0.036 | 0.120 | **0.326** |
+| 4 | 5 | 0.187 | 0.038 | 0.115 | 0.340 |
+| 10 | 11 | 0.261 | 0.050 | 0.100 | 0.411 |
+| 50 | 51 | 0.488 | 0.097 | 0.060 | 0.645 |
+
+1. **The penalty.** For $k = 3$, the capacity term is $\sqrt{2 \times 4 \times \ln(2{,}000e/4)/2{,}000} = 0.170$. The
+   confidence term is $\sqrt{(3\ln 2 + \ln 20)/4{,}000} = 0.036$.
+2. **The choice.** The bound is smallest at $k = 3$, 0.326. ERM over the union would pick $k = 50$ for its training
+   error of 6%, whose bound is 0.645. Past degree 3 the training error falls by less than the capacity term rises.
+3. **The price of not knowing the class.** Had degree 3 been fixed in advance, the confidence term would be 0.027 in
+   place of 0.036. Choosing among the classes costs 0.008 here.
+4. **Vacuity.** The bound of 0.326 is not vacuous, but it is loose. A held-out set of 2,000 examples would pin the
+   chosen classifier's risk to within $\sqrt{\ln(1/\delta)/(2m)} = 0.027$ of its test error. The capacity term of
+   0.170 is a worst case over all distributions.
+5. **Sample size.** For the degree-3 penalty to fall to 0.1, the sample must grow to $m = 9{,}989$; for 0.05, to
+   $m = 45{,}708$.
+
+{/* figure pending engine (A1 vcBound + A2 learningCurve on polynomial threshold classes): training error, penalty,
+SRM bound and measured test error against the degree k, with the bound's minimiser and the test error's minimiser
+marked; m and δ as inputs */}
+
+## Regularisation as SRM
+
+A penalty on the norm of the weights is SRM over nested balls
+<Cite id="shalevshwartz2014" /> <Cite id="mohri2018" />. Take linear predictors on inputs with $\norm{\xvec} \le \rho$,
+the balls $\Hcal_k = \set{\xvec \mapsto \inner{\wvec}{\xvec} : \norm{\wvec} \le 2^k}$ for $k = 0, 1, 2, \dots$, and a
+loss with values in $[0, 1]$ that is $L$-Lipschitz in the prediction, such as the ramp loss. The Rademacher complexity
+of $\Hcal_k$ is at most $2^k\rho/\sqrt m$, and the <NoteLink to="contraction-lemma">contraction lemma</NoteLink> carries
+it through the loss with a factor $L$. The <NoteLink to="rademacher-complexity">Rademacher bound</NoteLink> gives
+
+$$
+\epsilon_k(m, \delta) = \frac{2L\,2^k\rho}{\sqrt m} + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+With $\pi_k = 1/((k + 1)(k + 2))$, a weight vector with $1 < \norm{\wvec} \le 2^k$ belongs to class
+$k(\wvec) = \lceil\log_2\norm{\wvec}\rceil$, and $2^{k(\wvec)} < 2\norm{\wvec}$. The SRM bound becomes
+
+$$
+R(\wvec) \le \hat R_S(\wvec) + \frac{4L\rho\norm{\wvec}}{\sqrt m} + \sqrt{\frac{2\ln(k(\wvec) + 2) + \ln(1/\delta)}{2m}}.
+$$
+
+The penalty grows linearly in $\norm{\wvec}$ and only logarithmically in the class index. For a convex loss, minimising
+$\hat R_S(\wvec) + \lambda\norm{\wvec}$, or $\hat R_S(\wvec) + \lambda\norm{\wvec}^2$ as in
+<NoteLink to="ridge-regression">ridge regression</NoteLink>, traces the same family of solutions as the constraint
+$\norm{\wvec} \le B$, one $B$ for each $\lambda$. Choosing the strength of a
+<NoteLink to="regularisation">regulariser</NoteLink> is choosing a class from the structure. The bound fixes the
+strength by theory; <NoteLink to="cross-validation">cross-validation</NoteLink> fixes it from held-out data.
+
+<Gloss name="svm">Support vector machines</Gloss> choose the class after seeing the data: the margin of the trained
+machine fixes its norm. SRM as defined above forbids this, because the structure must be fixed in advance. Shawe-Taylor,
+Bartlett, Williamson and Anthony extended SRM to such data-dependent hierarchies, which justifies the
+<NoteLink to="margin-bounds">margin bounds</NoteLink> of support vector machines <Cite id="shawetaylor1998" />.
+
+## Pitfalls
+
+- **The structure and weights come first.** Choosing the classes or the weights after looking at the data voids the
+  union bound, as for the Occam bound.
+- **A loose bound picks too simple a model.** The penalty is a worst-case bound, often several times larger than the
+  real gap. Minimising it favours small classes. Hold-out estimates and data-dependent penalties, such as the empirical
+  Rademacher complexity, select better in practice <Cite id="bartlett2002model" />.
+- **SRM is not AIC or BIC.** <NoteLink to="information-criteria">Information criteria</NoteLink> estimate an expected
+  out-of-sample log-likelihood or a marginal likelihood for large samples. The SRM penalty is a high-probability bound
+  that holds for every sample size and every distribution.
+- **Many classes are cheap, but not free.** The term $\ln(1/\pi_k)$ grows slowly, so SRM over a long sequence of
+  classes costs little. A structure with very many classes of similar capacity spreads the weight thinly, so each class
+  carries a larger term $\ln(1/\pi_k)$ without a smaller capacity term.

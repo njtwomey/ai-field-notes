@@ -1,0 +1,242 @@
+---
+title: 'Neural architecture search'
+kind: concept
+summary: 'Neural architecture search treats a network''s structure as a hyperparameter and searches a space of architectures, often of repeated cells, by reinforcement learning, evolution or a gradient relaxation (DARTS). Weight sharing cuts the cost; random search is a strong baseline.'
+tags: [model-selection, hyperparameters, deep-learning, worked-example]
+aliases: [NAS, DARTS, differentiable architecture search, cell-based search space, weight sharing in architecture search, one-shot architecture search, ENAS, aging evolution, regularized evolution, NASNet search space, supernet]
+requires: [hyperparameter-search, random-search, backpropagation]
+related: [automated-machine-learning, evolution-strategies-and-covariance-matrix-adaptation, gradient-based-hyperparameter-optimisation, score-function-estimator, softmax-and-log-sum-exp, meta-learning, learning-curve-extrapolation, multi-fidelity-hyperparameter-optimisation, model-selection-at-scale, classic-convolutional-network-architectures, residual-connections]
+references: [elsken2019nas, zoph2017nas, zoph2018nasnet, real2019regularized, pham2018enas, liu2019darts, li2020randomnas, yang2020nashard, yu2020nassearch, zela2020darts, ying2019nasbench, lindauer2020nas, tan2019]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Neural architecture search** (<Gloss name="nas" />) chooses the structure of a neural network, such as its
+operations, connections and depth, by search instead of by hand. With a set of candidate architectures $\Acal$,
+weights $\wvec$ and training and validation losses $L_\text{train}$ and $L_\text{val}$, it solves the bilevel problem
+
+$$
+\min_{a \in \Acal} L_\text{val}\paren{\wvec^\star(a), a} \quad \text{subject to} \quad \wvec^\star(a) = \argmin_{\wvec}
+L_\text{train}(\wvec, a).
+$$
+
+A method is defined by three choices: the **<NoteLink to="hyperparameter-search-spaces">search space</NoteLink>**
+$\Acal$, the **search strategy** that proposes architectures, and the **performance estimation** that approximates
+$L_\text{val}(\wvec^\star(a), a)$ without always training $a$ to convergence <Cite id="elsken2019nas" />.
+</Definition>
+
+## Intuition
+
+An architecture is a hyperparameter with structure. Choosing between a $3 \times 3$ and a $5 \times 5$ convolution, or
+deciding which earlier layer feeds the next one, is a categorical choice like choosing a kernel; deciding the number of
+layers is an integer choice. NAS is therefore <NoteLink to="hyperparameter-search">hyperparameter
+optimisation</NoteLink> over a large, discrete, conditional space, with an evaluation that costs a full training run
+<Cite id="li2020randomnas" />.
+
+Two facts shape the field. The space is enormous, so it must be designed to contain good architectures and little
+else. And each evaluation is expensive, so most of the ingenuity goes into estimating an architecture's quality
+cheaply. Both make the results hard to compare: a well-designed space can make any search look good, and a cheap
+estimate can rank architectures wrongly.
+
+## Search spaces
+
+- **Chain-structured spaces** describe a network as a sequence of layers, each with a type (convolution, pooling, dense)
+  and its hyperparameters (width, kernel size, stride). The first <Gloss name="rl">reinforcement-learning</Gloss> search
+  predicted such a sequence layer by layer, including skip connections <Cite id="zoph2017nas" />.
+- **Cell-based spaces** search for a small building block, a **cell**, and stack copies of it in a fixed outer skeleton.
+  The NASNet space searches two cells: a **normal cell** that keeps the spatial resolution and a **reduction cell** that
+  halves it <Cite id="zoph2018nasnet" />. Each cell is a small <Gloss name="dag">directed acyclic graph</Gloss>: every
+  new node combines two earlier nodes, each through an operation from a fixed list. The number of stacked cells and the
+  number of filters are set by hand, so a cell found on a small proxy network can be stacked deeper and wider for the
+  final model.
+
+The cell-based design is what made NAS affordable. It shrinks the space from whole networks to small graphs, and it
+transfers: a cell found on <Gloss name="cifar-10" /> was stacked into an <Gloss name="imagenet" /> classifier
+<Cite id="zoph2018nasnet" />. It also fixes much of the network by hand, which limits what the search can discover
+<Cite id="yang2020nashard" />.
+
+## Search strategies
+
+### Reinforcement learning
+
+Zoph and Le trained a recurrent **controller** that outputs an architecture token by token. The validation accuracy of
+the trained architecture is the reward, and the controller's parameters are updated by the
+<NoteLink to="score-function-estimator">score-function gradient</NoteLink> (REINFORCE) of the expected reward. The
+controller sampled 12 800 architectures, with 800 networks training on 800 <Gloss name="gpu" plural /> at a time, and
+the best reached a test error of 3.65% on CIFAR-10 <Cite id="zoph2017nas" />. Searching cells instead of whole networks,
+NASNet used 500 GPUs for 4 days <Cite id="zoph2018nasnet" />.
+
+### Evolution
+
+Evolutionary search keeps a population of trained architectures, mutates good ones and discards others. Real et al.
+use **aging** (or regularised) evolution <Cite id="real2019regularized" />.
+
+1. Train $P$ random architectures as the initial population, held in a queue.
+2. Draw $S$ members of the population at random, and take the most accurate as the parent.
+3. Mutate the parent: change one operation, or reconnect one input of one node. Train and evaluate the child, and add
+   it to the population.
+4. Remove the **oldest** member of the population, not the worst. Repeat from step 2.
+
+Removing the oldest means that an architecture survives only through descendants that are retrained and re-evaluated. An
+architecture that scored well by luck of its training run cannot dominate for long, which is a defence against noisy
+evaluations. With $S = 1$ the procedure reduces to a kind of <NoteLink to="random-search">random search</NoteLink>. Each
+experiment evaluated 20 000 models on 450 GPUs in about 7 days. In side-by-side runs in the NASNet space, aging
+evolution found good architectures faster than reinforcement learning and random search, especially early in the search
+<Cite id="real2019regularized" />. Evolution of architectures is discrete; the continuous
+<NoteLink to="evolution-strategies-and-covariance-matrix-adaptation">evolution strategies</NoteLink> of optimisation
+search real vectors.
+
+### Gradient-based search: DARTS
+
+DARTS makes the search space continuous so that architectures can be optimised by
+<NoteLink to="gradient-descent">gradient descent</NoteLink> <Cite id="liu2019darts" />. Each edge $(i, j)$ of a cell,
+from node $i$ to node $j$, carries every candidate operation $o \in \Ocal$ at once, weighted by a
+<NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> of architecture parameters
+$\alphavec^{(i,j)} \in \reals^{\abs{\Ocal}}$:
+
+$$
+\bar o^{(i,j)}(\xvec) = \sum_{o \in \Ocal} \frac{\exp\alpha^{(i,j)}_o}{\sum_{o' \in \Ocal}\exp\alpha^{(i,j)}_{o'}}\, o(\xvec).
+$$
+
+The list $\Ocal$ includes a **zero** operation, which cuts the edge. The architecture is now the vector $\alphavec$ of
+all edges' parameters, and the bilevel problem of the definition has a continuous outer variable. At the end of the
+search, each edge keeps its operation of largest weight, and each node keeps its two strongest incoming edges from
+distinct earlier nodes, with the zero operation excluded from both choices.
+
+**The architecture gradient.** The outer objective is $L_\text{val}(\wvec^\star(\alphavec), \alphavec)$, and
+$\wvec^\star(\alphavec)$ requires training to convergence for every $\alphavec$. DARTS replaces $\wvec^\star$ with
+one step of gradient descent from the current weights $\wvec$, with step size $\xi$:
+
+$$
+\wvec'(\alphavec) = \wvec - \xi\,\nabla_{\wvec} L_\text{train}(\wvec, \alphavec).
+$$
+
+Differentiate $L_\text{val}(\wvec'(\alphavec), \alphavec)$ with respect to $\alphavec$. The chain rule gives a direct
+term, from the second argument, and an indirect term through $\wvec'$. The derivative of $\wvec'$ with respect to
+$\alphavec$ is $-\xi\,\nabla^2_{\wvec,\alphavec} L_\text{train}(\wvec, \alphavec)$, so
+
+$$
+\nabla_{\alphavec} L_\text{val}(\wvec', \alphavec) - \xi\,\nabla^2_{\alphavec,\wvec} L_\text{train}(\wvec,
+\alphavec)\,\nabla_{\wvec'} L_\text{val}(\wvec', \alphavec).
+$$
+
+The second term is a matrix of mixed second derivatives times a vector $\vvec = \nabla_{\wvec'} L_\text{val}$. It is
+computed without forming the matrix, by a central <Gloss name="finite-difference">finite difference</Gloss> of the
+architecture gradient of the training loss along $\vvec$: for a small $\epsilon$,
+
+$$
+\nabla^2_{\alphavec,\wvec} L_\text{train}(\wvec, \alphavec)\,\vvec \approx \frac{\nabla_{\alphavec} L_\text{train}(\wvec +
+\epsilon\vvec, \alphavec) - \nabla_{\alphavec} L_\text{train}(\wvec - \epsilon\vvec, \alphavec)}{2\epsilon}.
+$$
+
+This costs two extra forward and backward passes instead of a product of size $\abs{\alphavec} \times \abs{\wvec}$
+<Cite id="liu2019darts" />. With $\xi = 0$ the second term vanishes and the update treats the current weights as
+optimal, the **first-order** approximation. The search alternates one step on $\alphavec$ using validation batches with
+one step on $\wvec$ using training batches. The same one-step unrolling appears in
+<NoteLink to="gradient-based-hyperparameter-optimisation">gradient-based hyperparameter optimisation</NoteLink> and in
+<NoteLink to="meta-learning">MAML</NoteLink>.
+
+On CIFAR-10 DARTS reported a test error of $2.76 \pm 0.09\%$ after 4 GPU-days of search with the second-order
+gradient, and $3.00 \pm 0.14\%$ after 1.5 GPU-days with the first-order one. In the same comparison, NASNet-A had cost
+2000 GPU-days and AmoebaNet-A 3150 <Cite id="liu2019darts" />.
+
+## Performance estimation
+
+Training every candidate to convergence is the dominant cost, so NAS methods estimate quality cheaply.
+
+- **Lower fidelity.** Train for fewer epochs, on a subset of the data, at lower resolution, or with fewer cells and
+  filters, and rank by that score. The ranking at low fidelity must agree with the ranking at full fidelity; see
+  <NoteLink to="multi-fidelity-hyperparameter-optimisation">multi-fidelity hyperparameter optimisation</NoteLink> and
+  <NoteLink to="learning-curve-extrapolation">learning-curve extrapolation</NoteLink>.
+- **Weight sharing.** Treat every architecture in the space as a subgraph of one large network, the **supernet**, and
+  train the supernet's weights once. An architecture is then scored with the shared weights, without training of its
+  own. ENAS used weight sharing to find a recurrent cell on a single GPU in about 10 hours, which its authors put at
+  more than 1000 times cheaper in GPU-hours than earlier searches <Cite id="pham2018enas" />. DARTS is a weight-sharing
+  method too: its mixed edges are a supernet.
+
+Weight sharing trades accuracy of the ranking for cost. Yu et al. compared NAS search policies against random
+selection of architectures and found that, on average, state-of-the-art methods performed similarly to the random
+policy. Weight sharing degraded the ranking of candidates to the point where it did not reflect their stand-alone
+performance <Cite id="yu2020nassearch" />.
+
+## Worked example
+
+**How large is the DARTS space?** A DARTS convolutional cell has 7 nodes: two inputs (the outputs of the two previous
+cells), four intermediate nodes, and an output that concatenates the four intermediate nodes. The operation list has 8
+entries: $3 \times 3$ and $5 \times 5$ separable convolutions, $3 \times 3$ and $5 \times 5$ dilated separable
+convolutions, $3 \times 3$ max pooling, $3 \times 3$ average pooling, the identity, and zero <Cite id="liu2019darts" />.
+
+1. **Inputs of each node.** Intermediate node $m = 0, 1, 2, 3$ can read from the two cell inputs and the $m$ earlier
+   intermediate nodes, $m + 2$ predecessors in all. The discrete cell keeps 2 of them, in
+   $\binom{m+2}{2}$ ways: 1, 3, 6 and 10. Together, $1 \times 3 \times 6 \times 10 = 180$ wirings.
+2. **Operations.** Each of the $4 \times 2 = 8$ kept edges takes one of the 7 non-zero operations: $7^8 = 5\,764\,801$
+   choices.
+3. **One cell.** $180 \times 5\,764\,801 \approx 1.04 \times 10^9$ cells.
+4. **Two cells.** The normal and the reduction cell are chosen independently: $(1.04 \times 10^9)^2 \approx 1.1
+   \times 10^{18}$ architectures.
+
+Exhaustive search is out of the question, and so is random search over more than a vanishing fraction of the space.
+Every method relies on the space being smooth enough that a sample of a few thousand architectures, or a gradient,
+finds a good region.
+
+**Discretising one edge.** After search, an edge has architecture parameters $1.2$ for the $3 \times 3$ separable
+convolution, $0.4$ for the $5 \times 5$ separable convolution, $-0.3$ for max pooling, $0.9$ for the identity and $0.0$
+for zero; say the other three operations have parameters so negative that their weights are negligible. The softmax
+weights are $e^{1.2}/Z = 0.368$, $0.166$, $0.082$, $0.273$ and $0.111$, with
+$Z = e^{1.2} + e^{0.4} + e^{-0.3} + e^{0.9} + e^{0} = 9.01$. The edge becomes a $3 \times 3$ separable convolution.
+During search, though, the edge computed a mixture in which the convolution had weight 0.37 and the identity 0.27.
+The discrete network is not the network whose validation loss was optimised, and the gap between the two is one
+reason DARTS results vary from run to run.
+
+## Evaluating NAS
+
+NAS results are hard to compare, and much of the field's progress has been in learning how to compare them.
+
+- **Random baselines.** Li and Talwalkar found that random search with <NoteLink to="early-stopping">early
+  stopping</NoteLink> performed at least as well as ENAS on both standard benchmarks, Penn Treebank and CIFAR-10. Random
+  search with weight sharing reached a state-of-the-art result on Penn Treebank <Cite id="li2020randomnas" />. DARTS's
+  own random-search baseline reached $3.29 \pm 0.15\%$ on CIFAR-10 at the same 4 GPU-days, against $2.76\%$
+  <Cite id="liu2019darts" />.
+- **The training protocol dominates.** Yang, Esperança and Carlucci compared 8 methods on 5 data sets against the
+  average randomly sampled architecture of each space. Many methods struggled to beat that average. In the DARTS space,
+  tricks of the final training protocol, such as longer training, cutout and auxiliary towers, had more effect on the
+  reported error than the search. The space's accuracy range was so narrow that the random seed changed the ranking of
+  architectures, and the hand-designed skeleton mattered more than the searched operations
+  <Cite id="yang2020nashard" />.
+- **Search failures.** Zela et al. found search spaces in which DARTS converged to degenerate architectures with poor
+  test error. The failures coincided with high curvature of the validation loss in architecture space, and
+  regularising the search made it robust <Cite id="zela2020darts" />.
+- **<NoteLink to="tabular-benchmark-datasets">Tabular benchmarks</NoteLink>.** NAS-Bench-101 trained 423 000 unique
+  architectures of a small cell space on CIFAR-10, more than 5 million models in all, so that a search can be run by
+  table lookup and compared exactly <Cite id="ying2019nasbench" />.
+
+Lindauer and Hutter turned these lessons into a checklist: release code, compare in the same space with the same
+training pipeline, include random search, run several seeds, and report the full cost <Cite id="lindauer2020nas" />.
+
+## Practice today
+
+Cell-based search on <NoteLink to="image-classification">image classification</NoteLink> peaked around 2018 to 2020. The
+ideas persist in narrower forms. Hardware targets are added to the objective, so that the search trades accuracy against
+latency or memory on a given device. EfficientNet used architecture search to design a small baseline network and then
+scaled its depth, width and resolution together by a fixed rule <Cite id="tan2019" />. For large
+<NoteLink to="transformer">transformers</NoteLink> the architecture is mostly chosen by hand, and the remaining choices,
+such as depth against width, are made by ablations on small models and extrapolated with scaling laws (see
+<NoteLink to="model-selection-at-scale">model selection at scale</NoteLink>).
+
+## Pitfalls
+
+- **Selecting on the test set.** A search runs on a validation split, but the choice among several search runs, seeds
+  or retrained candidates is easily made by test error. The final test error is then a selection statistic. Keep a
+  test set that no stage of the search or the choice of runs has seen.
+- **Crediting the search for the space.** A well-designed space makes random architectures good. Report the score of
+  random architectures from the same space, trained with the same protocol.
+- **Unequal training protocols.** An architecture trained for 1500 epochs with augmentation and
+  <NoteLink to="regularisation">regularisation</NoteLink> cannot be compared with a baseline trained for 600 without.
+  Retrain baselines under the same protocol.
+- **One seed per architecture.** When the accuracy differences between architectures are smaller than the variation
+  across training seeds, a single run per architecture ranks noise.
+- **Trusting a weight-sharing ranking.** Scores from shared weights may not reflect stand-alone performance. Retrain the
+  top candidates from scratch before choosing.
+- **The proxy-to-target gap.** A cell searched on a shallow network of 8 cells may rank differently when stacked into
+  20 cells for the final model <Cite id="yang2020nashard" />.

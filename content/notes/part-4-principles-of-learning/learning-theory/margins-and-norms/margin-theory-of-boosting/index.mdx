@@ -1,0 +1,197 @@
+---
+title: 'Margin theory of boosting'
+kind: concept
+summary: 'The margin theory explains why boosting''s test error can keep falling after its training error is zero: later rounds raise the normalised margins of the training points, and the margin bound for a weighted vote depends on the base class and the margin, not the number of rounds.'
+tags: [learning-theory, boosting, margin, worked-example]
+aliases: [margin explanation of boosting, boosting the margin, margin distribution, voting classifier margin]
+requires: [margin-bounds, adaboost]
+related: [weak-and-strong-learnability, contraction-lemma, massarts-finite-class-lemma, bagging, gradient-boosting, support-vector-machine, margins-and-norms]
+references: [schapire1998, koltchinskii2002, breiman1999, reyzin2006, gao2013, freund1997, schapire2012, mohri2018, long2010]
+status: draft
+updated: 2026-10-12
+---
+
+import { BoostingMargins } from './BoostingMargins'
+
+<Definition>
+Let $\Bcal$ be a class of base classifiers $b : \Xcal \to \set{-1, +1}$, and let a voting classifier predict with
+$\sgn(f)$, where $f = \sum_{t=1}^T\alpha_t b_t/\sum_t\alpha_t$ with weights $\alpha_t \ge 0$ and $b_t \in \Bcal$. The
+**normalised margin** of $f$ on an example $(x, y)$ is $y\,f(x) \in [-1, 1]$: the weight voting for the correct label
+minus the weight voting against it, as a fraction of the total. The **margin theory of boosting** states that, with
+probability at least $1 - \delta$, every such vote satisfies $R(\sgn f) \le \hat R_\theta(f) + O\paren{\sqrt{d\ln^2(m/d)/
+(m\theta^2)} + \sqrt{\ln(1/\delta)/m}}$ for all $\theta > 0$, where $\hat R_\theta(f)$ is the fraction of the $m$
+training examples with margin at most $\theta$ and $d$ is the <NoteLink to="vapnik-chervonenkis-dimension">VC
+dimension</NoteLink> of $\Bcal$ <Cite id="schapire1998" />. The bound does not depend on $T$.
+</Definition>
+
+## Intuition
+
+Boosting builds a vote of many weak classifiers, such as small <NoteLink to="decision-tree">decision trees</NoteLink>.
+Each round adds a classifier, so the vote gets more complex. A VC bound for a vote of $T$ base classifiers grows with
+$T$ (see <NoteLink to="weak-and-strong-learnability">weak and strong learnability</NoteLink>), and predicts that running
+boosting for long enough overfits.
+
+Experiments contradict this. Schapire, Freund, Bartlett and Lee ran <NoteLink to="adaboost">AdaBoost</NoteLink> with
+C4.5 decision trees on the letter-recognition data. The training error reached zero after 5 rounds. The test error kept
+falling, from 8.4% after 5 rounds to 3.1% after 1,000 rounds, by which time the vote held more than two million tree
+nodes <Cite id="schapire1998" />. The training error says nothing more after round 5, so the change must be somewhere
+else.
+
+It is in the margins. After round 5, 7.7% of the training examples had a margin below 0.5. After 100 rounds every
+training example had a margin above 0.5 <Cite id="schapire1998" />. The later rounds do not change which points are
+classified correctly; they make the vote more decisive on each of them. A
+<NoteLink to="margin-bounds">margin bound</NoteLink> charges a classifier for its margin errors and for the capacity of
+the class at that margin. For a weighted vote, that capacity is the capacity of the base class, whatever the number
+of rounds.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, this is the move that
+exploits structure: the bound uses the margin and the convex-combination form of the vote in place of a count of its
+parameters.
+
+## The margin distribution
+
+The **margin distribution** of a vote $f$ on the sample is the cumulative distribution
+$\theta \mapsto \hat R_\theta(f) = \frac1m\sum_{i=1}^m\indicator[y_i f(x_i) \le \theta]$ for $\theta \in [-1, 1]$. Its
+value at $\theta = 0$ is the training error, counting ties as errors. Its value at a positive $\theta$ counts the points
+that are classified correctly but narrowly. A boosting run moves the curve to the right.
+
+AdaBoost drives every point of this curve below $\theta$ towards zero, at a rate set by the edges of the weak learners.
+The proof extends the training-error bound of the
+<NoteLink to="weak-and-strong-learnability">boosting theorem</NoteLink>. Write $F = \sum_t\alpha_t b_t$ for the
+unnormalised vote, with $\alpha_t = \frac12\ln((1 - \epsilon_t)/\epsilon_t)$ and $\epsilon_t$ the weighted error of
+round $t$, and $Z_t$ for the normaliser of the round-$t$ weights.
+
+1. **Turn a small margin into an exponential.** A margin at most $\theta$ means $y\,F(x) \le \theta\sum_t\alpha_t$. Then
+   $\exp(-y\,F(x) + \theta\sum_t\alpha_t) \ge 1$, so
+   $\hat R_\theta(f) \le \exp(\theta\sum_t\alpha_t)\,\frac1m\sum_i\exp(-y_i F(x_i))$.
+2. **Unroll the weights.** As in the training-error bound, $\frac1m\sum_i\exp(-y_i F(x_i)) = \prod_t Z_t$ with
+   $Z_t = 2\sqrt{\epsilon_t(1 - \epsilon_t)}$.
+3. **Collect each round's factor.** $\exp(\theta\alpha_t) = ((1 - \epsilon_t)/\epsilon_t)^{\theta/2}$. Multiplying by
+   $Z_t$ gives
+
+$$
+\hat R_\theta(f) \le \prod_{t=1}^T 2\sqrt{\epsilon_t^{1 - \theta}(1 - \epsilon_t)^{1 + \theta}}
+$$
+
+<Cite id="schapire1998" />. At $\theta = 0$ this is the training-error bound. If every round has weighted error
+$\epsilon_t \le \frac12 - \gamma$, each factor is below 1 for every $\theta < \gamma$, so the fraction of training
+points with margin below $\gamma$ falls exponentially in $T$. A weak learner with edge $\gamma$ eventually gives every
+training point a margin of about $\gamma$.
+
+## The bound
+
+The bound follows from the Rademacher form of the margin bound <Cite id="koltchinskii2002" />.
+
+**Step 1: the vote lives in the convex hull.** The normalised vote $f$ belongs to the convex hull
+$\mathrm{conv}(\Bcal)$, the set of all finite weighted averages of base classifiers. Its size is unbounded: $T$ and the
+weights are free.
+
+**Step 2: the convex hull has the Rademacher complexity of the base class.** For fixed signs $\sigmavec$, the map
+$f \mapsto \sum_i\sigma_i f(x_i)$ is linear in $f$. A linear function on a convex hull attains its supremum at one of
+the points the hull is built from. So
+$\sup_{f \in \mathrm{conv}(\Bcal)}\sum_i\sigma_i f(x_i) = \sup_{b \in \Bcal}\sum_i\sigma_i b(x_i)$, and taking
+expectations,
+
+$$
+\hat\Rad_S(\mathrm{conv}(\Bcal)) = \hat\Rad_S(\Bcal).
+$$
+
+Averaging any number of base classifiers does not raise the
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink>.
+
+**Step 3: the margin bound.** The fixed-margin theorem of <NoteLink to="margin-bounds" /> (ramp loss, then the
+<NoteLink to="contraction-lemma" />) applies to $\Hcal = \mathrm{conv}(\Bcal)$. With probability at least $1 - \delta$,
+every vote satisfies
+
+$$
+R(\sgn f) \le \hat R_\theta(f) + \frac{2}{\theta}\Rad_m(\Bcal) + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+**Step 4: the base class.** If $\Bcal$ has VC dimension $d$, its projection on $m$ points has at most $(em/d)^d$
+sign vectors, each of norm $\sqrt m$ (the <NoteLink to="growth-function-and-sauer-shelah-lemma">Sauer–Shelah
+lemma</NoteLink>). <NoteLink to="massarts-finite-class-lemma">Massart's lemma</NoteLink> then gives
+$\Rad_m(\Bcal) \le \sqrt{2d\ln(em/d)/m}$, and
+
+$$
+R(\sgn f) \le \hat R_\theta(f) + \frac{2}{\theta}\sqrt{\frac{2d\ln(em/d)}{m}} + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The number of rounds $T$ appears nowhere. A <NoteLink to="union-bound">union bound</NoteLink> over a grid of $\theta$,
+as in the margin-bounds note, lets $\theta$ be chosen after training at the cost of a factor 2 in the middle term and a
+$\ln\log_2(4/\theta)$ term. Schapire et al. proved the original version with a covering argument and a slightly
+different logarithmic factor <Cite id="schapire1998" />.
+
+**Reading the two results together.** Under the weak learning assumption with edge $\gamma$, the margin distribution
+bound makes $\hat R_\theta(f)$ vanish for any $\theta < \gamma$ as $T$ grows. The risk bound then tends to
+$\frac{2}{\theta}\Rad_m(\Bcal) + \sqrt{\ln(1/\delta)/(2m)}$, which is small when $m$ is large relative to
+$d/\theta^2$. More rounds can only lower the first term. This is the margin explanation of why boosting resists
+overfitting.
+
+The same picture links boosting to the <NoteLink to="support-vector-machine">support vector machine</NoteLink>. Map
+each input to the vector of base-classifier outputs $(b(x))_{b \in \Bcal}$. A vote is a linear classifier in that space
+with weights normalised in the $\ell_1$ norm, and boosting increases its $\ell_1$-normalised margin. The SVM maximises
+the $\ell_2$-normalised margin of a linear classifier instead <Cite id="schapire2012" />.
+
+## Worked example
+
+**AdaBoost's margins.** Take a weak learner with edge $\gamma = 0.1$, so every $\epsilon_t = 0.4$. The per-round
+factor $2\sqrt{0.4^{1 - \theta}\,0.6^{1 + \theta}}$ is 0.9798 at $\theta = 0$, 0.9898 at $\theta = 0.05$ and 0.9999 at
+$\theta = 0.1$; it crosses 1 at $\theta \approx 0.1007$.
+
+| $\theta$ | Factor per round | Bound on $\hat R_\theta$ after 500 rounds |
+| --- | --- | --- |
+| 0 | 0.9798 | $3.7 \times 10^{-5}$ |
+| 0.05 | 0.9898 | 0.0059 |
+| 0.1 | 0.9999 | 0.93 |
+
+After 500 rounds the bound guarantees that fewer than 0.6% of the training points have margin at most 0.05. It gives
+almost nothing at $\theta = 0.1$, the edge itself.
+
+**The risk bound.** Take a base class of VC dimension $d = 10$ and $\delta = 0.05$. The capacity and confidence terms
+$\frac{2}{\theta}\sqrt{2d\ln(em/d)/m} + \sqrt{\ln 20/(2m)}$ are:
+
+| $m$ | $\theta = 0.1$ | $\theta = 0.2$ | $\theta = 0.5$ |
+| --- | --- | --- | --- |
+| 10,000 | 2.53 | 1.27 | 0.515 |
+| 100,000 | 0.908 | 0.456 | 0.185 |
+| 1,000,000 | 0.318 | 0.159 | 0.065 |
+
+The bound is vacuous at $m = 10{,}000$ for any margin below about 0.3. Bringing the terms down to 0.1 at
+$\theta = 0.2$ needs about 2.7 million examples. The bound is loose as a number. Its value is in its shape: it does not
+grow with $T$.
+
+**Against the VC count.** A vote of $T$ classifiers from a class of VC dimension $d$ has VC dimension of order
+$Td\ln(Td)$ (see <NoteLink to="weak-and-strong-learnability">weak and strong learnability</NoteLink>). For $T = 1{,}000$
+and $d = 10$ this is of order $10^4 \times \ln 10^4 \approx 92{,}000$. The VC bound is vacuous until $m$ is in the
+millions, and it gets worse with every round. The margin bound at a fixed $\theta$ stays where it is.
+
+## Simulation
+
+<BoostingMargins />
+
+## Assumptions
+
+- **A fixed base class.** The capacity term is that of $\Bcal$. If the base learner grows deeper trees as the rounds
+  go on, $\Bcal$ is larger than it looks.
+- **Weights normalised to sum to 1.** The margin of the unnormalised vote $F$ grows without limit as the weights grow.
+  Only the normalised margin $y\,F(x)/\sum_t\alpha_t$ enters the bound.
+- **Independent, identically distributed data,** as in every
+  <NoteLink to="uniform-convergence">uniform-convergence</NoteLink> bound.
+
+## Pitfalls
+
+- **Larger minimum margins do not always help.** Breiman's arc-gv algorithm produces a larger minimum training margin
+  than AdaBoost and yet a higher test error on several benchmarks <Cite id="breiman1999" />. Reyzin and Schapire traced
+  the difference to base-classifier complexity: arc-gv chose more complex trees, so the class it effectively drew from
+  was larger, and the bound charges for that class <Cite id="reyzin2006" />. Gao and Zhou proved a bound in terms of
+  the whole margin distribution, including its mean and variance, that is sharper than a bound in the minimum margin
+  alone <Cite id="gao2013" />.
+- **<NoteLink to="label-noise">Label noise</NoteLink>.** With mislabelled points no vote has large margins everywhere.
+  AdaBoost keeps raising the weight of those points, the margin distribution piles up near zero, and the test error
+  rises. Convex-potential boosting algorithms such as AdaBoost provably fail under
+  <NoteLink to="label-noise-models">random classification noise</NoteLink> <Cite id="long2010" />.
+- **The bound is an explanation, not a stopping rule.** It is far above the measured test error at practical sample
+  sizes. It predicts the direction of change with the rounds; choose $T$ on held-out data.
+- **<NoteLink to="bagging">Bagging</NoteLink> raises margins too.** Bagging also moves the margin distribution right,
+  but less aggressively at its left end than boosting <Cite id="schapire1998" />. A large margin is not specific to
+  boosting.

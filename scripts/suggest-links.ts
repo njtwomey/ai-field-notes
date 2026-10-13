@@ -459,6 +459,11 @@ for (const n of notes) {
         skip('already linked in this note')
         continue
       }
+      // A topic overview named by one ordinary word ("Data", "Wavelets") names its subject in passing everywhere.
+      if (t.kind === 'overview' && wordCount === 1 && !acronymLike(match)) {
+        skip('single-word topic overview: too generic to link')
+        continue
+      }
       const glossHere = Object.values(glossary.entries).find((e) => e.note === t.slug && e.kind !== 'concept')
       if (glossHere && (glossed.has(glossHere.key) || glossAdded.has(glossHere.key))) {
         skip(`the <Gloss name="${glossHere.key}"> hover links this note`)

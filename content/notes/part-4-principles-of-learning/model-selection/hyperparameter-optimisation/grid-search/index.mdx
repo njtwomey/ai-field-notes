@@ -1,0 +1,154 @@
+---
+title: 'Grid search'
+kind: technique
+summary: 'Grid search scores every combination of a few values per hyperparameter, usually by cross-validation, and keeps the best. Its cost is the product of the numbers of values, and it tests only as many distinct values of each hyperparameter as the grid has on that axis.'
+tags: [model-selection, hyperparameters, worked-example]
+aliases: [grid search, exhaustive grid search, parameter sweep, coarse-to-fine grid search, GridSearchCV]
+requires: [hyperparameter-search-spaces, k-fold-cross-validation]
+related: [random-search, quasi-random-search, nested-cross-validation, overfitting-in-model-selection, one-standard-error-rule, validation-curves, cross-validating-a-ridge-penalty, regularisation-paths, bayesian-optimisation]
+references: [hsu2003, bergstra2012, godbole2023, pedregosa2011, cawley2010]
+status: draft
+updated: 2026-10-13
+---
+
+import { GridSearchSurface } from './GridSearchSurface'
+
+<Definition>
+Let a <NoteLink to="hyperparameter-search-spaces">search space</NoteLink> have $D$ hyperparameters, and let
+hyperparameter $d$ take one of $r_d$ listed values $\lambda_d^{(1)}, \dots, \lambda_d^{(r_d)}$. **Grid search**
+evaluates the validation loss $L(\lambdavec)$ at every point of the Cartesian product of these lists,
+$N = \prod_{d=1}^D r_d$ configurations, and returns the configuration with the lowest loss. The loss is usually a
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink> estimate, and the chosen configuration is
+then refitted on all the training data.
+</Definition>
+
+## Problem
+
+A learning procedure with one or two hyperparameters, such as the penalty of <NoteLink to="ridge-regression">ridge
+regression</NoteLink> or the $(C, \gamma)$ pair of an RBF <NoteLink to="support-vector-machine">support vector
+machine</NoteLink>, needs them chosen from data. The validation loss has no usable gradient in them, and each evaluation
+costs a full fit, or $K$ fits under <NoteLink to="cross-validation">cross-validation</NoteLink>. Grid search is the
+simplest answer to the **select** question of <NoteLink to="model-selection">model selection</NoteLink>: lay out the
+candidates, score each once, keep the best. It needs no model of the loss and no sequential decisions. Every trial is
+independent, so all of them can run at once.
+
+## Mechanism
+
+1. **Choose the values per axis.** A scale hyperparameter gets values evenly spaced in its logarithm: $10^{-3},
+   10^{-2}, \dots$ for a penalty. Hsu, Chang and Lin recommend $C \in \set{2^{-5}, 2^{-3}, \dots, 2^{15}}$ and
+   $\gamma \in \set{2^{-15}, 2^{-13}, \dots, 2^{3}}$ for an RBF SVM on scaled inputs, 11 by 10 values
+   <Cite id="hsu2003" />. A categorical hyperparameter lists every value.
+2. **Score every combination.** Each configuration is cross-validated on the same folds. Common folds make the
+   differences between configurations less noisy than the scores themselves, because every configuration meets the same
+   luck in the split.
+3. **Select.** The configuration with the lowest mean loss wins. Ties, and near-ties within the noise, go to the simpler
+   model under the <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink>.
+4. **Refit** the winner on all the training data.
+
+**Coarse to fine.** A grid fine enough everywhere is too expensive, so a second grid is often laid over the
+neighbourhood of the first grid's winner. Hsu, Chang and Lin search a coarse grid of $C$ and $\gamma$ in steps of a
+factor 4, then a fine grid in steps of $2^{0.25}$ around the best point <Cite id="hsu2003" />. Refinement assumes that
+the best region of the fine scale lies next to the best point of the coarse scale. A narrow optimum between coarse
+points breaks that assumption.
+
+**What a grid tests.** Projected onto hyperparameter $d$, the $N$ trials of a grid take only $r_d$ distinct values.
+Every other trial repeats one of them with a different setting of the remaining hyperparameters. When the loss depends
+mostly on one hyperparameter, the grid has spent most of its budget on settings of the others. With $D$ axes of $r$
+values each, the important axis gets $r = N^{1/D}$ values from $N$ trials.
+<NoteLink to="random-search">Random search</NoteLink> develops this argument and gets $N$ distinct values instead.
+
+**Grids are not monotone in resolution.** Refining a grid from $r$ to $r + 1$ values per axis moves every point. The
+new points can all miss a narrow valley that one old point happened to hit. Only refinements that keep the old points,
+such as halving the spacing, can never do worse.
+
+The figure below runs a grid on a tabulated cross-validation error of an RBF SVM, with an optional refinement and
+optional evaluation noise.
+
+<GridSearchSurface />
+
+## Worked example
+
+The cross-validated error of an RBF SVM on two iris species is tabulated over $\log_{10}C \in [-2, 3]$ and
+$\log_{10}\gamma \in [-3, 2]$. Its lowest value is $0.040$, at $C = 10$ and $\gamma = 0.01$.
+
+**A 5 by 5 grid.** Five values per axis, spaced $1.25$ decades apart, give 25 configurations:
+
+| $\log_{10}C$ \ $\log_{10}\gamma$ | $-3$ | $-1.75$ | $-0.5$ | $0.75$ | $2$ |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| $-2$ | 0.128 | 0.105 | 0.064 | 0.165 | 0.477 |
+| $-0.75$ | 0.128 | 0.088 | 0.060 | 0.165 | 0.477 |
+| $0.5$ | 0.080 | 0.051 | 0.060 | 0.099 | 0.463 |
+| $1.75$ | **0.046** | 0.056 | 0.077 | 0.099 | 0.463 |
+| $3$ | 0.059 | 0.079 | 0.077 | 0.099 | 0.463 |
+
+1. **Read the table.** Small $C$ underfits (the top rows sit near $0.13$ on the left). Large $\gamma$ overfits (the
+   right column is near $0.47$, chance for two balanced classes is $0.5$). The low values run along a diagonal from
+   $(0.5, -1.75)$ to $(1.75, -3)$.
+2. **Select.** The best cell is $0.046$ at $\log_{10}C = 1.75$, $\log_{10}\gamma = -3$, on the lower boundary of the
+   $\gamma$ range.
+3. **Refine.** A second 5 by 5 grid covers one coarse spacing on each side, clipped to the box:
+   $\log_{10}C \in [0.5, 3]$ and $\log_{10}\gamma \in [-3, -1.75]$. Its best value is $0.0437$, at
+   $\log_{10}C = 1.75$ and $\log_{10}\gamma = -2.69$.
+4. **Compare with the truth.** Fifty evaluations reach $0.0437$ against the table's minimum of $0.040$. The full
+   21 by 21 table costs 441.
+
+**Resolution is not monotone.** On the same surface, grids with $r$ points per axis, spaced evenly over the box, give
+these best errors:
+
+| $r$ | 3 | 4 | 5 | 6 | 7 | 8 | 11 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| trials | 9 | 16 | 25 | 36 | 49 | 64 | 121 |
+| best error | 0.059 | 0.052 | 0.046 | **0.040** | 0.046 | 0.049 | 0.040 |
+
+The 6 by 6 grid lands on whole decades and hits the optimum $(1, -2)$ exactly. The 8 by 8 grid costs 64 trials and
+finds a worse point than the 5 by 5 grid.
+
+**Noise makes the best score optimistic.** Add evaluation noise of standard deviation $0.01$ to every score, as a
+smaller validation set would. Averaged over 2,000 repetitions, the best observed score of the 11 by 11 grid is $0.029$,
+while the true error of the configuration it picks is $0.045$. The 21 by 21 grid reports $0.024$ and picks a
+configuration whose true error is $0.046$. With 3.6 times the trials, the reported score is lower and the chosen model
+is no better. <NoteLink to="overfitting-in-model-selection">Overfitting in model selection</NoteLink> explains the gap.
+
+## Cost
+
+A grid with $r_d$ values on axis $d$ costs $N = \prod_d r_d$ evaluations, which is $r^D$ for $r$ values on each of $D$
+axes. Five values per axis cost 25 evaluations for two hyperparameters, 3,125 for five and about $10^7$ for ten.
+
+Each evaluation under $K$-fold cross-validation costs $K$ fits, and the refit adds one: $KN + 1$ fits. Nested
+cross-validation with $K_\text{out}$ outer folds repeats the search in each outer training set, so
+$K_\text{out}(K_\text{in}N + 1)$ fits (see <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>). A
+10 by 10 grid scored by 5-fold cross-validation inside 5 outer folds costs $5 \times (5 \times 100 + 1) = 2{,}505$ fits.
+
+Two properties lower the wall-clock cost. The evaluations are independent, so they parallelise perfectly. Some learners
+fit a whole axis of a grid at once: the <NoteLink to="regularisation-paths">regularisation path</NoteLink> of the lasso
+or ridge regression is computed with warm starts, at little more than the cost of one fit.
+
+## Trade-offs
+
+- **Where grids work.** One or two continuous hyperparameters, a few categorical ones, a cheap fit, and a need for a
+  complete picture of the loss surface, for example to draw a <NoteLink to="validation-curves">validation
+  curve</NoteLink>. The <NoteLink to="tuning-deep-learning-hyperparameters">Deep Learning Tuning Playbook</NoteLink>
+  accepts grid search only in one or two dimensions <Cite id="godbole2023" />.
+- **Where grids fail.** Beyond three or four hyperparameters the product explodes, and most trials vary hyperparameters
+  that matter little <Cite id="bergstra2012" />. <NoteLink to="random-search">Random search</NoteLink> and
+  <NoteLink to="quasi-random-search">quasi-random search</NoteLink> spend the same budget on more distinct values of
+  each hyperparameter, and <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> uses earlier results to
+  place later trials.
+- **Reproducibility.** A grid is fully specified by its value lists. It is easy to report and to repeat, and it gives
+  every competing method the same candidates, which matters in fair comparisons (see
+  <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+- **Tools.** scikit-learn's `GridSearchCV` scores every combination by cross-validation on common folds and refits the
+  best <Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **The winner on the boundary.** In the worked example the coarse winner sits at the smallest $\gamma$. A winner on the
+  edge of a range means the range should be extended before the search is trusted.
+- **Linear spacing for scale hyperparameters.** A grid $C \in \set{1, 250, 500, 750, 1000}$ spends four of its five
+  values in the top decade.
+- **Reporting the grid's best score.** The minimum over $N$ noisy scores is biased low, and the bias grows with $N$
+  <Cite id="cawley2010" />. Report the error of the chosen configuration on data the search did not use, or run
+  <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>.
+- **Refining around noise.** A coarse winner that won by noise sends the fine grid to the wrong place. The fine stage
+  then adds candidates near a point that was never best.
+- **Grids at different resolutions in a comparison.** A method tuned on a finer grid gets more chances to win by noise.

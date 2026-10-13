@@ -166,7 +166,7 @@ export function SearchCommand() {
         onOpenChange={show}
         title="Search"
         description="Search all notes"
-        className="sm:max-w-3xl"
+        className="top-[12vh] sm:max-w-3xl"
       >
         <Command
           shouldFilter={false}

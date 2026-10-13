@@ -1,0 +1,149 @@
+---
+title: 'Bayesian comparison of classifiers'
+kind: concept
+summary: 'Bayesian comparison of two learning algorithms reports the posterior probabilities that either is practically better or that they are equivalent within a region of practical equivalence. The correlated t-test serves one data set, the signed-rank test many.'
+tags: [model-selection, evaluation, bayesian, hypothesis-testing, worked-example]
+aliases: [Bayesian correlated t-test, Bayesian signed-rank test, region of practical equivalence, practical equivalence, Bayesian hierarchical comparison of classifiers]
+requires: [corrected-resampled-t-test, bayesian-inference]
+related: [comparing-classifiers-over-multiple-datasets, comparing-learning-algorithms, p-value, is-one-classifier-better-than-another, bayes-factors-and-model-comparison]
+references: [benavoli2017, corani2015, nadeau2003]
+status: draft
+updated: 2026-10-13
+---
+
+import { PosteriorWithRope } from './PosteriorWithRope'
+
+<Definition>
+A Bayesian comparison of two learning algorithms A and B puts a <NoteLink to="bayesian-inference">posterior
+distribution</NoteLink> on their mean difference in score $\mu$ and reports three probabilities: $P(\mu < -r)$, that B
+is practically better; $P(-r \le \mu \le r)$, that the two are practically equivalent; and $P(\mu > r)$, that A is
+practically better. The interval $[-r, r]$ is the **region of practical equivalence** (rope), the differences too small
+to matter, fixed before the analysis <Cite id="benavoli2017" />. The **Bayesian correlated t-test** gives the posterior
+from <NoteLink to="cross-validation">cross-validation</NoteLink> on one data set <Cite id="corani2015" />; the
+**Bayesian signed-rank test** gives it from scores on many data sets.
+</Definition>
+
+## Intuition
+
+A significance test answers a question nobody asked: if the two algorithms were exactly equal, how surprising would
+these data be? Benavoli, Corani, Demšar and Zaffalon list what that leaves out <Cite id="benavoli2017" />:
+
+- **The probability of the hypotheses.** A <NoteLink to="p-value">p-value</NoteLink> is $P(\text{data at least this
+  extreme} \mid H_0)$, not the probability that $H_0$ or $H_1$ is true.
+- **The size of the effect.** Two algorithms are never exactly equal, so with enough data any point null is rejected.
+  On one of their data sets the same tiny difference gives $p = 0.077$ from 15 folds and $p = 0.048$ from 100.
+- **Evidence for equality.** A large p-value says only that the data did not reject. It cannot say the algorithms are
+  equivalent.
+
+The Bayesian comparison replaces the point null with a region. A difference of 0.002 in accuracy is not worth a paper or
+a deployment, whatever its p-value. Fixing the rope at $r = 0.01$, one point of accuracy, as Benavoli and colleagues do
+<Cite id="benavoli2017" />, the three posterior probabilities say directly how sure one can be that the difference is
+negligible, or that it favours either side. A probability above 0.95 for any of the three is a decision; otherwise the
+data are not enough.
+
+## The correlated t-test
+
+**The model.** Cross-validation on one data set gives $n$ differences $\xvec = (x_1, \dots, x_n)$ in score, one per
+fold, for example $n = 100$ from 10 repeats of 10-fold cross-validation. Model them as
+
+$$
+\xvec = \mathbf 1\mu + \boldsymbol\varepsilon, \qquad \boldsymbol\varepsilon \sim \Gauss(\mathbf 0, \Sigma), \qquad
+\Sigma_{ii} = \sigma^2, \quad \Sigma_{ij} = \rho\sigma^2 \ (i \ne j),
+$$
+
+the exchangeable correlation of the <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink>,
+with $\mu$ the mean difference and $\rho$ the correlation that overlapping training sets induce.
+
+**The correlation cannot be learnt from the folds.** Corani and Benavoli show that the maximum-likelihood estimate of
+$\rho$ is 0 whatever the data: the likelihood decreases in $\rho$ over its whole range <Cite id="corani2015" />. This
+is the Bayesian face of the result that one run of cross-validation contains no unbiased estimate of its own variance
+(see <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>). The
+test therefore fixes $\rho$ at Nadeau and Bengio's heuristic, the test fraction $\rho = n_\text{test}/n_\text{total}$,
+which is $1/K$ for $K$-fold cross-validation <Cite id="nadeau2003" />.
+
+**The posterior.** With $\rho$ fixed, the model is a normal model whose only unknowns are $\mu$ and $\sigma^2$, and the
+data enter through two summaries. The mean $\bar x$ has variance $\sigma^2(\rho + (1 - \rho)/n)$, and the sample
+variance $\hat\sigma^2$ has expectation $(1 - \rho)\sigma^2$, so the variance of $\bar x$ is estimated by
+
+$$
+\paren{\frac1n + \frac{\rho}{1 - \rho}}\hat\sigma^2,
+$$
+
+the same corrected variance as in the frequentist test. Under the standard non-informative prior for a normal mean and
+variance, the posterior of $\mu$ is a <NoteLink to="student-t-distribution">Student t distribution</NoteLink> with
+$n - 1$ degrees of freedom, located at $\bar x$, with that scale <Cite id="benavoli2017" />:
+
+$$
+\mu \mid \xvec \sim t_{n - 1}\paren{\bar x,\ \paren{\frac1n + \frac{\rho}{1 - \rho}}\hat\sigma^2}.
+$$
+
+The frequentist and Bayesian versions share their numbers. With no rope, $P(\mu > 0 \mid \xvec)$ equals one minus the
+one-sided p-value of the corrected resampled t-test <Cite id="corani2015" />. What changes is the reading: the posterior
+gives probabilities of the hypotheses and, with a rope, of practical equivalence.
+
+<PosteriorWithRope />
+
+The figure's default data set has 200 rows and a small true difference, about 0.007, inside a rope of 0.01. The
+correlated posterior spreads over all three regions: the probabilities that B is practically better, that the two are
+equivalent and that A is practically better are about 0.20, 0.26 and 0.54, and none passes 0.95. The posterior that
+ignores the correlation is narrow and puts 0.65 on A. Raising the noise on B's inputs to 0.4 moves the posterior to the
+right, and the probability that A is practically better passes 0.99.
+
+## Many data sets: the signed-rank test
+
+Across data sets the scores are not on a common scale, which is why the frequentist comparisons use ranks (see
+<NoteLink to="comparing-classifiers-over-multiple-datasets">comparing classifiers over multiple data sets</NoteLink>).
+The Bayesian signed-rank test keeps the ranks' robustness and adds the rope <Cite id="benavoli2017" />.
+
+- **The prior.** The per-data-set differences $z_1, \dots, z_q$ are draws from an unknown distribution, given a
+  Dirichlet process prior with a single pseudo-observation at $z_0 = 0$ and strength $s = 0.5$.
+- **The posterior.** The posterior of that distribution puts weights $(w_0, w_1, \dots, w_q) \sim
+  \operatorname{Dir}(s, 1, \dots, 1)$ on the points $z_0, z_1, \dots, z_q$.
+- **The three probabilities.** For each posterior draw of the weights, compute the weighted share of pairs $(i, j)$
+  whose mean $(z_i + z_j)/2$ falls left of, inside or right of the rope. These three shares are the quantities
+  $\theta_\text{left}$, $\theta_\text{rope}$, $\theta_\text{right}$, the signed-rank analogues of "which side wins".
+  Monte Carlo over the weights gives their joint posterior, drawn as a cloud of points in a triangle whose corners are
+  the three outcomes.
+
+Unlike the Wilcoxon test, it needs no symmetry assumption. Benavoli and colleagues compare
+<NoteLink to="naive-bayes">naive Bayes</NoteLink> (nbc) with the averaged one-dependence estimator (aode) on 54 UCI data
+sets. The frequentist signed-rank test gives $p \approx 10^{-6}$, and the Bayesian test gives probabilities 0.000, 0.103
+and 0.897 for nbc practically better, equivalent and aode practically better: strong but not decisive evidence for aode
+at the 0.95 threshold. For aode against the hidden naive Bayes classifier (hnb) the probabilities are 0.001, 0.956 and
+0.042, a decision for practical equivalence that no significance test can make <Cite id="benavoli2017" />.
+
+A **hierarchical model** joins the two levels: each data set's cross-validation differences follow the correlated model
+with its own mean $\mu_i$, and the $\mu_i$ are drawn from a common Student t distribution. It shrinks the noisy
+per-data-set means towards each other and is the authors' preferred model, at the cost of fitting by
+<Gloss name="mcmc">Markov chain Monte Carlo</Gloss> <Cite id="benavoli2017" />. The `baycomp` Python package implements
+the correlated t-test, the sign and signed-rank tests and the hierarchical model.
+
+## Worked example
+
+The data set of <NoteLink to="is-one-classifier-better-than-another">is one classifier better than another?</NoteLink>:
+$n = 200$ rows, 10 repeats of 10-fold cross-validation, two learners that are equally good. The 100 fold differences in
+accuracy have $\bar x = 0.029$ and $\hat\sigma = 0.0916$.
+
+1. **Correlation.** 10-fold cross-validation tests on a tenth of the data, so $\rho = 0.1$ and $\rho/(1 - \rho) = 1/9$.
+2. **Posterior.** The scale is $0.0916\sqrt{1/100 + 1/9} = 0.0319$, so $\mu \sim t_{99}(0.029, 0.0319^2)$.
+3. **Without a rope.** $P(\mu > 0) = 0.817$. The corrected resampled t-test's two-sided p-value is 0.365, and its
+   one-sided p-value $0.183 = 1 - 0.817$.
+4. **With a rope of 0.01.** $P(\mu < -0.01) = 0.11$, $P(\abs\mu \le 0.01) = 0.16$, $P(\mu > 0.01) = 0.72$. No
+   probability reaches 0.95: the data do not decide.
+5. **Ignoring the correlation.** With $\rho = 0$ the scale is $0.0916/10 = 0.0092$ and $P(\mu > 0.01) = 0.98$, a
+   confident and wrong verdict for A. This is the overconfidence of the naive <NoteLink to="paired-t-test">paired
+   t-test</NoteLink>, in Bayesian form.
+
+## Pitfalls
+
+- **The correlation is assumed.** $\rho = n_\text{test}/n_\text{total}$ is a heuristic. For unstable learners the true
+  correlation can be larger, and the posterior is then too narrow, as the corrected test is too liberal.
+- **The rope must be fixed in advance.** Choosing $r$ after seeing the posterior can produce any conclusion. It should
+  be set by what difference matters for the application: a point of accuracy, a cost, a latency budget.
+- **Probabilities about this distribution.** On one data set the posterior concerns training sets from that
+  distribution, like the frequentist tests. Generalising across problems needs many data sets.
+- **Undecided is an answer.** When no probability passes the threshold, the right report is that more data, or more
+  data sets, are needed, not the largest of the three.
+- **Bayes does not fix the design.** An under-tuned baseline or a test set reused for selection biases the differences,
+  and the posterior inherits the bias (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in
+  comparisons</NoteLink>).

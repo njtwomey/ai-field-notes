@@ -1,0 +1,177 @@
+---
+title: 'Information-theoretic generalisation bounds'
+kind: concept
+summary: 'The expected generalisation gap of an algorithm with a $\sigma$-sub-Gaussian loss is at most $\sqrt{2\sigma^2 I(S; W)/m}$, where $I(S; W)$ is the mutual information between the training sample and the learned hypothesis.'
+tags: [learning-theory, generalisation, information-theory, worked-example]
+aliases: [mutual-information generalisation bound, Xu–Raginsky bound, Russo–Zou bound, conditional mutual information bound, CMI bound, input–output mutual information]
+requires: [mutual-information, sub-gaussian-random-variables, generalisation-gap]
+related: [pac-bayes-bounds, algorithmic-stability, adaptive-data-analysis, differential-privacy, sample-compression-bounds, symmetrisation, channel-capacity, stochastic-gradient-langevin-dynamics, algorithm-dependent-bounds]
+references: [russo2016bias, xu2017, steinke2020, bu2020, bassily2018, hellstrom2023, donsker1975]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $S = (Z_1, \dots, Z_m)$ be a sample of $m$ independent draws from $\Dcal$ and let a learning algorithm, possibly
+randomised, output a hypothesis $W$ with conditional distribution $P_{W \mid S}$. The
+**<NoteLink to="generalisation-gap">expected generalisation gap</NoteLink>** is
+$\operatorname{gen} = \expect\LB R(W) - \hat R_S(W)\RB$, the expectation taken over the sample and the algorithm. If for
+every fixed hypothesis $w$ the loss $\ell(w, Z)$ with $Z \sim \Dcal$ is $\sigma$-sub-Gaussian, then
+
+$$
+\abs{\operatorname{gen}} \le \sqrt{\frac{2\sigma^2\, I(S; W)}{m}},
+$$
+
+where $I(S; W)$ is the mutual information between the sample and the output <Cite id="xu2017" />
+<Cite id="russo2016bias" />. A loss with values in $[0, 1]$ is $\frac12$-sub-Gaussian, which gives
+$\abs{\operatorname{gen}} \le \sqrt{I(S; W)/(2m)}$.
+</Definition>
+
+## Intuition
+
+A hypothesis overfits when it encodes accidents of its training sample: the particular noise in the labels, the
+particular points that happened to be drawn. To encode them, the output must carry information about the sample. An
+output that is nearly independent of the sample cannot overfit it, because its training loss is then nearly an average
+over fresh data. The <NoteLink to="mutual-information">mutual information</NoteLink> $I(S; W)$, measured in nats,
+counts how much the output reveals about the sample, and the bound converts nats into a gap.
+
+Three cases fix the scale.
+
+- **A constant algorithm** has $I(S; W) = 0$ and no gap.
+- **A finite class.** For an algorithm choosing among $k$ hypotheses, $I(S; W) \le \entropy(W) \le \ln k$, and the bound
+  becomes $\sqrt{\ln k/(2m)}$ for a $[0, 1]$ loss. This is the finite-class rate of
+  <NoteLink to="realisable-and-agnostic-learning">agnostic learning</NoteLink>, in expectation and without a
+  <NoteLink to="union-bound">union bound</NoteLink>. An algorithm whose choice is predictable, so that $\entropy(W)$ is
+  small and below $\ln k$, has a correspondingly smaller bound.
+- **Noise injection.** Adding noise to the output, as stochastic gradient Langevin dynamics adds noise to each step
+  (<NoteLink to="stochastic-gradient-langevin-dynamics">stochastic gradient Langevin dynamics</NoteLink>), limits how
+  much the output can reveal, and so limits the gap.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, the mutual information
+plays the role that capacity plays in a uniform bound, and the change of measure of
+<NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink> replaces the union bound. The
+mutual information is the average PAC-Bayes divergence when the prior is the marginal law of the output:
+$I(S; W) = \expect_S\KL(P_{W \mid S} \,\|\, P_W)$. PAC-Bayes bounds hold with high probability for any fixed prior;
+the mutual-information bound holds in expectation for the best prior in this average sense.
+
+## The mutual-information bound
+
+The derivation compares the joint law of $(S, W)$ with the law under which the output is independent of the sample. Let
+$g(s, w) = R(w) - \hat R_s(w)$ be the gap of hypothesis $w$ on sample $s$, so $\operatorname{gen} = \expect g(S, W)$.
+
+**Step 1: an independent copy has no gap.** Let $(\bar S, \bar W)$ have the same marginal laws as $S$ and $W$ but be
+independent of each other. For each fixed $w$, the empirical risk on a sample that did not influence $w$ is unbiased:
+$\expect_{\bar S}\hat R_{\bar S}(w) = R(w)$. Averaging over $\bar W$ gives $\expect g(\bar S, \bar W) = 0$.
+
+**Step 2: the decoupled gap is sub-Gaussian.** For fixed $w$, $g(\bar S, w) = \frac1m\sum_i (R(w) - \ell(w, \bar Z_i))$
+is an average of $m$ independent centred $\sigma$-sub-Gaussian variables, so it is $\sigma/\sqrt m$-sub-Gaussian
+(<NoteLink to="sub-gaussian-random-variables">sub-Gaussian random variables</NoteLink>): for every real $t$,
+
+$$
+\ln\expect_{\bar S} e^{t\,g(\bar S, w)} \le \frac{t^2\sigma^2}{2m}.
+$$
+
+Averaging the <Gloss name="mgf">moment generating function</Gloss> over the independent $\bar W$ keeps the same bound.
+
+**Step 3: change of measure.** The Donsker–Varadhan inequality states that
+$\expect_{\mu} f \le \KL(\mu \,\|\, \nu) + \ln\expect_\nu e^f$ for any two distributions $\mu$, $\nu$ and any
+function $f$ <Cite id="donsker1975" />. Take $\mu$ the joint law of $(S, W)$, $\nu$ the product law of
+$(\bar S, \bar W)$ and $f = t\,g$. The divergence of a joint law from the product of its marginals is the mutual
+information, so
+
+$$
+t\,\operatorname{gen} \le I(S; W) + \frac{t^2\sigma^2}{2m} \qquad \text{for every real } t.
+$$
+
+**Step 4: optimise over $t$.** For $t > 0$, $\operatorname{gen} \le I(S; W)/t + t\sigma^2/(2m)$, which is smallest at
+$t = \sqrt{2mI(S; W)/\sigma^2}$, where it equals $\sqrt{2\sigma^2 I(S; W)/m}$. Negative $t$ gives the same bound on
+$-\operatorname{gen}$, which proves the bound on $\abs{\operatorname{gen}}$.
+
+Russo and Zou proved the first version for finite classes, with the information that the output carries about the
+vector of empirical risks <Cite id="russo2016bias" />. Xu and Raginsky stated it with $I(S; W)$, which is easier to
+bound <Cite id="xu2017" />.
+
+The mutual-information bound controls the expected gap only. A high-probability bound needs a stronger quantity, such
+as a bound on the divergence $\KL(P_{W \mid S} \,\|\, P_W)$ for most samples, which is a PAC-Bayes bound
+<Cite id="hellstrom2023" />.
+
+**The Gibbs algorithm.** The algorithm that samples $W$ with probability proportional to
+$Q(w)\exp(-\lambda\hat R_S(w))$, for a fixed distribution $Q$ and inverse temperature $\lambda$, is the Gibbs posterior
+of <NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>. For a loss in $[0, 1]$, Xu and Raginsky report that
+$I(S; W) \le 2\lambda$, which gives $\abs{\operatorname{gen}} \le \sqrt{\lambda/m}$, and that a direct argument
+improves the gap bound to $\lambda/(2m)$ <Cite id="xu2017" />. The inverse temperature is the dial between fitting the
+sample and revealing it.
+
+## Conditional mutual information
+
+The mutual information can be infinite for an algorithm whose expected generalisation gap is small. A deterministic
+algorithm with a continuous output, such as the sample mean of continuous data, determines $W$ exactly from $S$, so
+$I(S; W) = \infty$ and the bound says nothing. For thresholds on the real line, a class of
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> 1, Bassily, Moran, Nachum, Shafer and Yehudayoff
+showed that every proper consistent learner has, for some distributions, mutual information that grows without bound as
+the domain grows <Cite id="bassily2018" />. Two refinements repair this.
+
+**Conditional mutual information.** Steinke and Zakynthinou draw a supersample $\tilde Z$ of $m$ pairs of independent
+examples and a uniform vector $U \in \set{0, 1}^m$ that picks one example from each pair for training. The conditional
+mutual information is $\mathrm{CMI} = I(W; U \mid \tilde Z)$: how much the output reveals about which member of each
+pair was used, given both. It is the information-theoretic version of the ghost sample of
+<NoteLink to="symmetrisation">symmetrisation</NoteLink>. For a loss in $[0, 1]$,
+$\abs{\operatorname{gen}} \le \sqrt{2\,\mathrm{CMI}/m}$ <Cite id="steinke2020" />. Three upper bounds on $\mathrm{CMI}$
+follow.
+
+- **Always finite.** $\mathrm{CMI} \le m\ln 2$, because $U$ has $m$ bits.
+- **Compression.** An algorithm whose output is determined by $k$ of its training examples has
+  $\mathrm{CMI} \le k\ln(2m)$ (<NoteLink to="sample-compression-bounds">sample compression bounds</NoteLink>).
+- **VC classes.** For a class of VC dimension $d$, some empirical risk minimiser has $\mathrm{CMI} \le d\ln m + 2$.
+
+**Individual-sample mutual information.** Bu, Zou and Veeravalli bound the gap by the information the output carries
+about each example separately: $\abs{\operatorname{gen}} \le \frac1m\sum_{i=1}^m\sqrt{2\sigma^2 I(W; Z_i)}$, which is
+never larger than the bound with $I(S; W)$ <Cite id="bu2020" />. For the sample mean of $m$ Gaussian vectors in $d$
+dimensions, $I(S; W)$ is infinite while $I(W; Z_i) = \frac d2\ln\frac{m}{m - 1}$ is finite.
+
+## Worked example
+
+**A finite class.** An algorithm chooses one of $k = 1{,}024$ hypotheses, the <NoteLink to="surrogate-losses">0-1
+loss</NoteLink> is used, and $m = 1{,}000$.
+
+1. **The information.** $I(S; W) \le \entropy(W) \le \ln 1{,}024 = 6.93$ nats.
+2. **The bound.** $\abs{\operatorname{gen}} \le \sqrt{6.93/2{,}000} = 0.059$.
+3. **Against the uniform bound.** The high-probability uniform bound over the same class at $\delta = 0.05$ is
+   $\sqrt{\ln(2k/\delta)/(2m)} = \sqrt{10.6/2{,}000} = 0.073$. The information bound is smaller and holds only in
+   expectation.
+4. **Sample size.** An expected gap of at most 0.02 needs $m \ge 6.93/(2 \times 0.02^2) \approx 8{,}700$.
+
+**A noisy mean.** Examples $z_i \in [0, 1]$; the algorithm outputs $W = \bar z + \xi$, the sample mean plus independent
+noise $\xi \sim \Gauss(0, \tau^2)$; the loss $\ell(w, z) = \min(1, (w - z)^2)$ lies in $[0, 1]$, so $\sigma = \frac12$.
+
+1. **The information.** $W$ depends on $S$ only through $\bar z$, so $I(S; W) = I(\bar z; \bar z + \xi)$. The mean of
+   $m$ variables in $[0, 1]$ has variance at most $1/(4m)$. A Gaussian channel with input variance $v$ and noise
+   variance $\tau^2$ carries at most $\frac12\ln(1 + v/\tau^2)$ nats (<NoteLink to="channel-capacity">channel
+   capacity</NoteLink>), so $I(S; W) \le \frac12\ln\paren{1 + 1/(4m\tau^2)}$.
+2. **Numbers.** With $m = 100$ and $\tau = 0.05$, $4m\tau^2 = 1$ and $I(S; W) \le \frac12\ln 2 = 0.35$ nats. The bound
+   is $\sqrt{0.35/200} = 0.042$.
+3. **Against the truth.** For the <NoteLink to="regression-losses">squared loss</NoteLink> the expected gap of
+   $\bar z + \xi$ is exactly $2\operatorname{var}(z)/m \le 1/(2m) = 0.005$, whatever $\tau$ is, and the clipping at 1
+   rarely acts when $\tau$ is small. The bound is non-vacuous and about eight times too large.
+4. **Less noise.** With $\tau = 0.005$, $I(S; W) \le 2.31$ nats and the bound grows to 0.107. As $\tau \to 0$ the bound
+   grows without limit, while the true gap stays at most 0.005. The information bound penalises how precisely the
+   output is reported, not how much the gap is.
+5. **More data.** At $\tau = 0.05$ the information shrinks like $1/(8m\tau^2)$, so the bound falls like $1/m$. At
+   $m = 1{,}000$ it is 0.0049, and the smallest $m$ with a bound below 0.01 is $m = 477$.
+
+{/* figure pending engine (C6 Gibbs <Gloss name="erm" /> over a finite class with exact I(S; W) by enumeration; noisy-mean study
+sketched in the lt-algorithmic log): the mutual-information bound beside the exact expected gap, against the inverse
+temperature or the noise level τ */}
+
+## Pitfalls
+
+- **Expectation, not high probability.** The bound controls $\expect[R(W) - \hat R_S(W)]$. Markov's inequality turns it
+  into a probability bound with $1/\delta$ dependence, much weaker than $\ln(1/\delta)$.
+- **Deterministic algorithms.** On continuous data, a deterministic output often has infinite mutual information with
+  the sample. Use the conditional or individual-sample versions, or add noise.
+- **The sub-Gaussian condition is on the loss for each fixed hypothesis.** Unbounded losses such as the squared loss on
+  unbounded data are not sub-Gaussian, and the bound does not apply to them as stated.
+- **The information is hard to compute.** $I(S; W)$ involves the unknown distribution and the whole algorithm. In
+  practice it is bounded through structure: the entropy of a finite output, a channel with known noise, a compression
+  scheme, or <NoteLink to="differential-privacy">differential privacy</NoteLink>, which gives
+  $I(S; W) \le \frac12\varepsilon^2 m$ for an $\varepsilon$-differentially private algorithm <Cite id="steinke2020" />.

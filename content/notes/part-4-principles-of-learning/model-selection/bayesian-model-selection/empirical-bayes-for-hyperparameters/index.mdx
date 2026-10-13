@@ -1,0 +1,202 @@
+---
+title: 'Empirical Bayes for hyperparameters'
+kind: technique
+summary: 'Empirical Bayes, or type-II maximum likelihood, sets hyperparameters (a prior scale, a ridge penalty, kernel length-scales) by maximising the marginal likelihood. One optimisation on all the data replaces a grid search; with many hyperparameters it can overfit.'
+tags: [model-selection, bayesian, hyperparameters, worked-example]
+aliases: [empirical Bayes, type-II maximum likelihood, type II maximum likelihood, ML-II, evidence approximation, evidence maximisation, maximum marginal likelihood]
+requires: [marginal-likelihood-and-bayesian-occams-razor]
+related: [gaussian-process-hyperparameter-learning, automatic-relevance-determination, ridge-regression, bayesian-linear-regression, hierarchical-models, james-stein-estimator, relevance-vector-machine, choosing-the-regularisation-strength]
+references: [robbins1956, james1961, efron1973, casella1985, mackay1992, bishop2006, bachoc2013, cawley2007, lotfi2022marginal]
+status: draft
+updated: 2026-10-13
+---
+
+import { EvidenceAgainstCrossValidation } from './EvidenceAgainstCrossValidation'
+
+<Definition>
+Let a model have parameters $\thetavec$ with a prior $p(\thetavec \mid \etavec)$ that depends on hyperparameters
+$\etavec$, such as a prior variance or a noise level. **Empirical Bayes** sets the hyperparameters to the maximiser of
+the marginal likelihood,
+
+$$
+\hat\etavec = \argmax_{\etavec}\; p(\Dcal \mid \etavec) = \argmax_{\etavec} \int p(\Dcal \mid \thetavec)\,
+p(\thetavec \mid \etavec)\, d\thetavec,
+$$
+
+and then uses the posterior $p(\thetavec \mid \Dcal, \hat\etavec)$ <Cite id="casella1985" />. Maximising the likelihood
+of the parameters is type-I maximum likelihood; maximising the marginal likelihood of the hyperparameters is
+**type-II maximum likelihood**. MacKay called the same procedure the evidence approximation <Cite id="mackay1992" />.
+</Definition>
+
+## Problem
+
+Regularised models have hyperparameters that the training loss cannot set. A ridge penalty, a prior variance or a noise
+level always fits the training data best at the value that removes all
+<NoteLink to="regularisation">regularisation</NoteLink>. The usual answer is to estimate the test error of each value on
+a grid by <NoteLink to="k-fold-cross-validation">cross-validation</NoteLink> and keep the best. That costs $K$ fits per
+grid point, and it becomes impractical with more than two or three hyperparameters, such as one length-scale per input.
+
+The <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> scores a hyperparameter
+value without held-out data. It integrates the parameters out, so it charges for the flexibility a weak prior allows,
+and its maximiser is a regularised fit. It is a smooth function of $\etavec$, so the choice is an optimisation by
+gradient or fixed-point iteration instead of a search. Empirical Bayes is the **select** step of
+<NoteLink to="model-selection">model selection</NoteLink> for continuous hyperparameters; it neither estimates nor
+assesses predictive error.
+
+## Mechanism
+
+### The normal means problem
+
+The cleanest case shows the whole mechanism. Observe $y_j \sim \Gauss(\theta_j, \sigma^2)$ independently for
+$j = 1, \dots, J$, with $\sigma^2$ known. Each $\theta_j$ has its own measurement, and the maximum-likelihood estimate
+is $\hat\theta_j = y_j$. Put a shared prior $\theta_j \sim \Gauss(0, \tau^2)$ on the means, with the prior variance
+$\tau^2$ as the hyperparameter.
+
+1. **The posterior for a fixed $\tau^2$.** By conjugacy (see <NoteLink to="hierarchical-models">hierarchical
+   models</NoteLink>), the posterior mean shrinks each observation towards zero:
+
+   $$
+   \expect[\theta_j \mid y_j, \tau^2] = (1 - B)\, y_j, \qquad B = \frac{\sigma^2}{\sigma^2 + \tau^2}.
+   $$
+
+   The shrinkage factor $B$ is the share of the observation's variance that is noise. It depends on the unknown
+   $\tau^2$.
+2. **The marginal likelihood.** Integrating $\theta_j$ out, $y_j = \theta_j + \varepsilon_j$ is a sum of independent
+   Gaussians, so $y_j \sim \Gauss(0, \sigma^2 + \tau^2)$ and
+
+   $$
+   \log p(\yvec \mid \tau^2) = -\frac{J}{2}\log\paren{2\pi(\sigma^2 + \tau^2)} - \frac{S}{2(\sigma^2 + \tau^2)}, \qquad
+   S = \sum_{j=1}^J y_j^2.
+   $$
+
+3. **Maximise.** Write $v = \sigma^2 + \tau^2$. The derivative in $v$ is $-J/(2v) + S/(2v^2)$, which is zero at
+   $v = S/J$. The constraint $\tau^2 \ge 0$ gives
+
+   $$
+   \hat\tau^2 = \max\paren{0,\, \frac{S}{J} - \sigma^2}, \qquad \hat B = \frac{\sigma^2}{\sigma^2 + \hat\tau^2} =
+   \min\paren{1,\, \frac{J\sigma^2}{S}}.
+   $$
+
+4. **Plug in.** The empirical Bayes estimate is $(1 - \hat B)\, y_j$.
+
+The data estimate the prior from the spread of all $J$ observations together, and each estimate borrows strength from
+the others. If the observations are no more spread out than noise alone would make them, $S \le J\sigma^2$, then
+$\hat\tau^2 = 0$ and every mean is shrunk to zero. Since $S/(\sigma^2 + \tau^2)$ is a chi-squared variable with $J$
+degrees of freedom, replacing $J$ by $J - 2$ in $\hat B$ makes it unbiased for $B$. The result is the
+<NoteLink to="james-stein-estimator">James–Stein estimator</NoteLink>, which has lower expected total squared error than
+$\hat\theta_j = y_j$ for every $\thetavec$ when $J \ge 3$ <Cite id="james1961" />. Efron and Morris derived it this way,
+as an empirical Bayes rule <Cite id="efron1973" />. Robbins introduced the name empirical Bayes for priors estimated
+from the data <Cite id="robbins1956" />.
+
+### A ridge penalty
+
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink> has the same structure. The weights
+$\wvec \in \reals^M$ of a linear model on features $\phivec(\xvec)$ have prior $\Gauss(\zeros, \alpha^{-1}\eye)$, the
+noise has precision $\beta$, and the posterior mean is the <NoteLink to="ridge-regression">ridge regression</NoteLink>
+estimate with penalty $\lambda = \alpha/\beta$. Let $\lambda_1, \dots, \lambda_M$ be the eigenvalues of
+$\beta\Phimat^\top\Phimat$ and $\mvec_N$ the posterior mean. Setting the derivatives of the log evidence in $\alpha$
+and $\beta$ to zero gives MacKay's fixed-point equations <Cite id="mackay1992" /> <Cite id="bishop2006" />:
+
+$$
+\alpha = \frac{\gamma}{\norm{\mvec_N}^2}, \qquad \frac1\beta = \frac{\norm{\yvec - \Phimat\mvec_N}^2}{N - \gamma},
+\qquad \gamma = \sum_{i=1}^M \frac{\lambda_i}{\alpha + \lambda_i}.
+$$
+
+The <NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink> note derives them. Each term of
+$\gamma$ lies in $[0, 1]$: near 1 for a direction the data determine and near 0 for one the prior determines. $\gamma$
+is the trace of the ridge hat matrix, the <NoteLink to="effective-degrees-of-freedom">effective degrees of
+freedom</NoteLink>. The noise update is the usual unbiased variance with $N - \gamma$ residual degrees of freedom. The
+iteration alternates between computing $\mvec_N$ and $\gamma$ and updating $\alpha$ and $\beta$, and each step costs
+$O(M)$ after one eigendecomposition of $\Phimat^\top\Phimat$.
+
+### Kernel hyperparameters
+
+A <NoteLink to="gaussian-process">Gaussian process</NoteLink> has no finite weight vector, and its hyperparameters
+enter the covariance matrix. The log marginal likelihood is a data-fit term plus a log-determinant complexity term,
+and it is maximised by gradient ascent with <Gloss name="l-bfgs" /> on a log scale
+(<NoteLink to="gaussian-process-hyperparameter-learning">Gaussian process hyperparameter learning</NoteLink>). One
+length-scale per input is <NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink>,
+and one prior precision per weight is the <NoteLink to="relevance-vector-machine">relevance vector machine</NoteLink>.
+Empirical Bayes is the standard way to fit both, because their tens or hundreds of hyperparameters rule out a grid.
+
+## Worked example
+
+Take $J = 10$ means with $\sigma = 1$. The true means are $\thetavec = (0.8, -0.4, 1.5, 0.2, -1.1, 0.6, -0.3, 1.0,
+-0.7, 0.4)$, whose mean square is $0.64$. The observations are
+
+$$
+\yvec = (1.7, -1.6, 1.8, 1.7, -1.5, -0.4, 0.3, 0.8, 0.4, -0.1).
+$$
+
+1. **The sum of squares.** $S = \sum_j y_j^2 = 14.89$, so $S/J = 1.489$.
+2. **The prior variance.** $\hat\tau^2 = 1.489 - 1 = 0.489$, against a true spread of $0.64$. Evaluating the log
+   marginal likelihood confirms the maximum: it is $-16.63$ at $\tau^2 = 0$, $-16.18$ at $\tau^2 = 0.5$ and $-16.38$ at
+   $\tau^2 = 1$.
+3. **The shrinkage.** $\hat B = 1/1.489 = 0.672$. Each estimate keeps a third of its observation: $1.7$ becomes $0.56$
+   and $-1.6$ becomes $-0.53$.
+4. **The error against the truth.** The total squared error $\sum_j(\hat\theta_j - \theta_j)^2$ is $7.61$ for the
+   maximum-likelihood estimates $\hat\theta_j = y_j$, $3.51$ for empirical Bayes and $3.26$ for James–Stein, whose
+   factor is $(J - 2)/S = 0.537$.
+
+Shrinkage halves the error, because the observations are noisier ($\sigma^2 = 1$) than the means are spread
+($\tau^2 = 0.64$). No grid and no held-out data were needed: the ten observations chose their own prior.
+
+A second example shows the failure. Fit a straight line to the three points $(-1, -0.8)$, $(0, 0.1)$ and $(1, 1.1)$
+of the worked example of <NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>, which assumes
+a noise standard deviation of $0.5$. At $\alpha = 1$ and $\beta = 4$, the log evidence is $-3.47$. Maximising over both
+precisions moves the noise variance to $0.0017$, a standard deviation of $0.04$, and raises the log evidence to
+$-1.18$. The three points lie close to a line, and with one residual degree of freedom the evidence cannot tell a lucky
+draw from a noiseless line. If the noise standard deviation really is $0.5$, the estimate is twelve times too small,
+and every predictive interval built from it is too narrow.
+
+The figure compares the evidence with <NoteLink to="cross-validation">cross-validation</NoteLink> on a polynomial ridge
+fit, beside the true test error of each penalty.
+
+<EvidenceAgainstCrossValidation />
+
+## Cost
+
+- **Normal means and linear-Gaussian models:** closed forms. One eigendecomposition of the $M \times M$ matrix
+  $\Phimat^\top\Phimat$ costs $O(M^3)$, after which each fixed-point step costs $O(M)$ plus the $O(NM)$ residual.
+- **Gaussian processes:** each evaluation of the evidence and its gradient needs a Cholesky factor of an $n \times n$
+  matrix, $O(n^3)$, and an optimiser takes tens to hundreds of evaluations.
+- **Against cross-validation:** $K$-fold cross-validation over a grid of $G$ values costs $KG$ fits per hyperparameter
+  grid, and a grid over $h$ hyperparameters has $G^h$ points. Empirical Bayes costs one fit per optimiser step whatever
+  $h$ is.
+
+## Trade-offs
+
+- **Evidence or cross-validation.** The evidence is optimal when the model family is right, and its estimate has low
+  variance because it uses every point in every term. Cross-validation measures predictive error directly and is more
+  robust when the model is misspecified. Bachoc compared the two for Gaussian-process covariance parameters and found
+  maximum likelihood better when the covariance family is correct and cross-validation better when it is not
+  <Cite id="bachoc2013" />.
+- **Plug-in or full Bayes.** Empirical Bayes plugs in one value of $\etavec$ and ignores its uncertainty. A hyperprior
+  $p(\etavec)$ and integration over $\etavec$, by <Gloss name="mcmc" /> or a
+  <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>, keep that uncertainty. The difference is large
+  when the data say little about $\etavec$: few groups in a hierarchical model, few points in a regression.
+- **Number of hyperparameters.** With a handful of hyperparameters the evidence is a well-determined function of them.
+  With one hyperparameter per input or per weight, the evidence is a training objective with many free parameters and
+  inherits the usual risk of overfitting.
+
+## Pitfalls
+
+- **The evidence overfits hyperparameters.** Maximising the evidence over a rich family of priors fits the prior to the
+  data. Lotfi and colleagues show the evidence leading to both overfitting and underfitting in hyperparameter learning,
+  including a neural-network mean function inside a Gaussian process that overfits the training data
+  <Cite id="lotfi2022marginal" />. The remedies are those for any overfitted fit: fewer hyperparameters, a hyperprior
+  that penalises extreme values, or a held-out check. Cawley and Talbot add such a hyperprior to a leave-one-out
+  criterion and integrate its scale out analytically <Cite id="cawley2007" />.
+- **Boundary estimates.** $\hat\tau^2 = 0$ in the normal means problem, or a noise variance driven towards zero in a
+  regression, is a common maximum, not a rare one. A boundary estimate claims complete pooling or a noiseless fit with
+  false certainty. Check whether the optimum sits on a boundary, and prefer a hyperprior that excludes it, such as a
+  half-Cauchy on $\tau$ (see <NoteLink to="prior-choice">prior choice</NoteLink>).
+- **Local maxima.** The evidence of a Gaussian process is not concave in its length-scales and noise. A short
+  length-scale with little noise and a long one with much noise can both be maxima. Restart from several initial values.
+- **Reusing the data for assessment.** The hyperparameters were chosen on all the data, so the evidence at the maximum
+  and the training error of the resulting fit are both optimistic. Assess the tuned model on a test set, or nest the
+  whole empirical Bayes fit inside an outer cross-validation loop (<NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>).
+- **Comparing models by maximised evidence.** The maximum of $p(\Dcal \mid \etavec)$ over $\etavec$ is a likelihood
+  maximised over $\etavec$, so it grows with the number of hyperparameters. Comparing two model families by their
+  maximised evidence repeats the problem the evidence was meant to solve, one level up.

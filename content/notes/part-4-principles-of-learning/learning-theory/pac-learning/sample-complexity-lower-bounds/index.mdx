@@ -1,0 +1,179 @@
+---
+title: 'Sample-complexity lower bounds'
+kind: concept
+summary: 'Any learner for a class of VC dimension $d$ needs $\Omega((d + \ln(1/\delta))/\epsilon)$ examples in the realisable case and $\Omega((d + \ln(1/\delta))/\epsilon^2)$ in the agnostic case, so the VC upper bounds have the right dependence on $d$, $\epsilon$ and $\delta$.'
+tags: [learning-theory, sample-complexity, lower-bounds, worked-example]
+aliases: [PAC lower bounds, sample complexity lower bound, Ehrenfeucht–Haussler–Kearns–Valiant lower bound]
+requires: [vapnik-chervonenkis-dimension, realisable-and-agnostic-learning]
+related: [minimax-lower-bounds, fundamental-theorem-of-statistical-learning, no-free-lunch-theorem, kullback-leibler-divergence]
+references: [ehrenfeucht1989, blumer1989, anthony1999, shalevshwartz2014, hanneke2016, tsybakov2009]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\Hcal$ be a class of binary classifiers with VC dimension $d$. A **sample-complexity lower bound** is a number
+$m_0(\epsilon, \delta)$ such that every learning algorithm, given fewer than $m_0$ examples, fails on some distribution:
+with probability more than $\delta$ it returns a hypothesis with risk more than $\epsilon$ above the best in $\Hcal$.
+For small $\epsilon$ and $\delta$, every learner needs $\Omega((d + \ln(1/\delta))/\epsilon)$ examples in the
+realisable case and $\Omega((d + \ln(1/\delta))/\epsilon^2)$ in the agnostic case <Cite id="ehrenfeucht1989" />
+<Cite id="blumer1989" /> <Cite id="anthony1999" />.
+</Definition>
+
+## Intuition
+
+An upper bound says that some learner succeeds with $m$ examples. A lower bound says that no learner can succeed with
+fewer, whatever it computes. The proof exhibits a hard distribution. The learner does not know which of several
+candidate distributions produced its data, and the candidates are chosen so that no sample of size $m$ tells them
+apart while each needs a different answer.
+
+Lower bounds decide whether the sample size obtained by inverting a bound, the fifth move of the
+<NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, is the minimum any learner
+needs or an artefact of a loose proof. For VC classes the upper and lower bounds agree in their dependence on $d$,
+$\epsilon$ and $\delta$, up to constants and, in the realisable case, a factor $\ln(1/\epsilon)$ that a better learner
+removes <Cite id="hanneke2016" />.
+
+Each term of the lower bound has its own hard distribution.
+
+- **The $d/\epsilon$ term.** The class can label $d$ points in every way, so the labels of points absent from the
+  sample are unconstrained. Putting little mass on many such points forces the learner to see most of them.
+- **The $\ln(1/\delta)/\epsilon$ term.** One rare point decides the answer. With probability $(1 - \epsilon)^m$ the
+  sample misses it.
+- **The $1/\epsilon^2$ factor.** In the agnostic case the label of a point is a biased coin. Deciding which way a coin
+  of bias $\tfrac12 \pm \epsilon$ leans takes order $1/\epsilon^2$ flips.
+
+## The realisable lower bound
+
+### The $d/\epsilon$ term
+
+Let $C = \set{c_0, c_1, \dots, c_{d-1}}$ be a set of $d \ge 2$ points shattered by $\Hcal$, and let $\epsilon \le 1/8$.
+
+1. **The distribution.** Put mass $1 - 8\epsilon$ on $c_0$ and mass $8\epsilon/(d - 1)$ on each of $c_1, \dots,
+   c_{d-1}$. Label $c_0$ with $+1$.
+2. **A random target.** Draw the labels $f(c_1), \dots, f(c_{d-1})$ independently and uniformly. Every such labelling
+   is produced by some hypothesis in $\Hcal$, because $C$ is shattered, so the problem is realisable for every draw.
+3. **Unseen points are coin flips.** If $c_i$ ($i \ge 1$) does not appear in the sample, the sample carries no
+   information about $f(c_i)$. Whatever the learner predicts there, it is wrong with probability $1/2$ over the draw of
+   $f$. Let $R'$ be the risk contributed by $c_1, \dots, c_{d-1}$; then $R' \le R(\hat h)$ and $R' \le 8\epsilon$.
+   Each $c_i$ is missing from the sample with probability $(1 - 8\epsilon/(d - 1))^m$, so
+
+$$
+\expect_{f, S}[R'] \ge \frac12 \sum_{i=1}^{d-1}\frac{8\epsilon}{d - 1}\paren{1 - \frac{8\epsilon}{d - 1}}^m =
+4\epsilon\paren{1 - \frac{8\epsilon}{d - 1}}^m.
+$$
+
+4. **Few examples miss many points.** Bernoulli's inequality $(1 - a)^m \ge 1 - am$ shows that when
+   $m \le (d - 1)/(16\epsilon)$ the factor is at least $1/2$, so $\expect_{f, S}[R'] \ge 2\epsilon$. An average over
+   targets is at most the largest value, so some fixed target $f$ has $\expect_S[R'] \ge 2\epsilon$.
+5. **From expectation to probability.** For that target, $R'$ lies in $[0, 8\epsilon]$, so
+   $\expect_S[R'] \le \epsilon + 8\epsilon\,\prob(R' > \epsilon)$. Combined with $\expect_S[R'] \ge 2\epsilon$, this
+   gives $\prob(R(\hat h) > \epsilon) \ge \prob(R' > \epsilon) \ge 1/8$.
+
+Every learner with $\delta < 1/8$ therefore needs $m > (d - 1)/(16\epsilon)$ examples. Ehrenfeucht, Haussler, Kearns
+and Valiant proved the same form, $(d - 1)/(32\epsilon)$ for $\epsilon \le 1/8$ and $\delta \le 1/100$, with a
+similar construction <Cite id="ehrenfeucht1989" />.
+
+### The $\ln(1/\delta)/\epsilon$ term
+
+Assume $\Hcal$ contains two hypotheses $h_+$ and $h_-$ and two points $c_1$, $c_2$ with $h_+(c_1) = h_-(c_1)$ and
+$h_+(c_2) \ne h_-(c_2)$. Let the learner be deterministic.
+
+1. **The distribution.** Put mass $1 - p$ on $c_1$ and mass $p$ on $c_2$, with $\epsilon < p$.
+2. **An uninformative sample.** With probability $(1 - p)^m$ the sample contains only copies of $c_1$. Both targets
+   label $c_1$ alike, so the sample is the same under both, and the learner returns the same hypothesis.
+3. **One target is wrong.** That hypothesis disagrees with one of $h_+$ and $h_-$ on $c_2$. Under that target its risk
+   is at least $p > \epsilon$.
+4. **Inversion.** The learner fails with probability at least $(1 - p)^m$ under that target. Letting $p$ decrease to
+   $\epsilon$, success with confidence $1 - \delta$ needs $(1 - \epsilon)^m \le \delta$, that is
+   $m \ge \ln(1/\delta)/(-\ln(1 - \epsilon))$. Because $-\ln(1 - \epsilon) \le \epsilon/(1 - \epsilon)$,
+
+$$
+m \ge \frac{1 - \epsilon}{\epsilon}\ln\frac{1}{\delta}.
+$$
+
+This is Blumer, Ehrenfeucht, Haussler and Warmuth's bound <Cite id="blumer1989" />. A randomised learner can guess,
+which halves the failure probability and changes $\ln(1/\delta)$ to $\ln(1/(2\delta))$.
+
+The two terms together give $m \ge \max\set{(d - 1)/(16\epsilon), (1 - \epsilon)\ln(1/\delta)/\epsilon}$. The larger
+of two numbers is at least their average, so the sample complexity is $\Omega((d + \ln(1/\delta))/\epsilon)$.
+
+## The agnostic lower bound
+
+### The $\ln(1/\delta)/\epsilon^2$ term
+
+Take one point $x$ on which two hypotheses of $\Hcal$ disagree, and let $\epsilon \le 1/4$. Under the distribution
+$P_+$ the label of $x$ is $+1$ with probability $\tfrac12 + \epsilon$; under $P_-$ it is $+1$ with probability
+$\tfrac12 - \epsilon$. Predicting the minority label at $x$ has risk $\tfrac12 + \epsilon$, against
+$\tfrac12 - \epsilon$ for the majority label, so a learner that picks the wrong label has excess risk $2\epsilon$.
+
+1. **Testing.** Let $A$ be the event that the learner predicts $+1$ at $x$. It fails under $P_+$ on $A^c$ and under
+   $P_-$ on $A$.
+2. **Bretagnolle–Huber.** For any event $A$ and distributions $P$, $Q$,
+   $P(A) + Q(A^c) \ge \tfrac12\exp(-\KL(P \,\|\, Q))$ <Cite id="tsybakov2009" />. The sample has $m$ independent labels,
+   so the <Gloss name="kl">Kullback–Leibler divergence</Gloss> of the two sample distributions is $m$ times that of one
+   label:
+
+$$
+\KL\paren{\operatorname{Ber}(\tfrac12 + \epsilon) \,\|\, \operatorname{Ber}(\tfrac12 - \epsilon)} =
+2\epsilon\ln\frac{1 + 2\epsilon}{1 - 2\epsilon} \le \frac{8\epsilon^2}{1 - 2\epsilon} \le 16\epsilon^2,
+$$
+
+   using $\ln(1 + u) \le u$ with $u = 4\epsilon/(1 - 2\epsilon)$, and $\epsilon \le 1/4$.
+3. **Inversion.** The larger of the two failure probabilities is at least $\tfrac14\exp(-16m\epsilon^2)$. Success with
+   confidence $1 - \delta$ under both distributions needs
+
+$$
+m \ge \frac{\ln(1/(4\delta))}{16\epsilon^2}.
+$$
+
+### The $d/\epsilon^2$ term
+
+The $d$ term uses $d$ such coins at once, one on each point of a shattered set, each with mass $1/d$. A sample of size
+$m$ puts about $m/d$ examples on each point. Each coin needs order $1/\epsilon^2$ examples to call correctly, and a
+learner that calls a constant fraction of the coins wrongly has excess risk of order $\epsilon$. Hence $m/d$ must be of
+order $1/\epsilon^2$. Anthony and Bartlett make this precise: for $\epsilon, \delta < 1/64$, every learner needs at
+least $d/(320\epsilon^2)$ examples <Cite id="anthony1999" />. Together the two terms give
+$\Omega((d + \ln(1/\delta))/\epsilon^2)$ <Cite id="shalevshwartz2014" />.
+
+The agnostic argument is a two-point and a multi-point testing lower bound, the same tools that bound minimax risks in
+statistics (<NoteLink to="minimax-lower-bounds">minimax lower bounds</NoteLink>).
+
+## Worked example
+
+Take linear classifiers on 10 features, so $d = 11$, with $\delta = 0.01$.
+
+**Realisable, $\epsilon = 0.01$.**
+
+1. The $d$ term: $(d - 1)/(16\epsilon) = 10/0.16 = 62.5$.
+2. The $\delta$ term: $(1 - \epsilon)\ln(1/\delta)/\epsilon = 99 \times 4.61 = 456$.
+3. Every learner needs at least 456 examples. Hanneke's upper bound is of the same order,
+   $O((d + \ln(1/\delta))/\epsilon)$, but its constant is not small enough to compare numbers
+   <Cite id="hanneke2016" />.
+
+**Agnostic, $\epsilon = 0.01$.**
+
+1. The $d$ term: $d/(320\epsilon^2) = 11/0.032 = 344$.
+2. The $\delta$ term: $\ln(1/(4\delta))/(16\epsilon^2) = \ln 25/0.0016 = 3.22/0.0016 = 2{,}012$.
+3. The VC upper bound of the <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> note,
+   $\sqrt{(d(\ln(2m/d) + 1) + \ln(4/\delta))/m}$, must be at most $\epsilon/2 = 0.005$ for <Gloss name="erm" /> to have
+   excess risk at most $\epsilon$. That needs $m = 6{,}855{,}411$ examples.
+
+The upper and lower bounds differ by a factor of about 3,400. The lower bound certifies the rate, $d/\epsilon^2$; it
+does not certify the constants. A tenfold smaller $\epsilon$ multiplies both bounds by about 100, and a tenfold larger
+$d$ multiplies both by about 10.
+
+{/* figure pending engine (A1 vcBound, vcLowerBound, sampleComplexity): the upper and lower sample complexities against
+ε on log–log axes, realisable and agnostic, with slopes −1 and −2 */}
+
+## Pitfalls
+
+- **Lower bounds are worst case over distributions.** The hard distributions are specific constructions. On a benign
+  distribution a learner can need far fewer examples, so a lower bound does not predict a learning curve.
+- **The constants are loose.** The constants $1/16$, $1/32$ and $1/320$ come from proofs, not from optimal
+  constructions. Numerical comparisons with upper bounds show the gap in constants as much as anything about learning.
+- **Randomisation and improper learners are covered.** The bounds apply to every algorithm, including randomised ones
+  and ones that return hypotheses outside $\Hcal$.
+- **The realisable log factor belongs to some learners.** The upper bound
+  $O((d\ln(1/\epsilon) + \ln(1/\delta))/\epsilon)$ for <NoteLink to="realisable-and-agnostic-learning">consistent
+  learners</NoteLink> has an extra $\ln(1/\epsilon)$ over the lower bound. Hanneke's learner, a majority vote of ERM
+  outputs on overlapping subsamples, removes it <Cite id="hanneke2016" />.

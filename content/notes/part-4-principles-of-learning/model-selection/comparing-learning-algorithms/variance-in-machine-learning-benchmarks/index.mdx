@@ -1,0 +1,143 @@
+---
+title: 'Variance in machine learning benchmarks'
+kind: concept
+summary: 'A benchmark score changes with the random seed, the train–test split, the initialisation, the data order and the hyperparameter search. A comparison of single runs mistakes this variance for progress; randomising every source over several runs measures it.'
+tags: [model-selection, evaluation, reproducibility, worked-example]
+aliases: [benchmark variance, seed variance, run-to-run variance, random seed variance, sources of variance in benchmarks]
+requires: [comparing-learning-algorithms, standard-error]
+related: [tuning-budgets-in-comparisons, variance-of-cross-validation-estimates, corrected-resampled-t-test, comparing-classifiers-over-multiple-datasets, test-set-reuse, metric-confidence-intervals]
+references: [dietterich1998, bouthillier2021, henderson2018, reimers2017, picard2021, melis2018, agarwal2021]
+status: draft
+updated: 2026-10-13
+---
+
+import { SourcesOfVariance } from './SourcesOfVariance'
+
+<Definition>
+The **variance of a benchmark score** is the spread of the score an algorithm obtains when the whole experiment is
+re-run with fresh random choices: the split of the data into training and <NoteLink to="test-sets">test sets</NoteLink>,
+the random seed of initialisation, the order in which the data are visited, data augmentation, dropout masks and the
+<NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>. A comparison between algorithms is informative
+only when the difference in their scores is large compared with this variance, and the variance can only be measured by
+re-running the experiment with those sources randomised <Cite id="bouthillier2021" />.
+</Definition>
+
+## Intuition
+
+A paper reports that a new method scores 85.0 against a baseline's 83.6. Both numbers come from one training run on
+one fixed split. Run the baseline again with another seed and it may score 85.2. The reported difference then measures
+which run was luckier, not which method is better.
+
+Dietterich named four sources of variation in a comparison of learning algorithms <Cite id="dietterich1998" />:
+
+1. the random choice of the test data;
+2. the random choice of the training data;
+3. internal randomness of the learning algorithm, such as initial weights;
+4. random labelling error, which bounds the error any algorithm can reach.
+
+A test that accounts for the second and third must run each algorithm several times. Deep learning adds more internal
+sources: data order, augmentation, dropout, non-deterministic <NoteLink to="floating-point-arithmetic">floating-point
+arithmetic</NoteLink> on <Gloss name="gpu" plural />, and the randomness of the hyperparameter search itself.
+
+## Sources and their sizes
+
+Bouthillier and colleagues measured each source on five tasks, from <Gloss name="cifar-10" />
+<NoteLink to="image-classification">image classification</NoteLink> to <Gloss name="bert" /> on <Gloss name="glue" />,
+randomising one source at a time over 200 runs <Cite id="bouthillier2021" />.
+
+- **Data sampling dominates.** Resampling the training and test data (by the bootstrap) gave the largest variance. Model
+  initialisation gave generally less than half of it, about as much as the order in which <Gloss name="sgd">stochastic
+  gradient descent</Gloss> visits the data.
+- **The test set alone explains much of it.** The spread due to data sampling matched a binomial model of a finite test
+  set: an accuracy measured on $n_\text{test}$ cases has standard deviation about $\sqrt{a(1 - a)/n_\text{test}}$ at
+  accuracy $a$. With $a = 0.9$ and $n_\text{test} = 1000$ that is 0.0095, nearly a point of accuracy.
+- **Hyperparameter search adds as much as initialisation.** Re-running <NoteLink to="random-search">random
+  search</NoteLink>, <NoteLink to="grid-search">grid search</NoteLink> or <NoteLink to="bayesian-optimisation">Bayesian
+  optimisation</NoteLink> with a new seed changed the final score about as much as changing the initialisation.
+- **The variance is as large as published gains.** The score variance on these benchmarks was of the same order as the
+  improvements between successive state-of-the-art results.
+
+Seeds alone already matter.
+
+- Henderson and colleagues split ten runs of the same <Gloss name="rl">reinforcement-learning</Gloss> algorithm, with
+  the same hyperparameters, into two groups of five seeds; a t-test between the groups' learning curves gave
+  $p = 0.0016$ <Cite id="henderson2018" />.
+- Reimers and Gurevych re-ran a published named-entity tagger with 86 seeds and got test
+  <NoteLink to="precision-recall-and-f-score">F1 scores</NoteLink> from 89.99 to 91.00; the score reported in its paper,
+  91.21, was above every one of them <Cite id="reimers2017" />.
+- Picard trained a <Gloss name="resnet" /> on CIFAR-10 with $10^4$ seeds: accuracy averaged 90.02 with standard
+  deviation 0.23, and the best and worst seeds differed by 1.82 points <Cite id="picard2021" />.
+
+A seed chosen as the best of many is an optimistic score, in the same way as the best of many hyperparameter settings
+(see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## Fixing a source is not the same as removing it
+
+Fixing a seed makes a run reproducible. It does not make the comparison fair. With the split fixed, every run measures
+the algorithm on that split, and the average over many seeds converges to a number specific to that split. The
+expected performance on new data differs from it by the split's luck, which no number of seeds reveals. Bouthillier and
+colleagues show that randomising only the initialisation, with everything else fixed, gives an average whose error stays
+at the level of very few independent runs however many seeds are added; randomising every source they could reach
+brought it much closer to an average of independent runs <Cite id="bouthillier2021" />. The same argument applies to
+<NoteLink to="repeated-and-monte-carlo-cross-validation">repeated cross-validation</NoteLink>: repetition removes
+partition noise, not the noise of the data.
+
+<SourcesOfVariance />
+
+In the figure's default setting, 450 rows and a forest of 15 trees, the standard deviation over 30 runs is 0.013 when
+only the seed changes, 0.024 when only the split changes, and 0.029 when both change. The binomial standard deviation of
+an accuracy near 0.84 on 150 test rows is 0.030: the test set's size alone accounts for nearly all of the spread. The
+seed-only runs cluster tightly around 0.825, below the forest's expected accuracy of 0.834, because they all share one
+split. Two honest runs of the same algorithm differ by 0.080 or more one time in twenty. With a single tree, the seed
+matters as much as the split.
+
+## What to report
+
+- **Randomise every source you can.** Draw a new split, a new seed and a new data order for each run, rather than
+  fixing all but one <Cite id="bouthillier2021" />.
+- **Use several splits.** Prefer multiple random splits, or <NoteLink to="cross-validation">cross-validation</NoteLink>,
+  to a single fixed test set.
+- **Run several times and report the spread.** Report the mean and standard deviation, or an interval, over runs. Deep
+  reinforcement learning papers commonly use 3 to 10 runs. Agarwal and colleagues recommend interval estimates from a
+  stratified bootstrap, the interquartile mean as a robust average, and the full distribution of scores
+  <Cite id="agarwal2021" />.
+- **Compare with a probability of improvement.** Bouthillier and
+  colleagues recommend the probability that A beats B on a random re-run, $P(A > B)$, with a confidence interval,
+  calling a difference meaningful when the interval's upper end passes 0.75. Detecting $P(A > B) = 0.75$ at
+  $\alpha = \beta = 0.05$ takes 29 runs of each algorithm <Cite id="bouthillier2021" />.
+- **Know the noise floor.** Melis, Dyer and Blunsom estimated the combined noise of seeds, non-deterministic arithmetic
+  and finite test sets in language modelling at about 0.4 perplexity on Penn Treebank, and took a gap of 1.0 as
+  statistically robust <Cite id="melis2018" />.
+- **Test with the right test.** On one data set, the <NoteLink to="corrected-resampled-t-test">corrected resampled
+  t-test</NoteLink> accounts for the overlap between resampled runs; across data sets, see
+  <NoteLink to="comparing-classifiers-over-multiple-datasets">comparing classifiers over multiple data sets</NoteLink>.
+
+## Worked example
+
+A new method scores 0.850 and a baseline 0.836 on one run each, on the figure's benchmark, where one honest run has
+standard deviation $s = 0.029$.
+
+1. **One run each.** The difference of two independent runs has standard deviation $s\sqrt2 = 0.041$. The gap of 0.014
+   is 0.34 of it. If the two methods were equally good, a gap at least this large in the new method's favour would occur
+   with probability about $P(Z > 0.34) = 0.37$. A single run supports no conclusion.
+2. **Ten runs each.** Averaging ten fully randomised runs of each divides the standard deviation of the difference by
+   $\sqrt{10}$, to 0.013. The same gap is now 1.1 standard deviations, still weak evidence.
+3. **The caveat.** Runs that resample one benchmark data set are not independent draws from the population, so 0.013
+   understates the uncertainty about new data, as in <NoteLink to="variance-of-cross-validation-estimates">variance of
+   cross-validation estimates</NoteLink>. A test that accounts for the overlap, such as the corrected resampled t-test,
+   is needed before claiming a difference.
+
+## Pitfalls
+
+- **Best-of-$k$ seeds.** Reporting the best seed of a new method against one seed of the baseline builds a gain from
+  noise.
+- **Fixing everything for reproducibility.** A fully seeded experiment reproduces one draw. It says nothing about the
+  spread.
+- **Variance after selection.** Hyperparameters chosen on the test set, or a checkpoint chosen by test score, make
+  every run optimistic, and averaging runs does not remove a shared bias (see
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink>).
+- **Unequal tuning.** A difference in tuning effort between methods is a systematic difference, not variance, and no
+  number of runs averages it away (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in
+  comparisons</NoteLink>).
+- **<NoteLink to="standard-error">Standard error of the mean</NoteLink> of runs as the uncertainty.** It measures the
+  noise of the runs on these data, not the uncertainty about the population.

@@ -1,0 +1,156 @@
+---
+title: 'Cross-validating a ridge penalty'
+kind: example
+summary: 'Choosing the ridge penalty for one regression problem by 10-fold cross-validation, leave-one-out through the hat matrix and generalised cross-validation: the three curves compared, their standard errors, and the minimum against the one-standard-error choice.'
+tags: [model-selection, worked-example, regularisation]
+aliases: [choosing a ridge penalty by cross-validation, ridge penalty selection example]
+requires: [k-fold-cross-validation, leave-one-out-cross-validation, ridge-regression]
+related: [generalised-cross-validation, one-standard-error-rule, effective-degrees-of-freedom, choosing-the-regularisation-strength, what-cross-validation-estimates, overfitting-in-model-selection]
+references: [hastie2009, breiman1984, craven1979]
+status: draft
+updated: 2026-10-13
+---
+
+import { RidgePenaltyCv } from './RidgePenaltyCv'
+
+<Definition>
+Draw $n = 50$ training rows with $d = 20$ inputs $\xvec \sim \Gauss(\boldsymbol 0, \eye_{20})$ and target
+$y = \xvec^\top\betavec + \varepsilon$, where $\beta_j = 2 \cdot 0.75^{j - 1}$ for $j = 1, \dots, 20$ and $\varepsilon
+\sim \Gauss(0, 2^2)$. Fit <NoteLink to="ridge-regression">ridge regression</NoteLink> with an unpenalised intercept at
+25 penalties $\lambda$ spaced evenly in $\log\lambda$ from 0.1 to 1000. Estimate the prediction error at each $\lambda$
+by 10-fold <NoteLink to="cross-validation">cross-validation</NoteLink>, by leave-one-out cross-validation and by
+generalised cross-validation, choose $\lambda$ by each, and apply the one-standard-error rule to the 10-fold curve.
+Compare every choice with the true error of the fitted model, measured on 20 000 fresh rows.
+</Definition>
+
+## Setup
+
+The ridge fit at penalty $\lambda$ minimises $\norm{\yvec - b\ones - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$ over the
+intercept $b$ and the coefficients $\wvec \in \reals^{20}$. Its fitted values are linear in $\yvec$,
+$\hat\yvec = \Smat_\lambda\yvec$, with the smoother matrix
+
+$$
+\Smat_\lambda = \frac1n\ones\ones^\top + \Xmat_c\paren{\Xmat_c^\top\Xmat_c + \lambda\eye}^{-1}\Xmat_c^\top,
+$$
+
+where $\Xmat_c$ is the design with each column centred. The first term fits the intercept; the second is the ridge fit
+to the centred data. Its trace is $1 + \operatorname{df}(\lambda)$, with
+$\operatorname{df}(\lambda) = \sum_j d_j^2/(d_j^2 + \lambda)$ from the singular values $d_j$ of $\Xmat_c$ (see
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>).
+
+The quantities asked for, all with squared-error loss:
+
+- $\operatorname{CV}_{10}(\lambda)$, the mean of the 10 fold errors $e_k(\lambda)$, and its
+  <NoteLink to="standard-error">standard error</NoteLink> $\operatorname{SE}(\lambda) = s(\lambda)/\sqrt{10}$, with
+  $s(\lambda)$ the standard deviation of the fold errors;
+- $\operatorname{LOO}(\lambda) = \frac1n\sum_i \paren{(y_i - \hat y_i)/(1 - S_{ii})}^2$, the leave-one-out error, which
+  for a linear smoother needs one fit (see <NoteLink to="leave-one-out-cross-validation">leave-one-out
+  cross-validation</NoteLink>);
+- $\operatorname{GCV}(\lambda) = n\norm{\yvec - \hat\yvec}^2/(n - \trace\Smat_\lambda)^2$, which replaces each
+  leverage $S_{ii}$ by the average $\trace\Smat_\lambda/n$ (see
+  <NoteLink to="generalised-cross-validation">generalised cross-validation</NoteLink>) <Cite id="craven1979" />;
+- the true conditional error $\operatorname{Err}_\Dcal(\lambda)$ of the ridge fit to all 50 rows.
+
+The minimisers are $\hat\lambda_\text{CV}$, $\hat\lambda_\text{LOO}$ and $\hat\lambda_\text{GCV}$. The
+<NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> picks $\hat\lambda_\text{1SE}$, the largest
+$\lambda$ with $\operatorname{CV}_{10}(\lambda) \le \operatorname{CV}_{10}(\hat\lambda_\text{CV}) +
+\operatorname{SE}(\hat\lambda_\text{CV})$ <Cite id="breiman1984" /> <Cite id="hastie2009" />. A larger $\lambda$ is a
+simpler model: fewer effective degrees of freedom.
+
+## Solution
+
+All numbers below are for the data set with seed 1 in the figure.
+
+**Step 1: the 10-fold curve.** Each fold fits on 45 rows and scores the other 5. Part of the curve:
+
+| $\lambda$ | $\operatorname{df}$ | $\operatorname{CV}_{10}$ | $\operatorname{SE}$ | $\operatorname{LOO}$ | $\operatorname{GCV}$ | $\operatorname{Err}_\Dcal$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.1 | 19.93 | 6.79 | 1.07 | 5.89 | 5.64 | 5.92 |
+| 1 | 19.31 | 6.47 | 1.02 | 5.68 | 5.43 | 5.76 |
+| 4.64 | 17.31 | 5.98 | 1.07 | 5.38 | 5.04 | 5.45 |
+| 6.81 | 16.37 | 5.93 | 1.14 | 5.39 | 5.00 | 5.40 |
+| 10 | 15.22 | 5.99 | 1.24 | 5.50 | 5.06 | 5.42 |
+| 21.5 | 12.36 | 6.49 | 1.49 | 6.14 | 5.62 | 5.89 |
+| 31.6 | 10.72 | 6.94 | 1.61 | 6.67 | 6.16 | 6.41 |
+| 46.4 | 9.04 | 7.49 | 1.72 | 7.30 | 6.83 | 7.11 |
+| 100 | 5.90 | 8.74 | 1.91 | 8.68 | 8.35 | 8.84 |
+| 1000 | 0.91 | 11.53 | 2.29 | 11.59 | 11.55 | 12.51 |
+
+The minimum is at $\hat\lambda_\text{CV} = 6.81$, with $\operatorname{CV}_{10} = 5.93$ and $\operatorname{SE} = 1.14$.
+
+**Step 2: leave-one-out.** Each leave-one-out fit uses 49 rows, so its models are closer to the 50-row model than the
+45-row models of 10-fold. The curve lies below the 10-fold curve by 0.9 at $\lambda = 0.1$ and by 0.5 near the minimum:
+the gap is largest where the fit has the most effective parameters and gains most from 4 extra rows. Refitting 50 times
+at each $\lambda$ and the closed form with $S_{ii}$ give the same numbers. The minimum is at
+$\hat\lambda_\text{LOO} = 4.64$, with $\operatorname{LOO} = 5.38$; at 6.81 it is 5.39, so the two penalties are nearly
+tied.
+
+**Step 3: generalised cross-validation.** At $\lambda = 6.81$ the residual sum of squares is 106.5 and
+$\trace\Smat_\lambda = 1 + 16.37 = 17.37$. Then
+
+$$
+\operatorname{GCV}(6.81) = \frac{50 \times 106.5}{(50 - 17.37)^2} = \frac{5325}{1064.7} = 5.00.
+$$
+
+GCV is minimised at $\hat\lambda_\text{GCV} = 6.81$. It sits below leave-one-out at every $\lambda$ here. The factor
+$1/(1 - S_{ii})^2$ is convex in the leverage, so applying it to the average leverage gives less than averaging it over
+the points, unless the large residuals sit at small leverages.
+
+**Step 4: the one-standard-error rule.** The threshold is $5.93 + 1.14 = 7.07$. The largest $\lambda$ with
+$\operatorname{CV}_{10} \le 7.07$ is $31.6$ ($\operatorname{CV}_{10} = 6.94$); the next, $46.4$, has 7.49. So
+$\hat\lambda_\text{1SE} = 31.6$, with $\operatorname{df} = 10.7$ against 16.4 at the minimum.
+
+**Step 5: against the truth.** The true error is smallest at $\lambda = 6.81$, where it is 5.40. The 10-fold and GCV
+choices hit it exactly; leave-one-out's choice, 4.64, costs 0.05. The one-standard-error choice has true error 6.41,
+about 19% worse. The rule bought a model with six fewer effective parameters at the price of a clearly larger error.
+
+**Step 6: the estimates themselves.** At its minimum, $\operatorname{CV}_{10} = 5.93$ overstates the true 5.40 by
+0.53, about half a standard error, and $\operatorname{GCV} = 5.00$ understates it by 0.40. The estimates scatter
+around the truth by amounts comparable to the standard error, and the minimum of a curve is biased low as an estimate
+of the chosen model's error (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+selection</NoteLink>).
+
+## Simulation
+
+<RidgePenaltyCv />
+
+Across 100 data sets drawn the same way (seeds 1 to 100), the average true error of each choice was:
+
+| Choice | Mean true error |
+| --- | --- |
+| best $\lambda$ on the grid (oracle) | 6.02 |
+| 10-fold minimum | 6.35 |
+| leave-one-out minimum | 6.33 |
+| GCV minimum | 6.32 |
+| one-standard-error rule | 7.18 |
+
+The three minimisers are almost interchangeable, each about 5% above the oracle. The one-standard-error rule was better
+than the 10-fold minimum on 22 of the 100 data sets and worse on average by 0.83.
+
+## What it illustrates
+
+- **Three estimators, one answer.** For a linear smoother, <NoteLink to="k-fold-cross-validation">$K$-fold
+  cross-validation</NoteLink>, leave-one-out and GCV are different estimates of the same curve, and their minimisers
+  agree to within a grid step or two. Leave-one-out and GCV cost one fit per $\lambda$; 10-fold costs ten.
+- **The bias of $K$-fold.** Fold models trained on $n(K - 1)/K$ rows predict worse than the final model, so the
+  10-fold curve lies above leave-one-out, most where the model is most flexible.
+- **Standard errors are wide.** One standard error, about 1.1, is larger than the whole variation of the curve between
+  $\lambda = 1$ and $\lambda = 21.5$. The data cannot locate the best penalty precisely, which is the motivation for
+  the one-standard-error rule. Even this standard error is too small; see
+  <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>.
+- **The one-standard-error rule is a preference, not a correction.** It buys a simpler model. When the truth has many
+  small coefficients, as here, the extra shrinkage costs accuracy. When simplicity has value of its own, or the minimum
+  is unstable across resamples, the trade can be worth it.
+- **The curve tracks expected, not conditional, error.** How close each estimate comes to this data set's true curve
+  changes from seed to seed; see <NoteLink to="what-cross-validation-estimates">what cross-validation
+  estimates</NoteLink>.
+
+## Variations
+
+- **More folds.** With $K = 20$ the same data give $\operatorname{CV}_{20}(0.1) = 5.95$ against leave-one-out's 5.89:
+  each fold model trains on 47.5 rows on average, and the curve moves most of the way to leave-one-out.
+- **More data.** With $n = 200$ (seed 1), the three curves agree to within 0.04 at small $\lambda$, the standard error
+  at the minimum falls to 0.40, and every minimiser lands within two grid steps of the true best penalty.
+- **Other <NoteLink to="regularisation">regularisation</NoteLink> selectors.** The evidence, the L-curve and the
+  discrepancy principle choose $\lambda$ without holding data out; see
+  <NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>.

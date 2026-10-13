@@ -1,147 +1,123 @@
 ---
 title: Regularisation
-kind: concept
-summary: 'Regularisation restricts a model to reduce variance at the cost of some bias, most often by adding a penalty $\lambda\Omega(\wvec)$ to the training loss. An $L^2$ penalty is MAP estimation under a Gaussian prior and an $L^1$ penalty under a Laplace prior; each penalty is equivalent to a norm constraint.'
-tags: [regularisation, overfitting, bayesian, linear-models, worked-example]
-aliases: [regularization, penalised likelihood, penalized regression, penalty term, structural risk minimisation]
-requires: [empirical-risk-minimisation, bayes-theorem]
-related: [lasso, elastic-net, smoothing-splines, bayesian-linear-regression, laplace-distribution, tree-pruning]
-references: [hastie2009, bishop2006, hoerl1970, tibshirani1996, bishop1995, vapnik1998]
+kind: overview
+summary: 'Regularisation trades bias for variance by restricting a fit: a penalty $\lambda\Omega(\wvec)$ or an equivalent constraint, shrinkage (ridge, James–Stein, Tikhonov), sparsity (lasso, SCAD, group lasso, subset selection), early stopping or noise. The strength $\lambda$ is chosen from data.'
+tags: [regularisation, overfitting, linear-models, model-selection]
+aliases: [regularization, penalised likelihood, penalized regression, penalty term]
+requires: [empirical-risk-minimisation, bias-variance-decomposition]
+related: [structural-risk-minimisation, implicit-regularisation, ridge-regression, lasso, elastic-net, smoothing-splines, bayesian-linear-regression, tree-pruning, cross-validation, information-criteria]
+references: [hastie2009, hastie2015sparsity, oneto2016, tibshirani1996, bishop2006, james1961, tikhonov1963, hastie2020best, ali2019, bishop1995, vapnik1998]
 status: draft
-updated: 2026-09-27
+updated: 2026-10-13
 ---
 
 <Definition>
 **Regularisation** is any change to a learning procedure that restricts the fitted model in order to reduce its
 variance, accepting some bias in exchange. The most common form adds a **penalty** $\Omega(\wvec) \ge 0$ on the
-parameters to the empirical risk,
+parameters $\wvec$ to the empirical risk,
 
 $$
 \hat\wvec_\lambda = \argmin_{\wvec}\ \sum_{i=1}^n \ell(f_{\wvec}(\xvec_i), y_i) + \lambda\,\Omega(\wvec),
 $$
 
-with a **regularisation strength** $\lambda \ge 0$. The $L^2$ penalty $\Omega = \norm{\wvec}_2^2$ gives
-<NoteLink to="ridge-regression">ridge regression</NoteLink> and <Gloss name="weight-decay">weight decay</Gloss>; the
-$L^1$ penalty $\Omega = \norm{\wvec}_1$ gives the <NoteLink to="lasso">lasso</NoteLink>.
+with a **regularisation strength** $\lambda \ge 0$. Other forms bound $\Omega(\wvec)$, stop an iterative fit early,
+perturb the training data or restrict the set of variables. The strength is a hyperparameter, chosen from data
+<Cite id="hastie2009" />.
 </Definition>
 
-## Why restrict a model
+## What it is for
 
 <NoteLink to="empirical-risk-minimisation">Empirical risk minimisation</NoteLink> over a rich class fits the training
-data closely, including its noise. The <NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>
-shows that the fitted function then changes a lot from one training set to the next. A penalty makes some solutions
-more expensive than others, usually those with large or many nonzero coefficients. The fit then moves towards a simple
-default, such as $\wvec = \zeros$, and moves less in response to the noise in any one sample. The strength $\lambda$
-sets the trade-off: $\lambda = 0$ is the unregularised fit, and $\lambda \to \infty$ returns the default whatever the
-data say.
+data closely, noise included, and the <NoteLink to="bias-variance-decomposition">bias–variance
+decomposition</NoteLink> shows the cost: the fitted function changes a lot from one training set to the next.
+Regularisation pulls the fit towards a simple default, such as $\wvec = \zeros$, so that it moves less in response to
+the noise of any one sample. At $\lambda = 0$ the fit is unregularised; as $\lambda \to \infty$ it returns the default
+whatever the data say.
 
-Vapnik's **structural risk minimisation** is the same idea stated for classes rather than penalties: order the
-hypothesis classes by complexity and minimise the empirical risk plus a bound on the estimation error of each class
-<Cite id="vapnik1998" />.
+For <NoteLink to="model-selection">model selection</NoteLink>, regularisation replaces a discrete choice among models by
+a continuous family indexed by $\lambda$. The rest of the chapter then chooses $\lambda$. The usual defaults are to
+standardise the features, leave the intercept unpenalised, and choose $\lambda$ on a logarithmic grid by
+cross-validation. Libraries scale the loss by $1$, $\frac1n$ or $\frac{1}{2n}$, so the same $\lambda$ means different
+amounts of regularisation in different software. Regularised coefficients are biased towards zero, so
+<NoteLink to="confidence-intervals">confidence intervals</NoteLink> computed as if the fit were unpenalised are wrong.
 
-## Penalties as priors
+## Main ideas
 
-Suppose $y_i = \wvec^\top\xvec_i + \varepsilon_i$ with independent $\varepsilon_i \sim \Gauss(0, \sigma^2)$, and give
-$\wvec$ a prior $p(\wvec)$. By <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink> the posterior is proportional to
-likelihood times prior, so the **<Gloss name="map-estimate">maximum a posteriori</Gloss>** (MAP) estimate minimises the
-negative log posterior:
+**Penalty, constraint and prior.** A penalty $\lambda\Omega(\wvec)$, a constraint $\Omega(\wvec) \le t$ and a constraint
+on the loss give the same solutions for convex problems, with $\lambda$, $t$ and the loss level linked through the data
+<Cite id="oneto2016" /> (<NoteLink to="penalised-and-constrained-regularisation">penalised and constrained
+regularisation</NoteLink>). The constraint form explains sparsity: the round $L^2$ ball is touched off the axes, while
+the corners of the $L^1$ ball sit on them. A penalty is also a negative log prior. <NoteLink to="ridge-regression">Ridge
+regression</NoteLink> is the posterior mode under a Gaussian prior, with $\lambda = \sigma^2/\tau^2$ for noise variance
+$\sigma^2$ and prior variance $\tau^2$, and the <NoteLink to="lasso">lasso</NoteLink> is the mode under a Laplace prior
+<Cite id="bishop2006" /> <Cite id="tibshirani1996" />. <NoteLink to="structural-risk-minimisation">Structural risk
+minimisation</NoteLink> states the same idea for nested hypothesis classes <Cite id="vapnik1998" />.
 
-$$
-\hat\wvec_{\text{MAP}} = \argmin_{\wvec}\ \frac{1}{2\sigma^2}\norm{\yvec - \Xmat\wvec}^2 - \log p(\wvec).
-$$
+**Shrinkage.** The <NoteLink to="james-stein-estimator">James–Stein estimator</NoteLink> shows that shrinking can beat
+the unbiased estimate everywhere. For $d \ge 3$ Gaussian means observed once each, multiplying the observations $\xvec$
+by $1 - (d - 2)\sigma^2/\norm{\xvec}^2$ lowers the expected total squared error for every value of the means
+<Cite id="james1961" />. <NoteLink to="tikhonov-regularisation">Tikhonov regularisation</NoteLink> solves ill-posed
+inverse problems by damping the component of singular value $s$ by the filter factor $s^2/(s^2 + \lambda)$
+<Cite id="tikhonov1963" />. With a design matrix and an identity penalty it is ridge regression; with a difference
+operator it penalises roughness. The <NoteLink to="effective-degrees-of-freedom">effective degrees of
+freedom</NoteLink>, $\trace\Smat$ for a linear smoother $\hat\yvec = \Smat\yvec$, measure how much freedom a given
+$\lambda$ leaves.
 
-The penalty is the negative log prior. Two priors give the two standard penalties.
+**Sparsity.** With orthonormal features and least-squares coefficient $z$, ridge returns $z/(1 + \lambda)$ and the lasso
+returns $\operatorname{sgn}(z)\max(\abs z - \lambda/2, 0)$, in the scaling of the definition above: ridge shrinks every
+coefficient, the lasso removes the small ones. <NoteLink to="sparsity-inducing-penalties">Sparsity-inducing
+penalties</NoteLink> compare these thresholding rules: $L^1$ is convex but shifts large coefficients towards zero, while
+$L^0$, bridge, SCAD and MCP leave them unbiased at the price of a non-convex objective.
+<NoteLink to="structured-sparsity-penalties">Structured sparsity penalties</NoteLink> remove whole groups (group lasso),
+make neighbours equal (fused lasso, total variation) or make a matrix low-rank (nuclear norm).
+<NoteLink to="best-subset-and-stepwise-selection">Best subset and stepwise selection</NoteLink> impose $L^0$ by search.
+Best subset beats the lasso at high <Gloss name="snr">signal-to-noise ratios</Gloss> and loses at low ones
+<Cite id="hastie2020best" />.
 
-- **Gaussian prior.** With independent $w_j \sim \Gauss(0, \tau^2)$, $-\log p(\wvec) = \norm{\wvec}^2/(2\tau^2)$ plus a
-  constant. Multiplying the objective by $2\sigma^2$ gives
-  $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_2^2$ with $\lambda = \sigma^2/\tau^2$. This is ridge regression.
-- **Laplace prior.** With independent $w_j$ of density $\frac{1}{2b}e^{-\abs{w_j}/b}$,
-  $-\log p(\wvec) = \norm{\wvec}_1/b$ plus a constant. Multiplying by $2\sigma^2$ gives
-  $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}_1$ with $\lambda = 2\sigma^2/b$. This is the lasso
-  <Cite id="tibshirani1996" />.
+**Paths and the choice of strength.** A <NoteLink to="regularisation-paths">regularisation path</NoteLink> computes the
+fit over a decreasing grid of $\lambda$, each fit warm-started from the last. The ridge path is smooth and the lasso
+path piecewise linear. <NoteLink to="choosing-the-regularisation-strength">Choosing the regularisation
+strength</NoteLink> compares the rules: $K$-fold cross-validation with or without the
+<NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink>, leave-one-out and <Gloss name="gcv" /> for
+linear smoothers, $C_p$ and <Gloss name="sure" /> when the noise variance is known, the evidence, and the L-curve and
+discrepancy principle for inverse problems. The smallest validation error along the path is optimistic for the $\lambda$
+that attains it, so assessing the tuned model needs data the choice never saw.
 
-A strong belief that coefficients are small (small $\tau$ or $b$) is a large $\lambda$. The
-<NoteLink to="laplace-distribution">Laplace distribution</NoteLink> puts more mass near zero and in the tails than a
-Gaussian of the same variance, which matches a belief that most coefficients are negligible and a few are large.
+**Regularisation without a penalty.** Stopping an iterative solver early regularises it: started at zero,
+<NoteLink to="gradient-descent">gradient descent</NoteLink> after $t$ steps is a spectral filter like ridge with
+$\lambda \approx 1/t$ (<NoteLink to="iterative-regularisation">iterative regularisation</NoteLink>). Gradient flow's
+risk is within a factor 1.69 of ridge's at the matching $\lambda$, for every design <Cite id="ali2019" />. Training on
+noisy inputs is exactly ridge regression for a linear model with squared error, and a penalty on the input gradient for
+a nonlinear one <Cite id="bishop1995" />; dropout acts as an adaptive $L^2$ penalty
+(<NoteLink to="noise-injection-as-regularisation">noise injection as regularisation</NoteLink>). Fewer features, smaller
+trees and fewer basis functions are structural restrictions of the same kind.
 
-The MAP estimate is a single point. A full Bayesian treatment averages over the posterior instead, as in
-<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>, and can also estimate $\lambda$ from
-the data.
+## How the notes fit together
 
-## Penalty and constraint forms
+- Start with <NoteLink to="penalised-and-constrained-regularisation">penalised and constrained
+  regularisation</NoteLink>, which sets out the forms, and
+  <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>, which measures their effect.
+- The <NoteLink to="james-stein-estimator">James–Stein estimator</NoteLink> and
+  <NoteLink to="tikhonov-regularisation">Tikhonov regularisation</NoteLink> cover shrinkage; the sparsity, structured
+  sparsity and subset-selection notes cover selection of variables.
+- <NoteLink to="regularisation-paths">Regularisation paths</NoteLink> come before
+  <NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>, which uses them.
+- <NoteLink to="iterative-regularisation">Iterative regularisation</NoteLink> and
+  <NoteLink to="noise-injection-as-regularisation">noise injection</NoteLink> come last and connect to neural-network
+  training.
 
-The penalised problem is equivalent to a constrained one:
+## Prerequisites and next steps
 
-$$
-\min_{\wvec}\ L(\wvec) \quad \text{subject to} \quad \Omega(\wvec) \le t.
-$$
-
-Let $L$ and $\Omega$ be convex and let $\hat\wvec$ solve the constrained problem. The
-<Gloss name="kkt">Karush–Kuhn–Tucker conditions</Gloss> give a multiplier $\lambda \ge 0$ with
-$\nabla L(\hat\wvec) + \lambda\nabla\Omega(\hat\wvec) = \zeros$ (with
-<NoteLink to="subgradients">subgradients</NoteLink> where $\Omega$ is not differentiable) and
-$\lambda(\Omega(\hat\wvec) - t) = 0$. The first condition says that $\hat\wvec$ is a stationary point, and hence by
-convexity a minimiser, of $L + \lambda\Omega$. Conversely, if $\hat\wvec_\lambda$ minimises $L + \lambda\Omega$, it also
-solves the constrained problem with $t = \Omega(\hat\wvec_\lambda)$: any $\wvec$ with $\Omega(\wvec) \le t$ and
-$L(\wvec) < L(\hat\wvec_\lambda)$ would give a smaller penalised objective. Each $\lambda$ therefore corresponds to a
-budget $t$, with larger $\lambda$ meaning smaller $t$. The correspondence depends on the data, so neither form is more
-general.
-
-The constraint form explains the geometry. The solution is where the smallest level set of $L$ touches the region
-$\Omega(\wvec) \le t$. The $L^2$ ball is round, so the contact point is generically off the axes and no coefficient is
-zero. The $L^1$ ball is a cross-polytope with corners on the axes, and the level sets of $L$ often touch it first at a
-corner, where some coefficients are exactly zero.
-
-## Worked example: orthonormal features
-
-With orthonormal features, $\Xmat^\top\Xmat = \eye$, both penalties act on each coefficient separately. Write
-$z_j = \xvec_{(j)}^\top\yvec$ for the least-squares coefficient of feature $j$, where $\xvec_{(j)}$ is the $j$-th
-column of $\Xmat$. Then $\norm{\yvec - \Xmat\wvec}^2 = \norm{\yvec}^2 - \norm{\zvec}^2 + \sum_j (w_j - z_j)^2$, so each
-coordinate solves a one-dimensional problem.
-
-- **Ridge**: minimising $(w - z)^2 + \lambda w^2$ gives $w = z/(1 + \lambda)$. Every coefficient shrinks by the same
-  factor and none reaches zero.
-- **Lasso**: minimising $(w - z)^2 + \lambda\abs{w}$ gives $w = \sgn(z)\max(\abs{z} - \lambda/2, 0)$, the
-  **soft-thresholding** rule. For $w > 0$ the <NoteLink to="derivative">derivative</NoteLink> $2(w - z) + \lambda$
-  vanishes at $w = z - \lambda/2$, which is positive only when $z > \lambda/2$. Otherwise the minimum is at the kink
-  $w = 0$.
-
-Take $\zvec = (3, 0.4)$ and $\lambda = 1$. Ridge gives $(1.5, 0.2)$: both coefficients halve. The lasso gives
-$(2.5, 0)$: the large coefficient moves by the fixed amount $0.5$ and the small one is removed.
-
-## Other regularisers
-
-Penalties on the parameters are one mechanism among several. Each of these reduces variance by restricting what the
-training procedure can reach:
-
-- **Combined penalties**: the <NoteLink to="elastic-net">elastic net</NoteLink> mixes $L^1$ and $L^2$; roughness
-  penalties on a curve give <NoteLink to="smoothing-splines">smoothing splines</NoteLink>.
-- **Early stopping**: halting <NoteLink to="gradient-descent">gradient descent</NoteLink> before convergence limits how
-  far the weights move from their initialisation, which for least squares behaves like a ridge penalty that weakens with
-  the number of steps. See <NoteLink to="early-stopping">early stopping</NoteLink>.
-- **Noise and augmentation**: training on perturbed inputs is equivalent, for small noise, to a Tikhonov penalty on the
-  model's derivatives <Cite id="bishop1995" />. See <NoteLink to="data-augmentation">data augmentation</NoteLink> and
-  <NoteLink to="dropout">dropout</NoteLink>.
-- **Weight decay in adaptive optimisers**: with Adam, an $L^2$ penalty in the loss and a direct decay of the weights
-  are not the same. See <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>.
-- **Structural limits**: fewer features (see <NoteLink to="feature-selection">feature selection</NoteLink>),
-  smaller trees (see <NoteLink to="tree-pruning">tree pruning</NoteLink>) or fewer basis functions.
-
-## Choosing the strength
-
-$\lambda$ is a hyperparameter. It is usually chosen by <NoteLink to="cross-validation">cross-validation</NoteLink> over
-a logarithmic grid. For linear smoothers, the <NoteLink to="effective-degrees-of-freedom">effective degrees of
-freedom</NoteLink> put different penalties on a common scale and allow criteria such as Mallows' $C_p$ and
-<NoteLink to="information-criteria">AIC</NoteLink>. Bayesian models can estimate it by maximising the
-<NoteLink to="law-of-total-probability">marginal likelihood</NoteLink>.
-
-## Pitfalls
-
-- **Standardise first.** A penalty on $\norm{\wvec}$ treats all coefficients alike, so its effect depends on the units
-  of each feature. See <NoteLink to="feature-scaling">feature scaling</NoteLink>.
-- **Leave the intercept unpenalised.** Shrinking the intercept makes the fit depend on the origin of $y$. Centre the
-  data or exclude the intercept from $\Omega$.
-- **Regularised coefficients are biased.** They are shrunk towards zero, so they understate true effects.
-  <NoteLink to="confidence-intervals">Confidence intervals</NoteLink> computed as if the fit were unpenalised are wrong.
-- **Conventions differ by a factor of $n$.** Some libraries scale the loss by $\frac{1}{n}$ or $\frac{1}{2n}$ and some
-  do not, so the same $\lambda$ means different amounts of regularisation in different software.
+The notes assume <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink>, the
+<NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink> and least squares. The estimators
+themselves are in Part V: <NoteLink to="ridge-regression">ridge regression</NoteLink>, the
+<NoteLink to="lasso">lasso</NoteLink>, the <NoteLink to="elastic-net">elastic net</NoteLink>,
+<NoteLink to="smoothing-splines">smoothing splines</NoteLink> and <NoteLink to="bayesian-linear-regression">Bayesian
+linear regression</NoteLink>, which keeps the whole posterior instead of its mode <Cite id="hastie2015sparsity" />.
+Training practice for neural networks is in Part VI: <NoteLink to="early-stopping">early stopping</NoteLink>,
+<NoteLink to="dropout">dropout</NoteLink>, <NoteLink to="data-augmentation">data augmentation</NoteLink> and
+<NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>.
+<NoteLink to="statistical-learning-theory">Learning theory</NoteLink> explains why regularised fits generalise, in
+<NoteLink to="stability-of-regularised-empirical-risk-minimisation">stability of regularised empirical risk
+minimisation</NoteLink> and <NoteLink to="implicit-regularisation">implicit regularisation</NoteLink>, and
+<NoteLink to="tree-pruning">tree pruning</NoteLink> regularises trees by cost-complexity.

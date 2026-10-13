@@ -1,0 +1,293 @@
+---
+title: 'Choosing the regularisation strength'
+kind: technique
+summary: 'The penalty $\lambda$ can be chosen by cross-validation (with or without the one-standard-error rule), generalised cross-validation, Mallows'' $C_p$, the marginal likelihood, the corner of the L-curve, or the discrepancy principle. They target different errors and need different knowledge.'
+tags: [model-selection, regularisation, linear-models, worked-example]
+aliases: [choosing lambda, regularisation parameter selection, L-curve, L-curve criterion, discrepancy principle, Morozov discrepancy principle]
+requires: [regularisation-paths, k-fold-cross-validation, generalised-cross-validation, effective-degrees-of-freedom]
+related: [one-standard-error-rule, cross-validating-a-ridge-penalty, validation-curves, empirical-bayes-for-hyperparameters, tikhonov-regularisation, mallows-cp-and-covariance-penalties, steins-unbiased-risk-estimate, iterative-regularisation, overfitting-in-model-selection, marginal-likelihood-and-bayesian-occams-razor]
+references: [hastie2009, golub1979, mackay1992, bishop2006, hansen1992, hansen1993, vogel1996, morozov1966, engl1996, hansen1998, mallows1973, breiman1984]
+status: draft
+updated: 2026-10-13
+---
+
+import { SelectorsCompared } from './SelectorsCompared'
+
+<Definition>
+For ridge or <NoteLink to="tikhonov-regularisation">Tikhonov regularisation</NoteLink>,
+$\hat\wvec_\lambda = \argmin_\wvec \norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$ with $n$ observations and $p$
+coefficients, a **rule for the regularisation strength** maps the data to one value $\hat\lambda$. Six rules are in
+common use:
+
+- **<NoteLink to="cross-validation">Cross-validation</NoteLink>** minimises a held-out estimate of prediction error,
+  optionally moved to a larger $\lambda$ by the one-standard-error rule.
+- **Generalised cross-validation** (GCV) minimises a closed-form approximation to leave-one-out.
+- **Mallows' $C_p$**, or Stein's unbiased risk estimate, minimises an unbiased estimate of
+  <NoteLink to="optimism-of-the-training-error">in-sample prediction error</NoteLink>.
+- **The evidence** maximises the <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal
+  likelihood</NoteLink> of a Gaussian prior on $\wvec$.
+- **The L-curve** picks the corner of the curve of $\log\norm{\hat\wvec_\lambda}$ against
+  $\log\norm{\yvec - \Xmat\hat\wvec_\lambda}$.
+- **The discrepancy principle** picks the $\lambda$ at which the residual is as large as the noise.
+</Definition>
+
+## Problem
+
+Every regulariser has a strength: the ridge $\lambda$, the lasso's $\lambda$, a smoothing parameter, a number of
+training steps. Too little leaves the noise in the fit; too much removes the signal. The best value depends on the noise
+level and on how large the true coefficients are, neither of which is known.
+
+The rules differ in three ways, and the differences decide which one fits a problem.
+
+1. **What they target.** Cross-validation, GCV and $C_p$ estimate **prediction error**, the error on new targets. The
+   L-curve and the discrepancy principle come from inverse problems, where the target is the **solution error**
+   $\norm{\hat\wvec_\lambda - \wvec^\star}$, the distance from the true coefficients $\wvec^\star$. The evidence is the
+   probability of the data under a prior, which is a good target when the prior describes $\wvec^\star$.
+2. **What they need.** Cross-validation needs data held out and refits. $C_p$ and the discrepancy principle need the
+   noise variance $\sigma^2$. The evidence needs a prior. GCV and the L-curve need nothing but the fit.
+3. **What they cost.** GCV, $C_p$, the evidence, the L-curve and the discrepancy principle all read off one
+   <Gloss name="svd">singular value decomposition</Gloss> of $\Xmat$. $K$-fold cross-validation needs $K$ fits per
+   $\lambda$.
+
+All six are **selection** rules in the sense of <NoteLink to="model-selection">model selection</NoteLink>. Each one
+reuses the data that fit the model, so the value of its criterion at $\hat\lambda$ is an optimistic estimate of the
+chosen model's error (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+Assessing the chosen model needs data the rule never saw.
+
+## Methods
+
+Throughout, write the singular value decomposition $\Xmat = \Umat\Dmat\Vmat^\top$ with singular values
+$d_1 \ge \dots \ge d_p$, and $z_j = \uvec_j^\top\yvec$ for the data's coordinate along the $j$-th left singular vector.
+The ridge fit keeps the fraction $\phi_j = d_j^2/(d_j^2 + \lambda)$ of each coordinate, the **filter factor**. Its
+residual sum of squares, degrees of freedom and coefficient norm are
+
+$$
+\operatorname{RSS}(\lambda) = \sum_j (1 - \phi_j)^2 z_j^2 + \norm{\rvec_\perp}^2,
+\qquad
+\operatorname{df}(\lambda) = \sum_j \phi_j,
+\qquad
+\norm{\hat\wvec_\lambda}^2 = \sum_j \paren{\frac{\phi_j z_j}{d_j}}^2,
+$$
+
+where $\rvec_\perp$ is the part of $\yvec$ outside the column space of $\Xmat$. Every criterion below except $K$-fold
+cross-validation is a function of these three numbers.
+
+**Cross-validation and the one-standard-error rule.** <NoteLink to="k-fold-cross-validation">$K$-fold
+cross-validation</NoteLink> fits on $K - 1$ folds, scores the held-out fold, and averages. It needs no model of the
+noise and works for any loss and any learner, which makes it the default. The
+<NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> takes the largest $\lambda$ whose error is
+within one <NoteLink to="standard-error">standard error</NoteLink> of the minimum <Cite id="breiman1984" />. It prefers
+a simpler model that the folds cannot distinguish from the best, and it pays for that in prediction error when the truth
+has many small effects. The <NoteLink to="cross-validating-a-ridge-penalty">ridge example</NoteLink> works both through
+on one data set.
+
+**Leave-one-out and GCV.** For a linear smoother, leave-one-out needs one fit per $\lambda$, through the shortcut
+$(y_i - \hat y_i)/(1 - S_{ii})$. <NoteLink to="generalised-cross-validation">Generalised cross-validation</NoteLink>
+replaces every leverage $S_{ii}$ by the mean $\operatorname{df}/n$,
+$\operatorname{GCV}(\lambda) = n\operatorname{RSS}(\lambda)/(n - \operatorname{df}(\lambda))^2$
+<Cite id="golub1979" />.
+
+**$C_p$ and SURE.** With the noise variance $\sigma^2$ known, Mallows' $C_p$,
+$\operatorname{RSS}(\lambda)/n + 2\sigma^2\operatorname{df}(\lambda)/n$, is an unbiased estimate of the in-sample
+prediction error <Cite id="mallows1973" />. For ridge it coincides with
+<NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink>. GCV is $C_p$ with
+$\sigma^2$ estimated by $\operatorname{RSS}/n$, to first order in $\operatorname{df}/n$.
+
+**The evidence.** Treat the penalty as a prior, $\wvec \sim \Gauss(\zeros, \alpha^{-1}\eye)$, with Gaussian noise of
+precision $\beta = 1/\sigma^2$. The posterior mean is the ridge fit with $\lambda = \alpha/\beta$ (see
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>). The marginal likelihood
+$p(\yvec \mid \alpha, \beta)$ integrates the coefficients out. In the singular coordinates each $z_j$ is Gaussian with
+variance $\sigma^2 + d_j^2/\alpha$ and each coordinate of $\rvec_\perp$ has variance $\sigma^2$, so
+
+$$
+\ln p(\yvec \mid \alpha, \beta) = -\frac12\sum_{j=1}^p \brack{\ln\paren{2\pi(\sigma^2 + d_j^2/\alpha)}
++ \frac{z_j^2}{\sigma^2 + d_j^2/\alpha}} - \frac{n - p}{2}\ln(2\pi\sigma^2) - \frac{\norm{\rvec_\perp}^2}{2\sigma^2}.
+$$
+
+Maximising it over $\alpha$, and over $\beta$ too when $\sigma^2$ is unknown, is
+<NoteLink to="empirical-bayes-for-hyperparameters">empirical Bayes</NoteLink>. MacKay's fixed-point updates do it in a
+few iterations: $\gamma = \sum_j \beta d_j^2/(\alpha + \beta d_j^2)$, $\alpha \leftarrow \gamma/\norm{\mvec}^2$ and
+$\beta \leftarrow (n - \gamma)/\operatorname{RSS}$, with $\mvec$ the posterior mean <Cite id="mackay1992" />
+<Cite id="bishop2006" />. The evidence chooses the prior that makes the data most probable. It is the best rule when the
+coefficients look like draws from that prior and can be poor when they do not.
+
+## The L-curve
+
+The L-curve plots, for every $\lambda$, the point
+
+$$
+\paren{\log\norm{\yvec - \Xmat\hat\wvec_\lambda},\ \log\norm{\hat\wvec_\lambda}}.
+$$
+
+On a problem whose singular values decay, the curve has the shape of an L <Cite id="hansen1992" />.
+
+- **The vertical arm (small $\lambda$).** The filter keeps the small singular values, and the noise in their
+  coordinates is divided by $d_j$. The coefficient norm grows without bound while the residual barely falls, because the
+  fit is already as close to the data as the noise allows.
+- **The horizontal arm (large $\lambda$).** The filter removes signal. The residual grows while the coefficient norm
+  shrinks slowly.
+- **The corner** is where neither norm can fall without the other rising sharply. Hansen and O'Leary define it as the
+  point of maximum curvature of the log-log curve <Cite id="hansen1993" />. With $\hat\rho(\lambda)$ and
+  $\hat\eta(\lambda)$ the two logarithms and primes for derivatives in $\lambda$, the curvature is
+
+  $$
+  \kappa(\lambda) = \frac{\hat\rho'\hat\eta'' - \hat\rho''\hat\eta'}{\paren{(\hat\rho')^2 + (\hat\eta')^2}^{3/2}},
+  $$
+
+  the curvature of any parametrised plane curve. Hansen derived a closed form for Tikhonov regularisation that needs
+  only $\norm{\yvec - \Xmat\hat\wvec_\lambda}$, $\norm{\hat\wvec_\lambda}$ and the derivative of the latter, all from
+  the singular value decomposition <Cite id="hansen1998" />.
+
+The L-curve needs no noise variance and no held-out data. It was designed for discrete ill-posed problems, whose
+singular values decay steadily to the level of the noise. Where the singular values are all of similar size, there is no
+sharp corner, and the maximum curvature can sit anywhere, including the end of the grid. Vogel showed that the L-curve
+choice need not converge as the discretisation is refined: it can stay almost constant while the optimal $\lambda$
+falls, and so over-regularise <Cite id="vogel1996" />.
+
+## The discrepancy principle
+
+Morozov's discrepancy principle chooses the $\lambda$ at which the residual equals the size of the noise
+<Cite id="morozov1966" />:
+
+$$
+\norm{\yvec - \Xmat\hat\wvec_\lambda} = \tau\delta,
+$$
+
+with $\delta$ the norm of the noise vector, $\delta^2 \approx n\sigma^2$, and a safety factor $\tau \ge 1$. The residual
+grows monotonically with $\lambda$, from the least-squares residual at $\lambda = 0$ to $\norm{\yvec}$, so the equation
+has exactly one root when $\tau\delta$ lies between them. The rule reflects a simple principle: a fit should not explain
+the data more closely than the noise allows.
+
+**Why it over-regularises for prediction.** Write $\fvec = \Xmat\wvec^\star$ for the noise-free targets and
+$\Smat_\lambda$ for the ridge smoother, so $\hat\yvec = \Smat_\lambda\yvec$. The expected residual sum of squares is
+
+$$
+\expect\operatorname{RSS}(\lambda) = \norm{(\eye - \Smat_\lambda)\fvec}^2 + \sigma^2\paren{n - 2\trace\Smat_\lambda
++ \trace\Smat_\lambda^2}.
+$$
+
+The first term is the squared bias. The second comes from the noise: $\expect\norm{(\eye - \Smat)\varepsilonvec}^2 =
+\sigma^2\trace(\eye - \Smat)^2$, expanded. The eigenvalues of $\Smat_\lambda$ lie in $[0, 1]$, so
+$\trace\Smat_\lambda^2 \le \trace\Smat_\lambda$, and the noise term is at most $\sigma^2(n - \operatorname{df})$.
+Setting $\expect\operatorname{RSS} = n\sigma^2$ therefore requires
+
+$$
+\text{squared bias} = \sigma^2\paren{2\operatorname{df} - \trace\Smat_\lambda^2} \ge \sigma^2\operatorname{df}.
+$$
+
+The squared bias must be at least $\sigma^2$ per effective parameter. The prediction-optimal $\lambda$ balances bias
+against variance and typically has less bias than that, so the discrepancy principle chooses a larger $\lambda$. Its
+classical justification is different: as the noise level $\delta$ tends to zero, the discrepancy choice makes the
+solution error tend to zero, at the optimal rate when the true solution is moderately smooth <Cite id="engl1996" />.
+Replacing the target $n\sigma^2$ by $(n - \operatorname{df})\sigma^2$ removes most of the excess bias.
+
+## Worked example
+
+Take $n = 20$ observations and $p = 4$ coefficients, with singular values $\dvec = (4, 2, 0.5, 0.1)$ and true
+coefficients $\wvec^\star = (1, 1, 1, 1)$ in the right singular basis. The noise-free coordinates are
+$\theta_j = d_j w^\star_j = (4, 2, 0.5, 0.1)$. The noise has $\sigma = 0.5$; take its realisation along the four
+directions to be $(0.3, -0.4, 0.6, -0.5)$, so $\zvec = (4.3, 1.6, 1.1, -0.4)$, and its squared length in the other 16
+directions to be $\norm{\rvec_\perp}^2 = 3.6$. Every quantity follows from the formulas of the Methods section.
+
+| $\lambda$ | 0.01 | 0.03 | 0.1 | 0.3 | 1 | 3 |
+| --- | --- | --- | --- | --- | --- | --- |
+| $\operatorname{df}$ | 3.46 | 3.13 | 2.77 | 2.40 | 1.95 | 1.49 |
+| $\operatorname{RSS}$ | 3.642 | 3.704 | 3.833 | 4.129 | 4.698 | 5.721 |
+| $\operatorname{GCV}$ | 0.2662 | 0.2604 | **0.2584** | 0.2665 | 0.2884 | 0.3341 |
+| $C_p$ | 0.2686 | 0.2635 | **0.2610** | 0.2664 | 0.2837 | 0.3234 |
+| $\ln p(\yvec)$ | −20.67 | −19.17 | −18.12 | **−18.03** | −19.51 | −23.69 |
+| $\norm{\hat\wvec_\lambda}$ | 3.20 | 2.58 | 2.09 | 1.64 | 1.28 | 1.03 |
+| true risk | 0.0397 | 0.0360 | 0.0323 | **0.0309** | 0.0388 | 0.0808 |
+
+The true risk is the expected in-sample error of the fit, $\frac1n\expect\norm{\Smat_\lambda\yvec - \fvec}^2 =
+\frac1n\sum_j\brack{(1 - \phi_j)^2\theta_j^2 + \sigma^2\phi_j^2}$. GCV and $C_p$ estimate the prediction error
+$\sigma^2 + $ risk, so their values sit near $0.25 + 0.03$.
+
+Minimised over a fine grid, the rules choose:
+
+| Rule | $\hat\lambda$ | true risk | solution error $\norm{\hat\wvec - \wvec^\star}$ |
+| --- | --- | --- | --- |
+| best for risk | 0.25 | 0.0308 | 1.19 |
+| GCV | 0.078 | 0.0330 | 1.62 |
+| $C_p$ ($\sigma$ known) | 0.091 | 0.0326 | 1.54 |
+| evidence ($\sigma$ known) | 0.195 | 0.0309 | 1.24 |
+| L-curve corner | 1.31 | 0.0442 | 1.28 |
+| discrepancy, $\tau = 1$ | 1.55 | 0.0487 | 1.31 |
+| best for solution error | 0.41 | 0.0315 | 1.14 |
+
+1. **GCV and $C_p$** follow the data's realised error. This noise draw makes the fit look slightly better at small
+   $\lambda$ than it is in expectation, and both rules undersmooth by a factor of about 3. Their risk is 7% above the
+   best.
+2. **The evidence** lands close to the best, because the true coefficients have the size the fitted prior assigns
+   them.
+3. **The discrepancy principle** needs $\operatorname{RSS} = n\sigma^2 = 5$, which happens at $\lambda = 1.55$. At the
+   risk-optimal $\lambda = 0.25$ the expected residual sum of squares is only 4.38, with a squared bias of 0.09. At
+   $\lambda = 1.55$ the squared bias is 0.63, seven times more, as the derivation predicts. Its risk is 58%
+   above the best. With the target $(n - \operatorname{df})\sigma^2$ instead it chooses $\lambda = 0.66$, with risk
+   0.034.
+4. **The L-curve** also lands near $\lambda = 1.3$. Its corner sits where $\norm{\hat\wvec_\lambda}$ stops falling
+   quickly, once the two weakest directions, $d_3 = 0.5$ and $d_4 = 0.1$, are mostly filtered out.
+5. **Solution error** is minimised at a larger $\lambda$, 0.41, than risk. Estimating $\wvec^\star$ penalises the noise
+   amplified by $1/d_j$ in weak directions more than prediction does, so the inverse-problem rules' preference for more
+   regularisation is less costly for that target.
+
+## Simulation
+
+<SelectorsCompared />
+
+The figure's problem has $n = 50$ rows of $p = 20$ standard-normal predictors, each correlated 0.9 with its neighbour,
+noise $\sigma = 1$, and either smooth coefficients $w^\star_j = \sin(\pi j/21)$ or coefficients drawn from
+$\Gauss(0, 1)$. Over 100 data sets, the mean prediction error (the noise floor is 1) and mean squared solution error of
+each rule's choice were:
+
+| Rule | smooth: prediction | smooth: solution | random: prediction | random: solution |
+| --- | --- | --- | --- | --- |
+| best $\lambda$ for prediction | 1.170 | 0.51 | 1.452 | 3.66 |
+| 10-fold CV | 1.196 | 0.64 | 1.520 | 4.29 |
+| one-standard-error rule | 1.311 | 0.27 | 1.771 | 6.20 |
+| leave-one-out | 1.196 | 0.62 | 1.520 | 4.31 |
+| GCV | 1.195 | 0.61 | 1.517 | 4.25 |
+| evidence ($\alpha$ and $\beta$ fitted) | 1.346 | 2.34 | 1.508 | 4.17 |
+| L-curve corner | 1.272 | 1.52 | 1.666 | 6.00 |
+| discrepancy ($\sigma$ known) | 1.337 | 0.40 | 1.726 | 6.00 |
+
+- **The cross-validation family is robust.** 10-fold, leave-one-out and GCV agree with each other to within 0.003
+  and lose about 15% of the excess error of the best $\lambda$ in both settings.
+- **The evidence depends on its prior.** With coefficients drawn from a Gaussian it is the best rule. With smooth
+  coefficients it chooses $\lambda$ about seven times too small and doubles the excess error.
+- **The one-standard-error rule and the discrepancy principle** both regularise more than prediction needs. With smooth
+  coefficients that buys the smallest solution errors of all the rules; with random ones it costs on both counts.
+- **The L-curve** is erratic on a well-conditioned problem. With random coefficients its maximum curvature sits at the
+  end of the grid in at least half the data sets.
+
+## Trade-offs
+
+| Rule | Needs | Targets | Cost per $\lambda$ |
+| --- | --- | --- | --- |
+| $K$-fold CV | refits | prediction error | $K$ fits |
+| one-standard-error | refits | a simpler model near the best | $K$ fits |
+| <Gloss name="loo" />, GCV | a linear smoother | prediction error | one fit and the leverages or the trace |
+| $C_p$, SURE | $\sigma^2$ | in-sample prediction error | one fit and the trace |
+| evidence | a prior | marginal likelihood | one fit and a determinant |
+| L-curve | decaying singular values | a balance of the two norms | one fit |
+| discrepancy | $\sigma^2$ | solution error as $\sigma \to 0$ | one fit |
+
+Practice follows the table. For prediction, use $K$-fold cross-validation, or GCV or leave-one-out when the model is a
+linear smoother and refitting is expensive. Use the evidence for Bayesian models whose prior is believed, and when
+several hyperparameters must be tuned at once, since its gradient is available. Use the L-curve and the discrepancy
+principle for inverse problems, where the coefficients themselves are the object of interest and the noise level is
+known from the instrument.
+
+## Pitfalls
+
+- **Reporting the criterion's minimum.** The minimum of a cross-validation or GCV curve is optimistic about the chosen
+  model. Assess it on held-out data or with <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>.
+- **An underestimated noise level.** The discrepancy principle and $C_p$ take $\sigma^2$ as given. Estimating it from
+  the residuals of a flexible fit makes it too small, and the discrepancy principle then undersmooths.
+- **The edge of the grid.** A rule whose choice sits at the end of the grid has not found an interior optimum. Extend
+  the grid; for the L-curve, check that a corner exists by plotting the curve.
+- **Correlated noise.** Every rule here assumes independent errors. Positively correlated noise looks like signal, and
+  cross-validation, GCV and the discrepancy principle then choose too small a $\lambda$.
+- **Different scalings.** A $\lambda$ chosen for $\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$ is a different
+  number for $\frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2 + \alpha\norm{\wvec}^2$. Convert before transferring a value
+  between software.

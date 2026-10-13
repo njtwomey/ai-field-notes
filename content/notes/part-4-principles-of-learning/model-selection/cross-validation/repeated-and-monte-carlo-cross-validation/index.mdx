@@ -1,0 +1,148 @@
+---
+title: 'Repeated and Monte Carlo cross-validation'
+kind: technique
+summary: 'Repeated $K$-fold cross-validation reruns $K$-fold with fresh random folds and averages; Monte Carlo cross-validation averages many random train–test splits; leave-$p$-out uses every split. Repetition removes the variance due to the partition, not the variance due to the data.'
+tags: [model-selection, evaluation, resampling, worked-example]
+aliases: [repeated cross-validation, repeated k-fold cross-validation, Monte Carlo cross-validation, MCCV, shuffle-split, repeated random subsampling, repeated learning-testing, repeated hold-out, leave-p-out cross-validation, leave-p-out]
+requires: [k-fold-cross-validation]
+related: [variance-of-cross-validation-estimates, what-cross-validation-estimates, bootstrap-estimates-of-prediction-error, corrected-resampled-t-test, five-by-two-cross-validation-test, consistency-and-efficiency-of-selection-criteria]
+references: [kohavi1995, burman1989, zhang1993, xu2001, shao1993, arlot2010, vanwinckelen2012, bengio2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { RepeatAverages } from './RepeatAverages'
+
+<Definition>
+**Repeated $K$-fold cross-validation** draws $R$ independent random partitions of the data into $K$ folds, computes the
+<NoteLink to="k-fold-cross-validation">$K$-fold estimate</NoteLink> $\operatorname{CV}_K^{(r)}$ for each, and reports
+their average $\overline{\operatorname{CV}}_R = \frac1R\sum_{r=1}^R \operatorname{CV}_K^{(r)}$. **Monte Carlo
+cross-validation** draws $B$ independent random splits, each holding out $n_v$ points and training on the rest, and
+averages the $B$ hold-out estimates <Cite id="xu2001" />; it is also called repeated learning–testing, shuffle-split or
+repeated random subsampling <Cite id="burman1989" />. **Leave-$p$-out** cross-validation averages over all
+$\binom{n}{p}$ ways of holding out $p$ points.
+</Definition>
+
+## Problem
+
+A $K$-fold estimate depends on which points land in which fold. Run it twice with different random partitions and the
+two numbers differ, although the data and the model are the same. When the difference between two candidates is
+smaller than this partition noise, one run cannot tell them apart.
+
+The estimate has two sources of randomness. The **data** $\Dcal$ are one random sample, and the **partition** is a
+second random draw made by the analyst. Repetition averages over the second. It cannot touch the first.
+
+## Mechanism
+
+- **Repeated $K$-fold.** Shuffle with a new seed, cut into $K$ folds, cross-validate, and repeat $R$ times. Every
+  point is tested exactly $R$ times, once per repeat. Common settings are 10 repeats of 10-fold or 5 repeats of
+  5-fold. Scikit-learn's `RepeatedKFold` and `RepeatedStratifiedKFold` implement it.
+- **Monte Carlo.** For $b = 1, \dots, B$, draw a random subset of $n_v$ points, fit on the other $n - n_v$, and score
+  on the subset. The training size and the number of splits are chosen independently, unlike in $K$-fold where
+  $n_v = n/K$ fixes both. A point is tested a random number of times; with $n_v/n = 0.1$ and $B = 10$ splits, a point is
+  never tested with probability $0.9^{10} = 0.35$, and with $B = 50$ with probability $0.005$. Scikit-learn's
+  `ShuffleSplit` implements it.
+- **Leave-$p$-out.** Every subset of $p$ points is held out once. For $p = 1$ it is
+  <NoteLink to="leave-one-out-cross-validation">leave-one-out</NoteLink>. The number of splits grows fast:
+  $\binom{20}{2} = 190$, but $\binom{100}{10} \approx 1.7 \times 10^{13}$. Exhaustive leave-$p$-out is feasible only for
+  tiny $n$ or for estimators with closed forms <Cite id="arlot2010" />, and Monte Carlo cross-validation is the
+  practical approximation of it.
+
+Each scheme is unbiased for the error at its training size: $\operatorname{Err}(n(K-1)/K)$ for repeated $K$-fold and
+$\operatorname{Err}(n - n_v)$ for Monte Carlo and leave-$n_v$-out, by the argument of $K$-fold cross-validation applied
+to each split. Repetition changes the variance, not the expectation.
+
+## What repetition buys
+
+Condition on the data $\Dcal$. The random partition is the only remaining randomness, and the $R$ repeats are
+independent draws of it. Write $\operatorname{CV}_\infty = \expect[\operatorname{CV}_K \mid \Dcal]$ for the average
+over all partitions of these data, the "complete" $K$-fold estimate <Cite id="kohavi1995" />, and
+$\sigma^2_\text{part} = \var(\operatorname{CV}_K \mid \Dcal)$ for the variance due to the partition. An average of $R$
+independent draws has
+
+$$
+\expect\brack{\overline{\operatorname{CV}}_R \mid \Dcal} = \operatorname{CV}_\infty,
+\qquad
+\var\paren{\overline{\operatorname{CV}}_R \mid \Dcal} = \frac{\sigma^2_\text{part}}{R}.
+$$
+
+Now let the data vary. The <NoteLink to="law-of-total-expectation">law of total variance</NoteLink> splits the variance
+of the estimate into the variance of its conditional mean and the mean of its conditional variance:
+
+$$
+\var\paren{\overline{\operatorname{CV}}_R} = \var_\Dcal\paren{\operatorname{CV}_\infty} +
+\frac{\expect_\Dcal\brack{\sigma^2_\text{part}}}{R}.
+$$
+
+The first term is the variance due to the data. It does not depend on $R$ and is the floor that repetition approaches.
+The second term is the partition noise, and it falls as $1/R$. The same argument shows that leave-$p$-out has the
+smallest variance among the Monte Carlo schemes that hold out $p$ points: Monte Carlo cross-validation equals
+leave-$p$-out plus partition noise with mean zero given the data, and adding independent noise of mean zero can only
+add variance.
+
+Three consequences follow.
+
+1. **Diminishing returns.** If the partition noise is a small part of the total, a single run is nearly as good as
+   many. If it is large, as for small $n$ and unstable learners, a few repeats remove most of it.
+2. **No approach to the truth for these data.** As $R \to \infty$ the estimate converges to $\operatorname{CV}_\infty$,
+   a fixed function of the data. It does not converge to the true error $\operatorname{Err}_\Dcal$ of the model fitted
+   to them. Under many practical circumstances, repeating cross-validation to estimate the accuracy of the model at hand
+   is therefore of little use, and <NoteLink to="confidence-intervals">confidence intervals</NoteLink> computed from the
+   repeats mislead <Cite id="vanwinckelen2012" /> (see <NoteLink to="what-cross-validation-estimates">what
+   cross-validation estimates</NoteLink>).
+3. **The spread over repeats is not the uncertainty.** The standard deviation of the $R$ repeated estimates measures
+   $\sigma_\text{part}$, the partition noise. It says nothing about the variance due to the data, which is usually
+   larger. Treating the $RK$ fold scores as independent and dividing their standard deviation by $\sqrt{RK}$ gives a
+   <NoteLink to="standard-error">standard error</NoteLink> that shrinks to zero as $R$ grows, a false precision (see
+   <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>)
+   <Cite id="bengio2004" />.
+
+Repetition earns its cost when comparing candidates. Two candidates scored on the same repeated partitions have a
+difference whose partition noise falls as $1/R$, so small but real differences become visible. A test of that
+difference must still account for the overlap of the training sets (see
+<NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink> and
+<NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink>).
+
+<RepeatAverages />
+
+## Leave-$p$-out and the training fraction
+
+Monte Carlo cross-validation separates two choices that $K$-fold ties together: how many points to hold out and how many
+splits to average. Holding out more points makes each fold model worse and the estimate more pessimistic, but it changes
+what the estimate is good for. For choosing among <NoteLink to="linear-regression">linear regression</NoteLink> models,
+leave-one-out, like <Gloss name="aic" /> and $C_p$, does not select the true model with probability tending to one.
+Leave-$n_v$-out does, when the held-out fraction $n_v/n$ tends to one as $n$ grows <Cite id="shao1993" />. Monte Carlo
+cross-validation with a large held-out fraction is the computable version. Zhang related the delete-$d$ criteria to the
+final prediction error criterion and studied their $r$-fold and repeated learning–testing approximations
+<Cite id="zhang1993" />. For estimating the error of the chosen model, as opposed to choosing it, a small held-out
+fraction remains the right choice (see <NoteLink to="consistency-and-efficiency-of-selection-criteria">consistency and
+efficiency of selection criteria</NoteLink>).
+
+## Worked example
+
+Take the figure's default setting, $n = 60$ points from two Gaussian classes and a 5-nearest-neighbour classifier, with
+the dataset control at 2. Twenty independent analysts each run 10-fold cross-validation on these data.
+
+1. **One run each.** Their 20 estimates of the <NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink>
+   average $0.288$ with standard deviation $0.025$ between analysts. Two analysts can differ by five points or more on
+   identical data.
+2. **Fifty repeats each.** Each analyst averages 50 partitions, 500 fits. Their 20 estimates now have standard
+   deviation $0.003$, close to $0.025/\sqrt{50} = 0.0035$, and average $0.287$.
+3. **The truth.** The model fitted to all 60 points has true error $0.206$ on 4,000 fresh points. All 20 analysts
+   overestimate it by eight points, and repetition has made them agree on the overestimate.
+
+On the first five datasets of the same size the gap between the converged value and the true error ranges from
+$-0.09$ to $+0.08$, while the partition standard deviation stays near $0.02$. The error due to the data is several
+times the partition noise, so 50 repeats reduce the total error of the estimate only a little.
+
+## Pitfalls
+
+- **Reporting the spread over repeats as a confidence interval.** It is the partition noise only (consequence 3).
+- **Testing on the pooled fold scores.** A <NoteLink to="paired-t-test">paired t-test</NoteLink> on $RK$ correlated
+  scores rejects far too often; use a corrected test.
+- **Monte Carlo with few splits.** With $B$ small, some points are never tested and others several times, which adds
+  variance compared with $K$-fold of the same cost.
+- **Repeating instead of collecting data.** When the data variance dominates, repetition improves the estimate's
+  reproducibility, not its accuracy.
+- **Different seeds for different candidates.** The variance reduction for
+  comparisons comes from scoring every candidate on the same partitions.

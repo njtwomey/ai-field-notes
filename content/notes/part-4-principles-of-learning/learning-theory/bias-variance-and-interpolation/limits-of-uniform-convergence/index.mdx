@@ -1,0 +1,178 @@
+---
+title: 'Limits of uniform convergence'
+kind: concept
+summary: 'Nagarajan and Kolter built learners trained by gradient descent whose test error is below $\epsilon$, while every two-sided uniform convergence bound, even one restricted to the hypotheses the learner actually outputs, is at least $1 - \epsilon$. Capacity arguments alone cannot explain them.'
+tags: [learning-theory, generalisation, neural-networks, worked-example]
+aliases: [failure of uniform convergence, algorithm-dependent uniform convergence, tightest uniform convergence bound]
+requires: [uniform-convergence, measuring-capacity-empirically]
+related: [algorithmic-stability, pac-bayes-bounds, norm-based-bounds-for-neural-networks, sample-compression-bounds, non-vacuous-generalisation-bounds, benign-overfitting, implicit-regularisation, adversarial-examples, test-set-bounds, bias-variance-and-interpolation]
+references: [nagarajan2019, negrea2020, zhang2017, bartlett2017, neyshabur2018, shalevshwartz2010, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let an algorithm $A$ map a sample $S$ of $m$ examples from $\Dcal$ to a hypothesis $h_S$, and let $L$ be a loss with
+true and <NoteLink to="empirical-risk-minimisation">empirical risks</NoteLink> $L_\Dcal(h)$ and $\hat L_S(h)$. The
+**tightest algorithm-dependent uniform convergence bound** $\epsilon_{\mathrm{unif\text{-}alg}}(m, \delta)$ is the
+smallest $\epsilon$ for which some set $\Scal_\delta$ of samples has probability at least $1 - \delta$ and
+
+$$
+\sup_{S \in \Scal_\delta}\ \sup_{h \in \Hcal_\delta}\abs{L_\Dcal(h) - \hat L_S(h)} \le \epsilon,
+\qquad \Hcal_\delta = \set{h_{S'} : S' \in \Scal_\delta},
+$$
+
+so the class is pruned to the hypotheses the algorithm outputs on typical samples. Nagarajan and Kolter constructed
+learners whose <NoteLink to="generalisation-gap">generalisation gap</NoteLink> is at most $\epsilon$ with probability
+$1 - \delta$, while $\epsilon_{\mathrm{unif\text{-}alg}}(m, \delta) \ge 1 - \epsilon$ <Cite id="nagarajan2019" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="uniform-convergence">uniform convergence</NoteLink> bound controls the gap of the learned hypothesis by
+the largest gap over a whole class. The obvious complaint is that the class is too big: VC classes of networks contain
+functions that fit random labels, which the learner never outputs on real data <Cite id="zhang2017" />. The obvious
+repair is to shrink the class, for instance to networks of small norm, until it holds only what the algorithm can
+produce. The definition above takes that repair to its limit.
+
+The limit still fails because of how uniform convergence handles the bad samples. It is allowed to ignore one set of
+samples with probability $\delta$, the same set for every hypothesis. It is not allowed to ignore a different bad sample
+for each hypothesis. Suppose every learned $h_S$ has its own bad sample $S'$, built from $S$, on which it is wrong
+everywhere, and suppose $S'$ is distributed exactly like a typical training sample. Then for most $S$, both $S$ and
+$S'$ are typical. The sample $S'$ is in $\Scal_\delta$, the hypothesis $h_S$ is in $\Hcal_\delta$, and the pair shows a
+gap near 1.
+
+Such learners fit the training data with a decision boundary that is simple at large scale and full of small
+fluctuations placed exactly at the training points. The fluctuations leave the test error near 0, because fresh data
+almost never lands on them. They wreck any bound that has to hold for every sample at once.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, this result limits the
+move that makes the bound uniform. It says when the algorithm, not a class, has to carry the argument.
+
+## The construction
+
+**The data.** Each input has two blocks, $\xvec = (\xvec_1, \xvec_2)$ with $\xvec_1 \in \reals^K$ for a small $K$ and
+$\xvec_2 \in \reals^D$ with $D$ much larger than $m$. The label $y = \pm 1$ is a fair coin. The signal block is
+$\xvec_1 = 2y\,\uvec$ for a fixed $\uvec$ with $\norm{\uvec}^2 = 1/m$. The noise block is
+$\xvec_2 \sim \Gauss(\zeros, \frac{32}{D}\Imat_D)$, independent of $y$, so $\norm{\xvec_2}^2 \approx 32$
+<Cite id="nagarajan2019" />.
+
+**The learner.** A linear classifier $h(\xvec) = \wvec_1^\top\xvec_1 + \wvec_2^\top\xvec_2$ starts at zero and takes one
+gradient step of size 1 on $\sum_i y_i h(\xvec_i)$. The result is
+
+$$
+\wvec_1 = \sum_i y_i\xvec_{1,i} = 2m\uvec, \qquad \wvec_2 = \sum_i y_i\xvec_{2,i}.
+$$
+
+The first block points along the true signal. The second is a sum of $m$ independent Gaussian vectors, each of squared
+norm about 32, so $\norm{\wvec_2}^2 \approx 32m$.
+
+**Fresh points are classified correctly.** For a new example, the margin is
+
+$$
+y\,h(\xvec) = y\,\wvec_1^\top(2y\uvec) + y\,\wvec_2^\top\xvec_2 = 4m\norm{\uvec}^2 + y\,\wvec_2^\top\xvec_2 =
+4 + y\,\wvec_2^\top\xvec_2.
+$$
+
+The new $\xvec_2$ is independent of $\wvec_2$, so $\wvec_2^\top\xvec_2$ is Gaussian with variance
+$\norm{\wvec_2}^2 \times 32/D \approx 1024\,m/D$. When $D$ is much larger than $m$, the noise term is small against 4,
+and the test error is tiny.
+
+**Training points are classified with a large margin.** For a training example $i$,
+$y_i\wvec_2^\top\xvec_{2,i} = \norm{\xvec_{2,i}}^2 + \sum_{j \ne i}y_iy_j\,\xvec_{2,j}^\top\xvec_{2,i}$. The first term
+is about 32 and the sum is small, so the training margin is about $4 + 32 = 36$.
+
+**The bad sample.** Build $S'$ from $S$ by negating every noise block: $(\xvec_{1,i}, -\xvec_{2,i})$ with the same
+label. The margin of $h_S$ on the $i$-th point of $S'$ is about $4 - 32 = -28$. Every point of $S'$ is misclassified.
+The Gaussian is symmetric, so $S'$ has exactly the distribution of a training sample.
+
+**Uniform convergence fails.** Fix any set $\Scal_\delta$ of probability at least $1 - \delta$, with $\delta \le 1/4$.
+The map $S \mapsto S'$ preserves the distribution, so $S$ and $S'$ both lie in $\Scal_\delta$ with probability at least
+$1 - 2\delta \ge \frac12$. With high probability $h_S$ also has test error below $\epsilon$ and misclassifies all of
+$S'$. So some sample $S_\star$ has all four properties, and
+
+$$
+\epsilon_{\mathrm{unif\text{-}alg}} \ge \abs{L_\Dcal(h_{S_\star}) - \hat L_{S'_\star}(h_{S_\star})} \ge 1 - \epsilon.
+$$
+
+Nagarajan and Kolter prove this for the <NoteLink to="surrogate-losses">0–1 loss</NoteLink> and for the ramp loss at any
+margin $\gamma \in [0, 1]$, with $D$ of order $m\ln(m/\delta)$ and $m\ln(1/\epsilon)$ or more
+<Cite id="nagarajan2019" />.
+
+**A neural network.** The same failure appears in an experiment without noise coordinates. Two classes lie uniformly on
+concentric spheres of radius 1 and 1.1 in $\reals^{1000}$. A two-layer <Gloss name="relu" /> network with 100,000 hidden
+units is trained by <Gloss name="sgd">stochastic gradient descent</Gloss> until 99% of the training points have margin
+at least 10. As $m$ grows from 4,096 to 65,536 the test error falls like $m^{-1/2}$. The bad sample projects each
+training point onto the other sphere and flips its label; it has the training distribution, and the network
+misclassifies all of it <Cite id="nagarajan2019" />. The learned boundary bends around each training point, much as in
+the <NoteLink to="adversarial-examples">adversarial examples</NoteLink> literature.
+
+{/* figure pending engine (sketch uniformConvergenceFailure in .scratch/learning-theory/logs/lt-margins.md): the linear
+construction measured against m and D, with the test error, the error on the noise-negated sample and the norm-based
+margin bound */}
+
+## What remains
+
+- **Bounds that are not uniform over samples.** <NoteLink to="algorithmic-stability">Algorithmic stability</NoteLink>,
+  <NoteLink to="sample-compression-bounds">sample compression</NoteLink> and
+  <NoteLink to="information-theoretic-generalisation-bounds">information-theoretic bounds</NoteLink> do not take a
+  supremum over a class, so the argument above does not apply to them directly.
+- **One-sided bounds.** The argument needs a two-sided bound: it uses a sample on which the empirical error is far
+  above the true error. Most existing tools are two-sided. Nagarajan and Kolter show that standard
+  <NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>, usually stated one-sided, are also no smaller than the
+  two-sided quantity in their examples <Cite id="nagarajan2019" />.
+- **Surrogates.** Uniform convergence can still bound a surrogate predictor that is coupled to the learned one. Setting
+  $\wvec_2$ to zero in the linear example gives a classifier with few effective parameters, small test error and a
+  <NoteLink to="non-vacuous-generalisation-bounds">non-vacuous bound</NoteLink> <Cite id="nagarajan2019" />. Negrea,
+  Dziugaite and Roy make this systematic: they bound the risk of the learned predictor through surrogates obtained by
+  conditioning or denoising, which belong to classes with uniformly small gaps <Cite id="negrea2020" />.
+- **Measurement.** A <NoteLink to="test-set-bounds">test-set bound</NoteLink> is not uniform over hypotheses and is
+  unaffected. It certifies the learned predictor without explaining it.
+
+## Worked example
+
+Take the linear construction with $m = 1{,}000$ and $D = 10^6$ noise coordinates, so $D/m = 1{,}000$.
+
+1. **Test error.** The noise term on a fresh point has variance about $1024m/D = 1.02$, so standard deviation about 1.
+   A fresh point is misclassified when the noise term is below $-4$: probability about $\Phi(-4) = 3 \times 10^{-5}$.
+2. **Training margins.** About $4 + 32 = 36$ for every training point, so the training error and the margin loss at
+   any $\gamma$ below about 30 are 0.
+3. **Error on the bad sample.** Each negated point has margin about $4 - 32 = -28$: an
+   <NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> of 1. A check by simulation with $m = 100$ and
+   $D = 10^5$ gives training margins between 33 and 39 and negated margins between $-31$ and $-25$.
+4. **A norm-based margin bound.** The weight norm is $\norm{\wvec} = \sqrt{\norm{\wvec_1}^2 + \norm{\wvec_2}^2} \approx
+   \sqrt{4m + 32m} = 6\sqrt m = 190$. The inputs have norm $X \approx \sqrt{32} = 5.66$. The capacity term of the
+   <NoteLink to="margin-bounds">margin bound</NoteLink> is
+   $2\norm{\wvec}X/(\gamma\sqrt m) = 2 \times 6 \times 5.66/\gamma = 67.9/\gamma$. At $\gamma = 30$, where the margin
+   loss is still 0, the term is 2.26. It does not depend on $m$, so more data never makes it informative.
+5. **Risk against the bounds.** The true risk is about $3 \times 10^{-5}$. The norm-based bound is above 2 at every
+   sample size. The theorem says that no uniform convergence bound over the hypotheses this learner outputs can do
+   better than $1 - \epsilon$.
+
+The norm of $\wvec_2$ grows like $\sqrt m$, and this matches what Nagarajan and Kolter measured in real networks: on
+<Gloss name="mnist" />, the distance of the weights from their initialisation grew like $m^{0.4}$, and norm-based bounds
+grew with $m$ <Cite id="nagarajan2019" />.
+
+## Assumptions
+
+- **Two-sided uniform convergence.** The result is about bounds on $\abs{L_\Dcal(h) - \hat L_S(h)}$, which is what the
+  standard proofs by <NoteLink to="symmetrisation">symmetrisation</NoteLink> give.
+- **A symmetry of the distribution.** The construction needs a map from typical samples to typical samples, here the
+  negation of the noise block or the swap of spheres, on which the learned hypothesis fails.
+- **Overparameterisation.** The noise dimension $D$ must exceed $m$ by a logarithmic factor, so that the learner can
+  memorise the noise of each training point.
+
+## Pitfalls
+
+- **Not a statement about learnability.** Uniform convergence still characterises which classes are learnable in the
+  worst case (see the <NoteLink to="fundamental-theorem-of-statistical-learning">fundamental theorem of statistical
+  learning</NoteLink>). The examples show that it can fail to explain a particular algorithm on a particular
+  distribution. Shalev-Shwartz et al. gave learnable problems, outside binary classification, where uniform convergence
+  fails <Cite id="shalevshwartz2010" />; that result is about learnability and is separate from this one.
+- **Not a statement that the bounds are loose by a constant.** Norm-based bounds such as the
+  <NoteLink to="norm-based-bounds-for-neural-networks">spectrally normalised margin bound</NoteLink> are numerically
+  large <Cite id="bartlett2017" /> <Cite id="neyshabur2018" />. The examples here show something stronger: the best
+  uniform convergence bound is near 1 in a setting where the test error is near 0.
+- **Not proved for every deep network.** The theorem covers the constructed examples; for standard networks there is an
+  experiment and a conjecture. Training with explicit <NoteLink to="regularisation">regularisation</NoteLink>, such as
+  <Gloss name="weight-decay">weight decay</Gloss>, is not covered <Cite id="nagarajan2019" />.

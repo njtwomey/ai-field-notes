@@ -1,0 +1,135 @@
+---
+title: 'Stratified cross-validation'
+kind: technique
+summary: 'Stratified cross-validation builds folds whose class proportions match the whole data set. It keeps every class in every fold, removes the shift in class balance between training and test folds and lowers the variance of the estimate. A continuous target is binned first.'
+tags: [model-selection, evaluation, class-imbalance, resampling, worked-example]
+aliases: [stratified k-fold, stratified k-fold cross-validation, stratified K-fold CV, stratified folds]
+requires: [k-fold-cross-validation]
+related: [blocking-and-stratification, grouped-cross-validation, class-imbalance, evaluating-imbalanced-classifiers, precision-recall-and-f-score, hold-out-validation]
+references: [kohavi1995, forman2010, morenotorres2012cv, sechidis2011]
+status: draft
+updated: 2026-10-13
+---
+
+import { StratifiedRareClass } from './StratifiedRareClass'
+
+<Definition>
+In **stratified $K$-fold cross-validation** the folds are formed separately within each class. A class with $n_c$
+members contributes $\lfloor n_c/K \rfloor$ or $\lceil n_c/K \rceil$ of them to each fold, so every fold has the class
+proportions of the whole data set, up to rounding <Cite id="kohavi1995" />. Training and evaluation then proceed as in
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>.
+</Definition>
+
+## Problem
+
+Random folds have random class compositions. Let the data have $n$ points of which $n_+$ belong to a class of
+interest, and let a fold hold $m$ points drawn at random. The number of class members in the fold follows a
+<NoteLink to="hypergeometric-distribution">hypergeometric distribution</NoteLink>, with mean $mn_+/n$ and variance
+
+$$
+m\,\frac{n_+}{n}\paren{1 - \frac{n_+}{n}}\frac{n - m}{n - 1}.
+$$
+
+The composition of the test fold and of its training set therefore fluctuate together, in opposite directions: a class
+over-represented in the test fold is under-represented in the training folds. Three things go wrong.
+
+1. **Undefined metrics.** A test fold with no members of the rare class has no recall, no precision when nothing is
+   predicted positive, and no <Gloss name="auroc">area under the ROC curve</Gloss>. A per-fold average containing an
+   undefined fold is undefined, and software that silently drops or zero-fills such folds biases the result
+   <Cite id="forman2010" />.
+2. **Shifted priors.** A classifier that learns the class balance of its training set, which almost every classifier
+   does, is evaluated on a test fold with a different balance. For a learner that predicts the training majority,
+   random hold-out splits of Fisher's iris data, three classes of 50, gave an average accuracy of 21.7% instead of
+   33.3% <Cite id="kohavi1995" />.
+3. **Extra variance.** The random compositions add a source of variation to the estimate that has nothing to do with
+   the learner.
+
+Stratification removes the fluctuation by construction. It is a form of the
+<NoteLink to="blocking-and-stratification">blocking</NoteLink> used in <NoteLink to="experimental-design">experimental
+design</NoteLink>: the class is a known source of variation, so the folds are balanced on it instead of left to chance.
+
+## Mechanism
+
+1. **Group the rows by class** and shuffle within each class.
+2. **Deal each class out** to the $K$ folds in turn, so that each fold receives its share of every class. Scikit-learn's
+   `StratifiedKFold` decides how many members of each class each fold receives by dealing the sorted class codes
+   round-robin, then assigns each class's rows in order.
+3. **Cross-validate** as usual. Every fold's test set and training set have the overall class proportions.
+
+**A continuous target** has no classes, but its distribution can be stratified the same way. Sort the rows by $y$,
+cut the sorted list into bins of $K$ consecutive rows, or into quantile bins, and stratify on the bin. Every fold then
+spans the range of the target, and no fold is left holding most of the extreme values.
+
+**Several labels per row.** In multi-label data each row has several binary labels, and stratifying on every
+combination of labels leaves most combinations with one row. Iterative stratification assigns first the rows of the
+rarest label, choosing for each the fold that most needs that label, and so balances each label's share across folds
+<Cite id="sechidis2011" />.
+
+**Beyond the label.** Folds can also differ in their input distribution. Stratified folds can still separate clusters
+of the inputs, and schemes that also spread similar inputs across folds reduce this partition-induced covariate shift
+<Cite id="morenotorres2012cv" />.
+
+## Worked example
+
+A data set has $n = 100$ rows, 5 of them positive, and is split into $K = 5$ folds of $m = 20$.
+
+1. **One random fold.** The probability that a given fold contains no positive is the probability that all 20 of its
+   rows come from the 95 negatives:
+
+$$
+\frac{\binom{95}{20}}{\binom{100}{20}} = \frac{80}{100}\cdot\frac{79}{99}\cdot\frac{78}{98}\cdot\frac{77}{97}\cdot\frac{76}{96} = 0.32.
+$$
+
+2. **Any fold.** Every fold contains a positive only if each of the five holds exactly one. The 5 positive positions
+   are a random subset of the 100, and $20^5$ of the $\binom{100}{5}$ subsets put one in each fold. The probability is
+   $20^5/\binom{100}{5} = 3{,}200{,}000/75{,}287{,}520 = 0.043$. So 96% of random partitions have at least one fold in
+   which recall is undefined.
+3. **Stratified.** Each fold receives exactly $5/5 = 1$ positive, and recall is always defined, though each fold's
+   recall is 0 or 1.
+
+With 10 positives among the 100, a fold holds on average $20 \times 0.1 = 2$ positives with standard deviation
+$\sqrt{20 \times 0.1 \times 0.9 \times 80/99} = 1.21$, and the chance that some fold has none is still 43%. The figure
+runs this case with a <NoteLink to="logistic-regression">logistic regression</NoteLink>. Over 100 random partitions of
+one data set, the plain 5-fold recall estimate is undefined for 44 of them; over the rest it has standard deviation
+0.097, against 0.054 for stratified folds, around a true recall of 0.63. For the
+<NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink>, which is defined on every fold, the standard
+deviations are 0.011 and 0.009.
+
+<StratifiedRareClass />
+
+## Cost
+
+None beyond plain $K$-fold: the folds are assigned differently, and the same $K$ models are fitted.
+
+## Trade-offs
+
+- **Bias and variance.** Kohavi found stratification "generally a better scheme both in terms of bias and variance" than
+  plain cross-validation across his experiments, with the variance
+  reduction slight for most data sets <Cite id="kohavi1995" />. The gain is largest for small data, rare
+  classes and metrics that depend on the class counts.
+- **Fewer members than folds.** A class with fewer than $K$ members cannot appear in every fold; some test folds still
+  lack it. Reduce $K$, or pool counts across folds before computing the metric.
+- **Stratification fixes the balance at the observed one.** When deployment will see a different class balance, the
+  estimate describes the balance in the data, not the one in use. That is a matter of
+  <NoteLink to="matching-the-split-to-deployment">matching the split to deployment</NoteLink>, which stratification
+  does not address.
+
+**Default practice.** Stratified folds are the default for classification: scikit-learn's `cross_val_score` and
+`GridSearchCV` use `StratifiedKFold` whenever the estimator is a classifier and the target is binary or multiclass.
+
+## Pitfalls
+
+- **Averaging per-fold $F_1$ or AUC under imbalance.** Even with stratified folds, few positives per fold make per-fold
+  $F_1$ noisy and biased. Computing $F_1$ from the <Gloss name="tp">true-positive</Gloss>,
+  <Gloss name="fp">false-positive</Gloss> and <Gloss name="fn">false-negative</Gloss> counts pooled over folds is the
+  least biased method; for the area under the ROC curve, averaging per-fold values is recommended
+  <Cite id="forman2010" />.
+- **Stratifying and ignoring groups.** When rows come in groups, stratifying the rows can put members of one group on
+  both sides. Group first (see <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink>);
+  scikit-learn's `StratifiedGroupKFold` balances the classes as far as the grouping allows.
+- **Stratifying a <NoteLink to="time-series">time series</NoteLink>.** Shuffling within classes breaks the time order
+  and lets the model train on the future (see <NoteLink to="time-series-cross-validation">time-series
+  cross-validation</NoteLink>).
+- **Resampling before splitting.** Oversampling the rare class, for example with <Gloss name="smote" />, before the
+  folds are made puts copies or interpolations of test points into training. Resampling belongs inside each training
+  fold (see <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).

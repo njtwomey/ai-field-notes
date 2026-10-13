@@ -1,0 +1,178 @@
+---
+title: 'Reusable holdout'
+kind: concept
+summary: 'A reusable holdout answers adaptively chosen queries so that its scores stay accurate on new data. Thresholdout reveals a noisy holdout score only when it disagrees with the training score; the Ladder updates a leaderboard only when a submission beats the best by a margin.'
+tags: [model-selection, evaluation, adaptive-data-analysis, worked-example]
+aliases: [Ladder mechanism, the Ladder, parameter-free Ladder, leaderboard error, reliable leaderboard]
+requires: [hold-out-validation, overfitting-in-model-selection]
+related: [adaptive-data-analysis, test-set-reuse, differential-privacy, test-set-bounds, nested-cross-validation, maximal-inequalities]
+references: [dwork2015, dwork2015holdout, blum2015ladder, roelofs2019]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+A holdout sample $S$ of $n$ examples is used **adaptively** when each new model $f_t$, or more generally each query, may
+depend on the answers $R_1, \dots, R_{t - 1}$ already given for earlier ones. A **reusable holdout** is a mechanism that
+answers such a sequence of queries so that, with high probability, every answer stays close to the true value on the
+underlying distribution, for a number of queries far larger than a plain holdout supports. Thresholdout
+<Cite id="dwork2015" /> answers general queries; the Ladder <Cite id="blum2015ladder" /> answers the narrower question
+of a leaderboard: the true loss of the best model submitted so far.
+</Definition>
+
+## Intuition
+
+A holdout score is an honest estimate of a model fixed before the holdout is looked at. Selecting the best of $J$ fixed
+models costs only a $\sqrt{2\ln J}$ factor in the error of the estimate (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Development rarely works that
+way. A score comes back; the analyst changes a feature, a threshold or an architecture; the next model is scored on the
+same holdout. Each score leaks a little information about the particular holdout sample, and the next model is chosen
+partly to fit it. After many rounds the holdout behaves like training data, and its scores overstate how well the models
+do on new data. <NoteLink to="adaptive-data-analysis">Adaptive data analysis</NoteLink> quantifies this: a plain holdout
+of size $n$ answers about $n$ adaptive queries before its answers can be pushed off by a constant.
+
+The remedy is to reveal less. An answer that does not depend on the fine detail of the holdout sample cannot be used to
+fit that detail. Thresholdout reveals nothing about the holdout as long as the training data give the same answer. The
+Ladder reveals a new number only when a submission is clearly better than the best so far. In both, the analyst learns
+few bits per query, and the cost of adaptivity is paid per bit revealed, not per query asked.
+
+## How a plain holdout fails
+
+Blum and Hardt's boosting attack shows the failure in its simplest form <Cite id="blum2015ladder" />. On a binary task,
+submit $k$ random label vectors for the $n$ holdout points, keep those that score above one half, and submit their
+coordinate-wise majority vote. Each kept vector agrees with the true labels slightly more often than chance, by
+accident of the sample, and the vote adds these accidents up. The vote's holdout accuracy is $\frac12 +
+\Omega(\sqrt{k/n})$, although its accuracy on new data is exactly $\frac12$. The bias grows like $\sqrt k$, not like
+$\sqrt{\ln k}$. <NoteLink to="adaptive-data-analysis">Adaptive data analysis</NoteLink> derives the constant: about
+$\Phi\paren{\sqrt{k/(\pi n)}} - \frac12$, with $\Phi$ the standard normal distribution function.
+
+The attack needs no access to the data beyond the scores. An analyst who tunes against a public leaderboard by trial and
+error runs a slower, unintended version of it.
+
+## Thresholdout
+
+Thresholdout splits the data into a training set $S_t$, which the analyst uses freely, and a holdout $S_h$, which only
+the mechanism reads <Cite id="dwork2015" /> <Cite id="dwork2015holdout" />. A query is a function $\phi$ of an example,
+such as the loss of a model, and $S[\phi]$ is its average over a sample $S$. The mechanism has a threshold $T$, a noise
+scale $\sigma$ and a budget $B$.
+
+1. For each query, compare the training average $S_t[\phi]$ with the holdout average $S_h[\phi]$, with Laplace noise
+   added to the threshold.
+2. If they agree to within the noisy threshold, answer with the training average $S_t[\phi]$. The holdout has revealed
+   nothing.
+3. If they disagree, answer with the holdout average plus Laplace noise of scale $\sigma$, and spend one unit of the
+   budget. Stop when the budget is spent.
+
+A query on which training and holdout agree is one where the analyst has not overfitted the training set, and the
+training answer is already accurate. Only the overfitted queries cost budget, and each of them reveals a noisy, private
+number. The privacy of the answers bounds how far any later query can be fitted to the holdout, and the mechanism stays
+accurate for a number of queries exponential in $n$ as long as few of them overfit <Cite id="dwork2015holdout" />.
+<NoteLink to="adaptive-data-analysis">Adaptive data analysis</NoteLink> gives the transfer theorem from
+<NoteLink to="differential-privacy">differential privacy</NoteLink> to generalisation on which this rests.
+
+For <NoteLink to="model-selection">model selection</NoteLink>, Thresholdout replaces the validation set. The analyst
+trains and tunes on $S_t$, and asks the mechanism for the validation score of each candidate. Candidates that generalise
+get their training score back; those that overfit get a noisy holdout score, and the budget counts how often that
+happened.
+
+## Leaderboards and the Ladder
+
+A competition leaderboard ranks submissions by their loss on a holdout. Its purpose is narrower than estimating every
+submission's loss: it must report the loss of the best submission so far. Blum and Hardt define the **leaderboard
+error** of the reported values $R_1, \dots, R_k$ as
+
+$$
+\operatorname{lberr}(R_1, \dots, R_k) = \max_{1 \le t \le k}\abs{\min_{1 \le i \le t} R_\Dcal(f_i) - R_t},
+$$
+
+where $R_\Dcal(f)$ is the true loss of submission $f$ on the distribution, with values in $[0, 1]$
+<Cite id="blum2015ladder" />.
+
+**The Ladder.** Fix a step $\eta > 0$ and start with $R_0 = \infty$. For each submission $f_t$, compute its holdout loss
+$R_S(f_t)$.
+- If $R_S(f_t) < R_{t - 1} - \eta$, report $R_t = R_S(f_t)$ rounded to a multiple of $\eta$.
+- Otherwise report the previous value, $R_t = R_{t - 1}$.
+
+A submission that does not beat the best by at least $\eta$ learns nothing it did not already know.
+
+**Why it works: few transcripts.** The analyst is a fixed rule that maps the reported values so far to the next
+submission. The derivation counts the transcripts the Ladder can produce.
+1. **Few updates.** The reported value lies in $[0, 1]$ after the first update and falls by at least $\eta$ at every
+   later one, so there are at most $1/\eta + 1$ updates.
+2. **Few values.** Each reported value is a multiple of $\eta$ in $[0, 1]$, one of at most $1/\eta + 1$ values.
+3. **Few transcripts.** A transcript of $t$ rounds is fixed by the rounds at which updates happen and the values
+   reported there. Encoding the rounds and values takes at most $B = (1/\eta + 2)\log_2(4t/\eta)$ bits, so at most $2^B$
+   transcripts exist, and the analyst can produce at most $2^B$ distinct submissions.
+4. **Union bound.** For each fixed submission, <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>
+   gives $\prob\paren{\abs{R_\Dcal(f) - R_S(f)} > \varepsilon} \le 2e^{-2\varepsilon^2 n}$. A
+   <NoteLink to="union-bound">union bound</NoteLink> over the at most $2^B$ possible submissions makes every holdout
+   loss accurate to $\varepsilon$ at once, except with probability at most $2^{B + 1}e^{-2\varepsilon^2 n}$.
+5. **From losses to the leaderboard.** On that event, the minimum holdout loss over the submissions so far is within
+   $\varepsilon$ of the minimum true loss. The Ladder reports a value within $\eta$ of the minimum holdout loss, because
+   it skips only improvements smaller than $\eta$ and rounds to a multiple of $\eta$. So
+   $\abs{\min_{i \le t}R_\Dcal(f_i) - R_t} \le \varepsilon + \eta$ for every $t$.
+
+The failure probability is at most $\exp\paren{-2\varepsilon^2 n + B + 1}$. Choosing $\eta$ of order $n^{-1/3}$ balances
+the two error terms and gives a leaderboard error of order $\log^{1/3}(kn)/n^{1/3}$ with high probability, for any
+analyst and any number of submissions $k$ <Cite id="blum2015ladder" />. The dependence on $k$ is logarithmic, against
+$\sqrt k$ for a full-precision leaderboard under the boosting attack.
+
+**The parameter-free Ladder.** A fixed step is hard to choose before a competition starts. The parameter-free variant
+keeps the loss vector of the best submission so far and updates only when a one-sided
+<NoteLink to="paired-t-test">paired $t$-test</NoteLink> on the per-example loss differences finds the new submission
+better; the step then shrinks as the scores improve. Blum and Hardt describe the test as roughly a 0.15
+<NoteLink to="significance-level">significance level</NoteLink> and call it a heuristic: the adaptively chosen
+submissions break the test's assumptions <Cite id="blum2015ladder" />.
+
+## Worked example
+
+A competition holds out $n = 10^6$ examples and wants confidence $1 - \delta = 0.95$. Compare three regimes.
+
+1. **Fixed submissions.** For $k = 1{,}000$ submissions fixed in advance, Hoeffding's inequality with a union bound
+   makes every score accurate to $\sqrt{\ln(2k/\delta)/(2n)} = \sqrt{10.6/(2 \times 10^6)} = 0.0023$.
+2. **A full-precision leaderboard under attack.** The boosting attack's bias is about
+   $\Phi\paren{\sqrt{k/(\pi n)}} - \frac12$. For $k = 1{,}000$ this is $\Phi(0.0178) - 0.5 = 0.007$. For $k = 10^6$ it
+   is $\Phi(0.564) - 0.5 = 0.214$: a random vote looks 21 points better than chance.
+3. **The Ladder's guarantee.** Take $\eta = 0.015$ and require $2^{B + 1}e^{-2\varepsilon^2 n} \le \delta$, which holds
+   when $2\varepsilon^2 n \ge B + 1 + \ln(1/\delta)$.
+   - For $k = 1{,}000$: $B = (66.7 + 2)\log_2(4{,}000/0.015) = 68.7 \times 18.0 = 1{,}238$ bits, so
+     $\varepsilon = \sqrt{(1{,}238 + 1 + 3.0)/(2 \times 10^6)} = 0.025$ and the leaderboard error is at most
+     $0.025 + 0.015 = 0.040$.
+   - For $k = 10^6$: $B = 68.7 \times \log_2(2.67 \times 10^8) = 68.7 \times 28.0 = 1{,}922$ bits, so
+     $\varepsilon = 0.031$ and the error is at most $0.046$.
+
+A thousandfold increase in submissions moves the Ladder's guarantee from 0.040 to 0.046, while the worst case for a
+full-precision leaderboard grows thirtyfold. At $k = 1{,}000$ the Ladder's worst-case guarantee is looser than what the
+attack achieves on a plain leaderboard: the guarantee covers every analyst, and its constants are conservative.
+
+{/* figure pending engine (ladder, boostingAttack and thresholdout; sketched in .scratch/model-selection/logs/ms-selection-bias.md, extending adaptiveHoldoutStudy of the lt-algorithmic log): reported against true best-so-far loss over k submissions of the boosting attack, for a full-precision leaderboard, the Ladder with step eta and the parameter-free Ladder */}
+
+## In practice
+
+- **Lock the final test set.** Model development uses a validation set, or
+  <NoteLink to="cross-validation">cross-validation</NoteLink> on the training data; the test set is scored once at the
+  end. Nested schemes give the same separation on small data (see <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>).
+- **Coarse answers.** Competitions limit the number of submissions per day and report scores to few decimals. Both
+  shrink the information revealed per query. The Ladder makes the same idea exact by reporting only significant
+  improvements.
+- **Private final rankings.** Competitions rank on a private holdout scored once, so that overfitting the public
+  leaderboard costs the overfitter. Practical budgets, two-tier <NoteLink to="test-sets">test sets</NoteLink> and
+  holdout rotation are covered in <NoteLink to="test-set-reuse">test-set reuse</NoteLink>.
+- **Measured overfitting is often small.** A study of more than one hundred Kaggle competitions compared public and
+  private leaderboards and found little evidence of substantial adaptive overfitting <Cite id="roelofs2019" />. Real
+  analysts are not adversaries, and the worst-case bounds overstate the typical bias.
+
+## Pitfalls
+
+- **Counting submissions, not adaptivity.** A thousand models fixed in advance cost a $\sqrt{\ln k}$ factor. Ten models,
+  each designed after reading the previous one's holdout score, can already overfit. What matters is how much each
+  answer reveals and how the next query depends on it.
+- **Reusing the training set as the holdout.** Thresholdout compares training and holdout answers; it does not make the
+  training scores honest. The guarantees cover the holdout answers only.
+- **Spent budgets.** Once Thresholdout's budget is spent, or once the Ladder has updated many times, the guarantee
+  weakens. A fresh holdout restores it.
+- **Leaderboard accuracy is not per-model accuracy.** The Ladder guarantees the best-so-far score. It does not report an
+  accurate loss for each submission, and a submission that does not improve gets the old number back.
+- **Noise is not free.** Thresholdout's answers are noisier than the plain holdout's. For a handful of queries the plain
+  holdout is more accurate.

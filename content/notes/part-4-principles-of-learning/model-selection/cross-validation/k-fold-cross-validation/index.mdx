@@ -1,0 +1,199 @@
+---
+title: 'k-fold cross-validation'
+kind: technique
+summary: '$K$-fold cross-validation splits the data into $K$ folds, fits on $K - 1$ and tests on the one left out, in turn, and averages the $n$ held-out losses. It estimates the error of the learner trained on $n(K - 1)/K$ points; 5 and 10 folds are the usual choices.'
+tags: [model-selection, evaluation, resampling, worked-example]
+aliases: [K-fold CV, v-fold cross-validation, rotation estimation]
+requires: [hold-out-validation]
+related: [leave-one-out-cross-validation, stratified-cross-validation, grouped-cross-validation, repeated-and-monte-carlo-cross-validation, variance-of-cross-validation-estimates, what-cross-validation-estimates, nested-cross-validation, cross-validating-a-pipeline]
+references: [stone1974, geisser1975, hastie2009, kohavi1995, breiman1992, burman1989, arlot2010, bengio2004, forman2010]
+status: draft
+updated: 2026-10-13
+---
+
+import { KFoldBias } from './KFoldBias'
+
+<Definition>
+Split the indices $1, \dots, n$ into $K$ disjoint **folds** of nearly equal size, and let $\kappa(i)$ be the fold that
+contains point $i$. Let $\hat f^{-k}$ be the model fitted to all the data except fold $k$. The **$K$-fold
+cross-validation** estimate of prediction error is
+
+$$
+\operatorname{CV}_K = \frac{1}{n}\sum_{i=1}^n \ell\paren{y_i, \hat f^{-\kappa(i)}(\xvec_i)}.
+$$
+
+Each point is predicted exactly once, by a model that did not see it. It is the most common form of
+<NoteLink to="cross-validation">cross-validation</NoteLink> <Cite id="stone1974" />
+<Cite id="geisser1975" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="hold-out-validation">Hold-out validation</NoteLink> sets part of the data aside. Every held-out point is
+lost to fitting, and the estimate rests on one random split of one validation set. With small data both costs are
+large: a validation set big enough for a precise estimate leaves too little to fit.
+
+$K$-fold cross-validation rotates the validation role. Each of the $K$ folds is held out once, so every point is used
+for validation, and each fit still sees most of the data. Grouping the sum by folds shows the estimate as an average of
+$K$ hold-out estimates,
+
+$$
+\operatorname{CV}_K = \sum_{k=1}^K \frac{n_k}{n}\,\widehat{\operatorname{Err}}_k,
+\qquad
+\widehat{\operatorname{Err}}_k = \frac{1}{n_k}\sum_{i : \kappa(i) = k}\ell\paren{y_i, \hat f^{-k}(\xvec_i)},
+$$
+
+where $n_k$ is the size of fold $k$. The method answers the chapter's first question, **estimate**, for one model, and
+the second, **select**, when the estimate is computed for each candidate and minimised. It does not answer the third:
+the smallest of several cross-validation scores is optimistic about the model that achieved it (see
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>).
+
+## Mechanism
+
+1. **Shuffle** the rows and cut them into $K$ blocks. Without the shuffle, data sorted by class, time or source give
+   folds that differ systematically. Classification uses <NoteLink to="stratified-cross-validation">stratified
+   folds</NoteLink>; records that share an entity use <NoteLink to="grouped-cross-validation">grouped folds</NoteLink>.
+2. **Fit** the whole pipeline on the $K - 1$ training folds: every data-dependent step, from scaling to
+   <NoteLink to="feature-selection">feature selection</NoteLink>, belongs inside the loop (see
+   <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).
+3. **Predict** the held-out fold and record each point's loss.
+4. **Average** the $n$ losses. The per-fold averages $\widehat{\operatorname{Err}}_k$ are kept as well, for a rough
+   spread.
+5. **Select**, if there are candidates: compute $\operatorname{CV}_K$ for each on the same folds, so that differences
+   reflect the candidates and not the partition, and keep the smallest.
+6. **Refit** the chosen candidate on all $n$ points. The $K$ fold models are discarded.
+
+With $n$ not divisible by $K$, the first $n \bmod K$ folds take one extra point, as in scikit-learn's `KFold`.
+
+## What $K$-fold cross-validation estimates
+
+Write $\operatorname{Err}(m)$ for the expected prediction error of the learner trained on $m$ random points: the true
+error $\operatorname{Err}_{\Dcal_m}$ of the fitted model, averaged over training sets $\Dcal_m$ of size $m$. Take
+equal folds of size $n/K$, so every fold model is trained on $m = n(K - 1)/K$ points.
+
+Consider one term of the sum, $\ell(y_i, \hat f^{-\kappa(i)}(\xvec_i))$. The model $\hat f^{-\kappa(i)}$ is fitted to
+the $m$ points outside fold $\kappa(i)$. The point $(\xvec_i, y_i)$ is not among them, and it is independent of them
+because the data are independent draws. Conditional on the training points, the term is therefore the loss of a fixed
+model at a fresh point, whose expectation is $\operatorname{Err}_{\Dcal_m}$ for that training set. Averaging over
+training sets gives $\operatorname{Err}(m)$. Every term has the same expectation, so
+
+$$
+\expect\brack{\operatorname{CV}_K} = \operatorname{Err}\paren{\tfrac{K-1}{K}\,n}.
+$$
+
+$K$-fold cross-validation is unbiased for the expected error at training size $n(K - 1)/K$, not at $n$. The model put
+to use is trained on all $n$ points. While the learning curve $\operatorname{Err}(m)$ is still falling at $n$, the
+estimate is **pessimistic** for it, by $\operatorname{Err}(n(K-1)/K) - \operatorname{Err}(n)$ <Cite id="hastie2009" />.
+The estimate also targets the average over training sets, not the error of the one model fitted to the data at hand;
+<NoteLink to="what-cross-validation-estimates">what cross-validation estimates</NoteLink> treats that distinction.
+
+The size of the bias follows from the shape of the learning curve. Suppose the excess error over the irreducible error
+falls as $c/m$, which holds for least squares with $p$ coefficients ($c \approx p\sigma^2$ for noise variance
+$\sigma^2$) and for other regular parametric models. Then the excess error estimated by $K$-fold cross-validation is
+
+$$
+\frac{c}{n(K-1)/K} = \frac{K}{K-1}\cdot\frac{c}{n},
+$$
+
+the true excess error inflated by $K/(K-1)$:
+
+| $K$ | 2 | 3 | 5 | 10 | 20 | $n$ (leave-one-out) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Inflation $K/(K-1)$ | 2.00 | 1.50 | 1.25 | 1.11 | 1.05 | $n/(n-1)$ |
+
+Two-fold cross-validation doubles the excess error; ten-fold adds 11%. Flexible models with steep learning curves
+suffer more. Burman added a correction term, built from the errors of the fold models and the full model on the whole
+sample, that removes the leading term of this bias <Cite id="burman1989" />.
+
+<KFoldBias />
+
+## Choosing $K$
+
+- **Bias** falls as $K$ grows, by the inflation factor above, and is smallest for
+  <NoteLink to="leave-one-out-cross-validation">leave-one-out</NoteLink>, $K = n$.
+- **Variance** does not fall in the same way. The fold models of a large $K$ share almost all their training data, so
+  their errors are strongly correlated, and the average of correlated errors keeps much of their variance. The variance
+  of $\operatorname{CV}_K$ is a sum of the variance of single errors, the covariance of errors within a fold and the
+  covariance of errors in different folds, and the last term does not shrink with $n$ <Cite id="bengio2004" />. For
+  unstable learners such as <NoteLink to="decision-tree">decision trees</NoteLink>, both 2-fold and leave-one-out
+  estimates had high variance in Kohavi's experiments <Cite id="kohavi1995" />.
+  <NoteLink to="variance-of-cross-validation-estimates">Variance of cross-validation estimates</NoteLink> derives the
+  decomposition.
+- **Cost** is $K$ fits per candidate.
+- **For selection, not assessment,** a pessimistic bias that is equal across candidates does not change their ranking.
+  The bias is not equal: flexible candidates have steeper learning curves and lose more from training on fewer points,
+  so a small $K$ tilts the choice towards simpler models. Experiments on regression subset selection found 10-fold
+  better than leave-one-out for choosing among submodels <Cite id="breiman1992" />.
+
+**Defaults.** Five or ten folds are standard. Kohavi recommended stratified 10-fold cross-validation for choosing among
+classifiers, even when the computing budget allows more folds <Cite id="kohavi1995" />. Scikit-learn's `cross_val_score`
+and `GridSearchCV` use 5 folds by default, stratified for classifiers. With very large data a single validation set is
+enough; with very small data, <NoteLink to="repeated-and-monte-carlo-cross-validation">repeating</NoteLink> the $K$-fold
+split with fresh partitions reduces the part of the variance that comes from the partition.
+
+## Worked example
+
+Six observations $y = (2, 4, 3, 7, 5, 9)$ are to be predicted by their training mean, with
+<NoteLink to="regression-losses">squared loss</NoteLink>. The folds are $\set{1, 2}$, $\set{3, 4}$ and $\set{5, 6}$, so
+$K = 3$.
+
+1. **Fold 1** is held out. The training mean of $(3, 7, 5, 9)$ is 6. The squared errors at $y_1 = 2$ and $y_2 = 4$ are
+   $16$ and $4$.
+2. **Fold 2.** The mean of $(2, 4, 5, 9)$ is 5. The errors at 3 and 7 are $4$ and $4$.
+3. **Fold 3.** The mean of $(2, 4, 3, 7)$ is 4. The errors at 5 and 9 are $1$ and $25$.
+4. **Average.** $\operatorname{CV}_3 = (16 + 4 + 4 + 4 + 1 + 25)/6 = 54/6 = 9.0$.
+
+For comparison, the overall mean is 5, the residuals are $(-3, -1, -2, 2, 0, 4)$, and the training error is
+$34/6 = 5.67$. Leaving one point out moves the mean away from that point by $1/(n-1)$ of its residual, so each
+leave-one-out residual is $n/(n-1) = 6/5$ times the training residual, and leave-one-out gives
+$5.67 \times 1.44 = 8.16$.
+
+The three numbers follow the formula of the previous section. Let the observations have variance $\sigma^2$. The error
+of a mean of $m$ points at a new point has variance $\sigma^2$ from the new point and $\sigma^2/m$ from the mean, so
+$\operatorname{Err}(m) = \sigma^2(1 + 1/m)$. With $n = 6$:
+
+- the model in use, trained on 6 points, has $\operatorname{Err}(6) = 1.17\sigma^2$;
+- leave-one-out targets $\operatorname{Err}(5) = 1.20\sigma^2$;
+- 3-fold targets $\operatorname{Err}(4) = 1.25\sigma^2$;
+- the training error has expectation $\sigma^2(1 - 1/n) = 0.83\sigma^2$.
+
+The sample variance, $34/5 = 6.8$, estimates $\sigma^2$. It puts the target at $1.17 \times 6.8 = 7.9$, the 3-fold
+estimate's expectation at $8.5$, and the training error's at $5.7$. The excess error of the mean predictor is
+$\sigma^2/m$, the $c/m$ form with $c = \sigma^2$, and the 3-fold estimate inflates it by $3/2$: from $\sigma^2/6$ to
+$\sigma^2/4$.
+
+## Cost
+
+$K$ fits per candidate, and $K\abs{\Lambda}$ fits for a search over a set $\Lambda$ of hyperparameter values. The fits
+are independent and run in parallel. Each fit sees $n(K-1)/K$ points, so for learners whose cost grows faster than
+linearly in $n$ the total is less than $K$ full fits. For linear smoothers, leave-one-out needs only one fit (see
+<NoteLink to="leave-one-out-cross-validation">leave-one-out cross-validation</NoteLink>).
+
+## Trade-offs
+
+- **Data efficiency against cost.** Every point validates once and trains $K - 1$ times, at $K$ times the cost of a
+  hold-out <Cite id="arlot2010" />.
+- **Dependence on the partition.** A different random partition gives a different estimate. Repetition averages this
+  out (see <NoteLink to="repeated-and-monte-carlo-cross-validation">repeated and Monte Carlo
+  cross-validation</NoteLink>).
+- **No honest <NoteLink to="standard-error">standard error</NoteLink>.** The $K$ fold estimates share training data, so
+  the standard deviation of the fold estimates divided by $\sqrt K$ is too small, and no unbiased estimator of the
+  variance exists for all distributions <Cite id="bengio2004" />.
+
+## Pitfalls
+
+- **No shuffle.** Scikit-learn's `KFold` does not shuffle by default. On rows sorted by class or by date, contiguous
+  folds hold out whole classes or whole periods.
+- **Different folds for different candidates.** Comparing candidates on different partitions adds partition noise to
+  every difference. Fix the folds, or the seed, once.
+- **Reporting the best score.** The minimum of $\operatorname{CV}_K$ over many candidates is biased low (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+- **Averaging a non-additive metric over folds.** $F_1$ and the <Gloss name="auroc">area under the ROC curve</Gloss>
+  computed per fold and averaged differ from the same metric computed on all $n$ out-of-fold predictions. For $F_1$
+  under <NoteLink to="class-imbalance">class imbalance</NoteLink>, pooling the <Gloss name="tp">true-positive</Gloss>,
+  <Gloss name="fp">false-positive</Gloss> and <Gloss name="fn">false-negative</Gloss> counts over folds is the least
+  biased choice; per-fold averaging is biased, and fails when a fold has no positives <Cite id="forman2010" />.
+- **Dependent rows.** Repeated measurements of one entity, nearby points in space and consecutive points in time make
+  random folds optimistic (see <NoteLink to="grouped-cross-validation">grouped</NoteLink>,
+  <NoteLink to="spatial-and-blocked-cross-validation">spatial and blocked</NoteLink> and
+  <NoteLink to="time-series-cross-validation">time-series</NoteLink> cross-validation).

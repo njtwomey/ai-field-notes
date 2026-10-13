@@ -1,0 +1,186 @@
+---
+title: 'Corrected resampled t-test'
+kind: test
+summary: 'A t-test of two learning algorithms from their score differences on $J$ train–test splits of one data set. The splits share data, so the variance of the mean difference is taken as $(1/J + n_2/n_1)\hat\sigma^2$, not $\hat\sigma^2/J$ (Nadeau and Bengio).'
+tags: [model-selection, evaluation, hypothesis-testing, resampling, worked-example]
+aliases: [Nadeau–Bengio corrected t-test, corrected repeated cross-validation t-test, corrected resampled paired t-test, corrected repeated k-fold cv test]
+requires: [paired-t-test, variance-of-cross-validation-estimates]
+related: [five-by-two-cross-validation-test, mcnemars-test, repeated-and-monte-carlo-cross-validation, bayesian-comparison-of-classifiers, is-one-classifier-better-than-another, comparing-learning-algorithms]
+references: [nadeau2003, dietterich1998, bouckaert2003, bouckaert2004, bengio2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { TypeIErrorRates } from '../_shared/TypeIErrorRates'
+
+<Definition>
+Train two learning algorithms A and B on the same $J$ random train–test splits of one data set of $n$ rows, each split
+with $n_1$ training and $n_2$ test rows, and let $d_j$ be the difference of their scores on split $j$. The **corrected
+resampled t-test** of Nadeau and Bengio uses
+
+$$
+t = \frac{\bar d}{\sqrt{\paren{\dfrac1J + \dfrac{n_2}{n_1}}\hat\sigma^2}},
+$$
+
+with $\bar d$ and $\hat\sigma^2$ the mean and sample variance of the $d_j$, and reads it against a t distribution with
+$J - 1$ degrees of freedom <Cite id="nadeau2003" />. The term $n_2/n_1$ accounts for the correlation between the $d_j$
+that the overlap of the splits creates.
+</Definition>
+
+## What it answers
+
+The question is about algorithms, not fitted models: trained on data sets of $n_1$ rows from this distribution, does A
+score higher than B on average? One train–test split gives one difference, and its noise mixes the luck of the test set
+with the luck of the training set. Resampling gives many differences, and the obvious test is a
+<NoteLink to="paired-t-test">paired t-test</NoteLink> on them. That test is badly wrong. The splits are drawn from one
+data set, so their training sets overlap, their <NoteLink to="test-sets">test sets</NoteLink> overlap, and the
+differences rise and fall together. The paired t-test assumes they are independent and divides their spread by
+$\sqrt J$, which understates the uncertainty of $\bar d$ more and more as $J$ grows.
+
+Dietterich found that this "resampled paired t-test" has a false-rejection rate far above its nominal level, rising with
+the number of splits, and that the paired t-test on the ten folds of one 10-fold cross-validation rejected up to twice
+as often as it should <Cite id="dietterich1998" />. Nadeau and Bengio kept the resampling and fixed the variance.
+
+## Hypotheses
+
+$H_0: \mu = 0$, where $\mu = \expect[d_j]$ is the expected difference in score between A and B when each is trained on
+$n_1$ rows drawn from the population and tested on fresh rows. The expectation is over the training set, the test set
+and any internal randomness of the learners. The alternative is $\mu \ne 0$, or a one-sided alternative fixed in
+advance.
+
+## Assumptions
+
+- The $J$ splits are drawn independently at random from one data set: repeated hold-out (Monte Carlo cross-validation)
+  or $r$ repeats of $K$-fold <NoteLink to="cross-validation">cross-validation</NoteLink>, with both algorithms scored
+  on the same splits.
+- The differences are exchangeable: each has the same variance $\sigma^2$, and every pair has the same correlation
+  $\rho$.
+- That correlation is close to the test fraction, $\rho \approx n_2/n$. This is the heuristic part of the test; the next
+  section says where it comes from and when it fails.
+- $\bar d$ is approximately normal, which holds for scores averaged over tens of test rows.
+
+## Test statistic
+
+**The variance of the mean of correlated differences.** With $\var(d_j) = \sigma^2$ and $\cov(d_j, d_k) = \rho\sigma^2$
+for $j \ne k$, the variance of the mean sums $J$ variances and $J(J - 1)$ covariances:
+
+$$
+\var(\bar d) = \frac{1}{J^2}\paren{J\sigma^2 + J(J - 1)\rho\sigma^2} = \sigma^2\paren{\rho + \frac{1 - \rho}{J}}.
+$$
+
+As $J$ grows the variance falls to $\rho\sigma^2$, not to zero. The shared part of the differences, the part due to
+this particular data set, does not average away.
+
+**What the sample variance estimates.** For exchangeable variables the expected sample variance is the variance minus
+the covariance, because the shared part cancels in the deviations from the mean (the same identity drives the bias of
+the naive <NoteLink to="standard-error">standard error</NoteLink> in
+<NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>):
+
+$$
+\expect[\hat\sigma^2] = \sigma^2 - \rho\sigma^2 = (1 - \rho)\sigma^2.
+$$
+
+**The unbiased correction.** Factor $(1 - \rho)$ out of $\var(\bar d)$:
+
+$$
+\var(\bar d) = (1 - \rho)\sigma^2\paren{\frac1J + \frac{\rho}{1 - \rho}}, \qquad\text{so}\qquad
+\expect\brack{\paren{\frac1J + \frac{\rho}{1 - \rho}}\hat\sigma^2} = \var(\bar d).
+$$
+
+The naive estimate $\hat\sigma^2/J$ keeps only the first term. Its ratio to the truth is
+$(1 - \rho)/(J\rho + 1 - \rho)$, which falls towards zero as $J$ grows: the more splits, the more overconfident the
+naive test.
+
+**Choosing $\rho$.** The correlation cannot be estimated from the $d_j$ of one data set: one run of resampling gives no
+unbiased estimate of the variance of the mean (<Cite id="bengio2004" />, see
+<NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>). Nadeau and
+Bengio fix it with a deliberately crude surrogate <Cite id="nadeau2003" />. Suppose the loss on a test row did not
+depend on the training set at all, so the score on split $j$ is the mean of a fixed function $f$ over its $n_2$ test
+rows.
+
+1. One split's score then has variance $\var(f)/n_2$.
+2. Two independent random test sets of size $n_2$ from $n$ rows share $n_2^2/n$ rows on average, and only shared rows
+   contribute to the covariance of their means, so the covariance is $(n_2^2/n)\var(f)/n_2^2 = \var(f)/n$.
+3. The correlation is the ratio: $\rho_0 = (\var(f)/n)\big/(\var(f)/n_2) = n_2/n$.
+
+Then $\rho_0/(1 - \rho_0) = n_2/(n - n_2) = n_2/n_1$, and the corrected variance is $(1/J + n_2/n_1)\hat\sigma^2$, the
+statistic in the definition. For $r$ repeats of $K$-fold cross-validation, $J = rK$ and $n_2/n_1 = 1/(K - 1)$; 10
+repeats of 10-fold give $1/100 + 1/9 = 0.121$ in place of $0.01$, a standard error 3.5 times the naive one.
+
+The surrogate ignores the correlation that comes from shared training rows. Nadeau and Bengio note that it is a good
+approximation for stable algorithms and a poor one for unstable algorithms such as <NoteLink to="decision-tree">decision
+trees</NoteLink> and <NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> with small $k$. When the true
+$\rho$ exceeds $n_2/n$, the corrected test still rejects too often; when it is smaller, the test is conservative.
+
+## Decision rule
+
+Reject $H_0$ at level $\alpha$ when $\abs t \ge t_{1 - \alpha/2,\, J - 1}$. A $1 - \alpha$ interval for $\mu$ is $\bar d
+\pm t_{1 - \alpha/2,\, J - 1}\sqrt{(1/J + n_2/n_1)\hat\sigma^2}$.
+
+<TypeIErrorRates highlight={['resampledT', 'corrected']} byRepeats />
+
+The figure compares the tests on simulated data sets where the two learners are equally good by construction. The paired
+t-test on the 100 differences of 10 repeats of 10-fold cross-validation rejects on most data sets. Its second panel
+shows the mechanism: each extra repeat shrinks the naive standard error while the true uncertainty, set by the data set,
+stays put. The corrected test stays within Monte Carlo noise of 5% for every number of repeats; raise the number of
+simulated data sets to shrink the intervals. The learners are depth-4 decision trees, the unstable case Nadeau and
+Bengio warn about, and the corrected test still holds close to its level here.
+
+## Worked example
+
+A data set of $n = 200$ rows, two learners A and B, and 10 repeats of 10-fold cross-validation, so $J = 100$,
+$n_1 = 180$ and $n_2 = 20$. The data come from the figure's simulation with no noise on B's inputs and $n = 200$: the
+two learners are equally good, and A minus B in accuracy on 2000 fresh rows is $-0.0005$.
+
+1. **The differences.** Over the 100 folds, A's accuracy minus B's has mean $\bar d = 0.029$ and standard deviation
+   $\hat\sigma = 0.0916$. A looks 2.9 points better.
+2. **The naive test.** $\text{se} = 0.0916/\sqrt{100} = 0.00916$, $t = 0.029/0.00916 = 3.17$ on 99 degrees of freedom,
+   $p = 0.002$. It declares A better.
+3. **The corrected test.** The factor is $1/100 + 20/180 = 0.121$, so $\text{se} = 0.0916\sqrt{0.121} = 0.0319$ and
+   $t = 0.029/0.0319 = 0.91$, $p = 0.37$. It finds no difference.
+4. **The interval.** The corrected 95% interval for $\mu$ is $0.029 \pm 1.98 \times 0.0319 = [-0.034, 0.092]$. It
+   contains the true value, about zero.
+5. **Why the data favour A.** The first repeat alone gives $\bar d = -0.010$ over its ten folds; the mean over all
+   repeats is $+0.029$. Averaging repeats converges on what this one data set says, and this data set happens to suit A
+   a little. The correction keeps that data-set-level uncertainty in the standard error, which repetition cannot remove
+   (see <NoteLink to="repeated-and-monte-carlo-cross-validation">repeated and Monte Carlo cross-validation</NoteLink>).
+
+The same data set is worked through every test in <NoteLink to="is-one-classifier-better-than-another">is one
+classifier better than another?</NoteLink>
+
+## In practice
+
+- **10 repeats of 10-fold.** Bouckaert and Frank measured how often a test's verdict changes when the data are
+  re-partitioned at random. The corrected test on 10 repeats of 10-fold cross-validation was the most replicable of the
+  tests they compared, and the <NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink> the
+  least <Cite id="bouckaert2004" />. Bouckaert calibrated the degrees of freedom of several tests by simulation and
+  recommended the same 10-by-10 design, using all 100 differences, with 10 degrees of freedom
+  <Cite id="bouckaert2003" />.
+- **Number of splits.** Nadeau and Bengio found too little power at $J = 5$ random hold-out splits and little gain
+  beyond $J = 15$ <Cite id="nadeau2003" />.
+- **Same splits for both learners.** Pairing on the same splits removes the variance the two learners share.
+  Different seeds for different learners throw that away.
+- **Any score.** The test applies to any score averaged over test rows: accuracy, log-loss, <Gloss name="mse">mean
+  squared error</Gloss>.
+
+## Effect size
+
+Report $\bar d$ in the score's units with the corrected interval, here $0.029$ with $[-0.034, 0.092]$. An interval that
+spans zero and stays within a margin that no one would care about supports practical equivalence; the
+<NoteLink to="bayesian-comparison-of-classifiers">Bayesian correlated t-test</NoteLink> turns the same corrected
+variance into posterior probabilities of a practically meaningful difference.
+
+## Pitfalls
+
+- **Pooling folds into a plain t-test.** A paired t-test on the $rK$ fold scores of repeated cross-validation, with $J -
+  1$ degrees of freedom and $\hat\sigma/\sqrt J$, is the resampled t-test this note corrects.
+- **A heuristic, not an identity.** The correction is exact only when $\rho = n_2/n$. For very unstable learners or very
+  small data sets the true correlation can be larger, and the test then rejects more often than its level.
+- **One data set.** The test concerns training sets drawn from the distribution that produced this data set. It says
+  nothing about other data sets; comparisons over many data sets use ranks (see
+  <NoteLink to="comparing-classifiers-over-multiple-datasets">comparing classifiers over multiple data sets</NoteLink>).
+- **Tuning inside the comparison.** If either algorithm's hyperparameters were tuned on the same folds, its scores are
+  optimistic; tune inside each training split, as in <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>.
+- **Many comparisons.** Testing a new method against several baselines multiplies the
+  <Gloss name="fp">false-positive</Gloss> risk; see <NoteLink to="multiple-testing">multiple testing</NoteLink>.

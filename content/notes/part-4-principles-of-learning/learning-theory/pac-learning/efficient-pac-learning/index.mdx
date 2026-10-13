@@ -1,0 +1,151 @@
+---
+title: 'Efficient PAC learning'
+kind: concept
+summary: 'Efficient PAC learning asks for a learner whose running time is polynomial in $1/\epsilon$, $1/\delta$, the input dimension and the target''s size. Some classes with small VC dimension, such as 3-term DNF, are hard to learn properly yet easy to learn with a larger hypothesis class.'
+tags: [learning-theory, computational-complexity, worked-example]
+aliases: [efficient PAC learnability, polynomial-time PAC learning, proper learning, improper learning, representation-independent learning, consistency problem, computational learning theory]
+requires: [probably-approximately-correct-learning, realisable-and-agnostic-learning]
+related: [vapnik-chervonenkis-dimension, occam-bound, fundamental-theorem-of-statistical-learning, weak-and-strong-learnability]
+references: [valiant1984, pitt1988, kearns1994, kearns1994book, kearns1994agnostic, klivans2004, guruswami2009, bendavid2003agreement, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\Ccal = \bigcup_n \Ccal_n$ be a family of target classes, where $\Ccal_n$ holds functions on inputs of dimension
+$n$ and each target $c$ has a representation of size $\mathrm{size}(c)$. A learner **efficiently PAC learns** $\Ccal$
+using hypothesis class $\Hcal$ if, for every $n$, $c \in \Ccal_n$, distribution $\Dcal$ and $\epsilon, \delta \in
+(0, 1)$, it runs in time polynomial in $n$, $\mathrm{size}(c)$, $1/\epsilon$ and $1/\delta$, and returns a hypothesis
+in $\Hcal$ that can be evaluated in polynomial time and has $R(h) \le \epsilon$ with probability at least
+$1 - \delta$. The learning is **proper** if $\Hcal = \Ccal$ and **improper** (representation-independent) otherwise
+<Cite id="valiant1984" /> <Cite id="kearns1994book" />.
+</Definition>
+
+## Intuition
+
+The statistical theory of <NoteLink to="probably-approximately-correct-learning">PAC learning</NoteLink> counts
+examples. A class of finite <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> needs few of them, and
+<NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> succeeds
+(<NoteLink to="fundamental-theorem-of-statistical-learning">fundamental theorem of statistical learning</NoteLink>).
+That theory says nothing about how long the minimisation takes. Searching an exponentially large class for a
+hypothesis that fits the sample can be infeasible even when a few hundred examples carry enough information.
+
+Valiant's original definition required a polynomial-time learner <Cite id="valiant1984" />. Efficient PAC learning keeps
+that requirement and separates two questions. The sample complexity asks how much data is enough. The computational
+complexity asks whether a learner can use that data in reasonable time. The answers can differ sharply.
+
+The output representation matters. A learner that must return a hypothesis from the target class may face an
+NP-hard search, while a learner allowed a larger class may find a good hypothesis quickly. The larger class costs
+examples, because its capacity is larger, but it can save exponential time.
+
+## Definition
+
+The definition has four parts.
+
+- **Size parameters.** The input dimension $n$ (for example the number of Boolean variables) and $\mathrm{size}(c)$
+  (for example the number of terms of a formula) measure the problem. A learner must be polynomial in both, so that
+  harder targets may take longer but not exponentially longer.
+- **Accuracy and confidence.** The running time is polynomial in $1/\epsilon$ and $1/\delta$. A polynomial in
+  $\ln(1/\delta)$ is usually achievable, by repeating a learner and picking the best run on fresh examples.
+- **Hypothesis evaluation.** The returned hypothesis must be evaluable in polynomial time. Without this condition a
+  learner could return the training sample itself as an encoded "hypothesis" and push all the work to prediction time.
+- **The sample size.** A polynomial-time learner reads at most polynomially many examples, so efficient learnability
+  implies a polynomial sample complexity.
+
+The **consistency problem** for $\Hcal$ asks, given a labelled sample, for some $h \in \Hcal$ with zero training error,
+or a report that none exists. It links the computational and statistical questions in both directions.
+
+1. **Consistency gives learning.** If $\ln\abs{\Hcal_n}$ is polynomial in $n$ and the consistency problem is solvable in
+   polynomial time, then running the solver on $m = (\ln\abs{\Hcal_n} + \ln(1/\delta))/\epsilon$ examples is an
+   efficient realisable learner, by the <NoteLink to="realisable-and-agnostic-learning">realisable bound</NoteLink>.
+2. **Proper learning gives consistency.** Suppose a proper learner exists. Given a sample of $m$ points labelled
+   consistently with some $c \in \Ccal$, run the learner on the uniform distribution over those points with
+   $\epsilon < 1/m$. A hypothesis with risk below $1/m$ on that distribution misclassifies none of the $m$ points. So
+   the learner solves the consistency problem with probability at least $1 - \delta$: the problem is in RP, the class
+   of problems solved by randomised polynomial-time algorithms with one-sided error <Cite id="pitt1988" />.
+
+The second direction is the route to hardness results. If the consistency problem for $\Ccal$ is NP-hard, proper
+efficient learning of $\Ccal$ is impossible unless $\mathrm{RP} = \mathrm{NP}$, which is believed false.
+
+## Proper and improper learning
+
+**Conjunctions are efficiently and properly learnable.** A conjunction of literals over $n$ Boolean variables is
+consistent with a sample if it keeps every literal that all positive examples satisfy. The elimination algorithm starts
+with the conjunction of all $2n$ literals and, for each positive example, deletes the literals that the example
+falsifies. It never errs on a negative example, because its hypothesis always contains the target's literals and is
+therefore at least as strict. It runs in time $O(nm)$. With $\abs{\Hcal} = 3^n + 1$, so that
+$\ln\abs{\Hcal} \le n\ln 3 + \ln 2$, it needs $O((n + \ln(1/\delta))/\epsilon)$ examples <Cite id="valiant1984" />.
+
+**3-term DNF is hard to learn properly.** A 3-term DNF formula is a disjunction $T_1 \vee T_2 \vee T_3$ of three
+conjunctions. Pitt and Valiant reduced graph 3-colouring to its consistency problem, so 3-term DNF is not efficiently
+properly learnable unless $\mathrm{RP} = \mathrm{NP}$ <Cite id="pitt1988" />.
+
+**3-term DNF is easy to learn improperly.** Distributing the disjunction over the conjunctions gives
+
+$$
+T_1 \vee T_2 \vee T_3 = \bigwedge_{u \in T_1,\, v \in T_2,\, w \in T_3}(u \vee v \vee w),
+$$
+
+a 3-CNF formula: a conjunction of clauses with three literals each. There are at most $(2n)^3$ such clauses. Treat each
+clause as a new Boolean variable, computed from the input in polynomial time. A 3-CNF formula is then a conjunction over
+the new variables, and the elimination algorithm learns it in time polynomial in $n^3$ and $m$. The output is a 3-CNF
+formula, not a 3-term DNF formula, but it has small risk, which is all PAC learning asks <Cite id="pitt1988" />
+<Cite id="kearns1994book" />.
+
+The separation is about representation, not about information. Both classes have VC dimension polynomial in $n$; the
+NP-hardness comes from insisting that the answer be written as three terms.
+
+## Hardness results
+
+Representation hardness does not show that a class is hard to learn: an improper learner may still succeed. Hardness for
+every representation needs a different assumption.
+
+- **Cryptographic hardness.** Kearns and Valiant showed that efficiently learning polynomial-size Boolean formulae,
+  deterministic finite automata or constant-depth threshold circuits, with any polynomially evaluable hypothesis class,
+  would break RSA encryption, factor Blum integers and decide quadratic residuosity <Cite id="kearns1994" />. The
+  proof places the decryption functions of a public-key cryptosystem inside the class. Anyone can generate labelled
+  examples of them from the public key, so a learner for the class would decrypt.
+- **DNF.** Whether polynomial-size DNF formulae are efficiently PAC learnable is open. The fastest known algorithm runs
+  in time $2^{\tilde O(n^{1/3})}$ <Cite id="klivans2004" />.
+- **Agnostic learning.** Kearns, Schapire and Sellie defined efficient agnostic learning
+  <Cite id="kearns1994agnostic" />. In that setting the consistency problem becomes approximate error minimisation,
+  which is NP-hard even for simple classes. For halfspaces, when some halfspace agrees with a fraction $1 - \epsilon$ of
+  the examples, finding a halfspace that agrees with a fraction $\tfrac12 + \epsilon$ is NP-hard
+  <Cite id="guruswami2009" />. Approximately maximising agreements is NP-hard for monomials and several other simple
+  classes as well <Cite id="bendavid2003agreement" />. Minimising a convex <NoteLink to="surrogate-losses">surrogate
+  loss</NoteLink> in place of the 0–1 loss is the practical answer to this hardness.
+
+## Worked example
+
+**Elimination on four variables.** Let the target be $x_1 \wedge \neg x_3$ over $n = 4$ variables. The algorithm starts
+from $x_1 \wedge \neg x_1 \wedge x_2 \wedge \neg x_2 \wedge x_3 \wedge \neg x_3 \wedge x_4 \wedge \neg x_4$.
+
+1. The positive example $(1, 0, 0, 1)$ falsifies $\neg x_1$, $x_2$, $x_3$ and $\neg x_4$. They are deleted, leaving
+   $x_1 \wedge \neg x_2 \wedge \neg x_3 \wedge x_4$.
+2. The positive example $(1, 1, 0, 0)$ falsifies $\neg x_2$ and $x_4$, leaving $x_1 \wedge \neg x_3$.
+3. The negative example $(0, 1, 1, 1)$ is skipped. The hypothesis already labels it negative.
+
+Two positive examples recover the target exactly here. In general the hypothesis may keep extra literals that no
+positive example has falsified yet, and the PAC bound limits how much risk they cause.
+
+**Proper against improper, in examples.** Take $n = 10$ variables, $\epsilon = 0.05$ and $\delta = 0.05$, and use the
+realisable bound $m \ge (\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$.
+
+| Learner | Hypothesis class | $\ln\abs{\Hcal}$ | Examples | Time |
+| --- | --- | --- | --- | --- |
+| Proper | 3-term DNF, $\abs{\Hcal} \le 3^{3n}$ | $30\ln 3 = 33.0$ | 720 | NP-hard search |
+| Improper | 3-CNF, $\abs{\Hcal} \le 2^{(2n)^3}$ | $8{,}000\ln 2 = 5{,}545$ | 110,964 | polynomial |
+
+The improper learner needs 154 times as many examples. It trades data for computation: the proper learner's 720
+examples suffice statistically, but finding a consistent 3-term DNF formula is an NP-hard search.
+
+## Pitfalls
+
+- **Proper hardness is not learning hardness.** An NP-hardness proof for the consistency problem of $\Ccal$ rules out
+  only learners that output hypotheses in $\Ccal$. 3-term DNF is the standard example.
+- **Worst-case hardness is about adversarial distributions.** The hardness results hold for some distributions and
+  targets. Learning under a fixed distribution, such as the uniform distribution on the Boolean cube, can be easier.
+- **Polynomial is not practical.** The improper 3-term DNF learner uses $(2n)^3$ features. For $n = 100$ that is
+  8,000,000 features, polynomial in $n$ but heavy in practice.
+- **The hypothesis must be evaluable.** Allowing any output representation without the polynomial-evaluation
+  condition makes every class trivially "learnable" by storing the data.

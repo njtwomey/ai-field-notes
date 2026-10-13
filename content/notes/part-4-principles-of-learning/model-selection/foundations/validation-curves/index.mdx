@@ -1,0 +1,142 @@
+---
+title: 'Validation curves'
+kind: concept
+summary: 'A validation curve plots training and cross-validated error against one hyperparameter. Low training error with high validation error marks overfitting, two high errors mark underfitting, and the validation minimum is the selection. Learning curves plot them against sample size.'
+tags: [model-selection, diagnostics, worked-example]
+aliases: [validation curve, complexity curve]
+requires: [overfitting-and-underfitting, cross-validation]
+related: [learning-curves-and-sample-size, one-standard-error-rule, regularisation-paths, choosing-the-regularisation-strength, early-stopping]
+references: [hastie2009, breiman1984, pedregosa2011, bengio2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { RidgeValidationCurve } from './RidgeValidationCurve'
+
+<Definition>
+Let a learner have a hyperparameter $\lambda$ that controls its flexibility, and let $\lambda_1 < \dots < \lambda_m$ be
+a grid of values. For each $\lambda_k$, run $K$-fold <NoteLink to="cross-validation">cross-validation</NoteLink> on the
+same folds and record two averages: the error of each fold's model on its own training folds, and its error on the
+held-out fold, $\operatorname{CV}(\lambda_k)$. The **validation curve** plots both against $\lambda$, usually with a
+band of one <NoteLink to="standard-error">standard error</NoteLink> around the validation error
+<Cite id="hastie2009" />. It shows where the learner underfits and overfits, and its minimum selects $\lambda$.
+</Definition>
+
+## Intuition
+
+A single cross-validation score says how good one setting is. A validation curve says how the error changes as the
+setting changes, which explains the score. The training error shows what the model can fit. The validation error shows
+what it can predict. Where they agree, the model fits only what generalises. Where they diverge, the model has begun to
+fit the noise of its training folds.
+
+The curve is the measurable version of the picture in <NoteLink to="overfitting-and-underfitting">overfitting and
+underfitting</NoteLink>. The test error is unknown, so cross-validated error stands in for it, and the training-fold
+error stands in for the training error.
+
+## Reading a validation curve
+
+Orient the axis so that flexibility grows in one direction. For a penalty $\lambda$, flexibility falls as $\lambda$
+grows. For a polynomial degree, a tree depth or a number of training epochs, it rises.
+
+- **The underfitting side.** At the rigid end, training and validation errors are both high and close together. The gap
+  is small because the model cannot fit the noise. The errors are high because it cannot fit the signal either. More
+  flexibility lowers both.
+- **The overfitting side.** At the flexible end, the training error is low and keeps falling, while the validation error
+  rises. The gap between them estimates how much the fit relies on noise in its own training folds.
+- **The bottom.** Between the two, the validation error reaches its minimum. The minimiser
+  $\hat\lambda = \argmin_k \operatorname{CV}(\lambda_k)$ is the cross-validation choice.
+- **The width of the bottom.** Near the minimum the curve is usually flat relative to its standard errors. All the
+  values whose validation error lies within about one standard error of the minimum are statistically
+  indistinguishable on these data. The <NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> picks
+  the most regularised of them <Cite id="breiman1984" />.
+
+The training curve on its own cannot select: it decreases monotonically towards the flexible end. It earns its place on
+the plot by separating the two failure modes. A high validation error with a high training error calls for more
+flexibility. A high validation error with a low training error calls for less.
+
+## Computing one
+
+1. **Choose the grid on the right scale.** Penalties, <Gloss name="learning-rate">learning rates</Gloss> and kernel
+   widths act multiplicatively, so their grids are spaced evenly in $\log\lambda$. Ten to forty values spanning several
+   orders of magnitude are typical. Extend the grid until both failure modes are visible.
+2. **Use the same folds for every value.** With common folds, differences between neighbouring points reflect the
+   hyperparameter, not the luck of the split. The curve is then smooth even when each point has a large standard
+   error.
+3. **Record both errors on every fold.** The training error is each fold model's error on the $(K - 1)n/K$ points it was
+   fitted to, averaged over folds. It measures the data loss only, without the <NoteLink to="regularisation">penalty
+   term</NoteLink>.
+4. **Attach a standard error.** The usual band is the standard deviation of the $K$ fold errors divided by $\sqrt K$.
+   The fold errors share training data, so this band is too narrow, and no unbiased estimate of the variance exists
+   <Cite id="bengio2004" />. It is still a useful scale for reading the curve.
+
+scikit-learn's `validation_curve` returns these training and validation scores for a grid of one hyperparameter
+<Cite id="pedregosa2011" />.
+
+<RidgeValidationCurve />
+
+## Validation curves and learning curves
+
+A validation curve and a learning curve answer different questions with the same two errors.
+
+| | Validation curve | Learning curve |
+| --- | --- | --- |
+| Horizontal axis | A hyperparameter $\lambda$ | The training-set size $n$ |
+| What is fixed | The training data | The hyperparameter |
+| What it chooses | $\lambda$ | Whether more data will help |
+| Overfitting shows as | Validation error rising towards the flexible end | A persistent gap that closes slowly with $n$ |
+| Underfitting shows as | Both errors high at the rigid end | Both errors converging to a high plateau |
+
+A learning curve that has flattened with both errors high says that more data will not help, and that more flexibility
+might. A learning curve with a wide gap still closing says that more data would lower the error at this setting. See
+<NoteLink to="learning-curves-and-sample-size">learning curves and sample size</NoteLink>. Plotting the validation error
+against training epochs gives a third curve, whose minimum is the stopping point of
+<NoteLink to="early-stopping">early stopping</NoteLink>.
+
+## Worked example
+
+The figure at its default settings fits <NoteLink to="ridge-regression">ridge regression</NoteLink> on a cubic B-spline
+basis with 30 knots to $n = 60$ points, $x$ uniform on $[-1, 1]$ and $y = \sin(\pi x) + \varepsilon$ with noise standard
+deviation $0.3$, so the smallest achievable error is $\sigma^2 = 0.09$. Five-fold cross-validation scores 37 values of
+$\log_{10}\lambda$ from $-6$ to 3. The true error comes from 4000 fresh points.
+
+| $\log_{10}\lambda$ | Training error | Validation error | Standard error | True error |
+| --- | --- | --- | --- | --- |
+| $-3.00$ | 0.032 | 0.627 | 0.260 | 0.792 |
+| $-0.75$ | 0.051 | 0.145 | 0.036 | 0.136 |
+| $-0.25$ | 0.085 | 0.170 | 0.047 | 0.158 |
+| $1.00$ | 0.406 | 0.445 | 0.081 | 0.459 |
+
+1. **Overfitting at $\log_{10}\lambda = -3$.** The training error, $0.032$, is a third of the noise variance. The fit
+   passes close to the training points. The validation error is twenty times larger, at $0.627$. The fit swings between
+   the points, and the swings cost far more on held-out points than they save on training points.
+2. **Underfitting at $\log_{10}\lambda = 1$.** The penalty shrinks the fit towards a constant, so it
+   cannot reach the peaks of the sine. Training and validation errors are $0.406$ and $0.445$, both far above $0.09$ and
+   within $0.04$ of each other.
+3. **The minimum.** The validation error is smallest at $\log_{10}\lambda = -0.75$, with $0.145$. The true error there
+   is $0.136$, which is also the smallest true error on the grid. Here cross-validation selects the right value.
+4. **One standard error.** The threshold is $0.145 + 0.036 = 0.181$. The largest $\lambda$ whose validation error is
+   below it is $\log_{10}\lambda = -0.25$, with $0.170$; the next value, $0$, has $0.206$. The rule picks a fit three
+   times as regularised, at a true error of $0.158$ instead of $0.136$. On this sample the extra regularisation cost
+   $0.022$. The rule buys stability across samples, not accuracy on one.
+5. **The optimism of the minimum.** The validation error at the minimum, $0.145$, happens to lie above the true error.
+   Over many samples the minimum of a validation curve is biased low, because it is the smallest of 37 noisy estimates
+   (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## Pitfalls
+
+- **Reporting the minimum as performance.** The lowest point of the validation curve was chosen for being low. Assess
+  the chosen setting on a test set or by <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>.
+- **A grid that stops too soon.** A curve whose minimum lies at the edge of the grid has not found the minimum. Extend
+  the grid until the validation error rises on both sides.
+- **One hyperparameter at a time.** Hyperparameters interact. The best penalty depends on the learning rate, the kernel
+  width or the number of features, so a validation curve for one with the others fixed answers a conditional question.
+  Search several together with <NoteLink to="hyperparameter-search">hyperparameter optimisation</NoteLink>, and use
+  validation curves to understand the result.
+- **Training error on a different footing.** Training error must be measured on the same rows the fold model was fitted
+  to, with the same loss as the validation error and without the penalty. A training curve that includes the penalty,
+  or uses a different metric, cannot be compared with the validation curve.
+- **Curves that are not U-shaped.** Very large models can show validation error falling again past the point where they
+  interpolate the training data (see <NoteLink to="double-descent">double descent</NoteLink>). A curve over a short
+  range can miss the second descent or mistake it for noise.
+- **Noise read as structure.** With a small validation set, wiggles in the curve are often noise. Compare them with the
+  standard-error band before acting on them.

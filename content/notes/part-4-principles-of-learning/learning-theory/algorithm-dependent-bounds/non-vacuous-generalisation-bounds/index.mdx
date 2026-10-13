@@ -1,0 +1,161 @@
+---
+title: 'Non-vacuous generalisation bounds'
+kind: example
+summary: 'A bound is vacuous when it exceeds the trivial value, such as risk 1. Optimising a PAC-Bayes bound over a Gaussian posterior around trained weights gives non-vacuous bounds for small neural networks, where VC and norm bounds are in the thousands.'
+tags: [learning-theory, generalisation, worked-example, deep-learning]
+aliases: [nonvacuous generalization bound, non-vacuous bound, vacuous bound, risk certificate, PAC-Bayes bound optimisation]
+requires: [pac-bayes-bounds]
+related: [norm-based-bounds-for-neural-networks, flat-minima-and-sharpness, limits-of-uniform-convergence, measuring-capacity-empirically, vapnik-chervonenkis-dimension, minimum-description-length, algorithm-dependent-bounds]
+references: [dziugaite2017, perezortiz2021, zhou2019nonvacuous, lotfi2022, zhang2017, langford2005, alquier2024]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+A generalisation bound is **vacuous** when its value is no better than a trivial bound, such as a risk of 1 for the
+<NoteLink to="surrogate-losses">0-1 loss</NoteLink>, or 0.5 for a binary problem where guessing achieves it.
+
+The problem: binary <Gloss name="mnist" /> assigns label $+1$ to the digits 0 to 4 and $-1$ to the digits 5 to 9. A
+network with one hidden layer of 600 <Gloss name="relu" /> units (about 472,000 parameters) is trained by
+<Gloss name="sgd">stochastic gradient descent</Gloss> on $m = 55{,}000$ images to a training error of 0.001 and a test
+error of 0.018. Using only the training data, certify an upper bound on the error of a predictor derived from the
+network, valid with probability at least 0.965. Dziugaite and Roy solved this problem with an optimised PAC-Bayes bound
+of 0.161 <Cite id="dziugaite2017" />.
+</Definition>
+
+## Setup
+
+**The data and the classifier.** Each example is a $28 \times 28$ grey-scale image, a vector $x \in \reals^{784}$, with
+a label $y \in \set{-1, +1}$. A weight vector $\wvec \in \reals^d$ with $d \approx 472{,}000$ defines the classifier
+$h_{\wvec}$. The trained weights are $\hat\wvec$ and the random initialisation they started from is $\wvec_0$. The loss
+is the 0-1 loss, so every risk lies in $[0, 1]$.
+
+**The quantity bounded.** A PAC-Bayes bound controls the Gibbs risk $R(Q) = \expect_{\wvec \sim Q}R(h_{\wvec})$ of a
+randomised classifier that draws weights from a posterior $Q$ for each prediction
+(<NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>). The certificate is for this stochastic network, not
+for $h_{\hat\wvec}$ itself.
+
+**The bound used.** With probability at least $1 - \delta$, every posterior $Q$ satisfies
+$\operatorname{kl}(\hat R_S(Q) \,\|\, R(Q)) \le (\KL(Q \,\|\, P) + \ln(m/\delta))/(m - 1)$, the Langford–Seeger form
+of the PAC-Bayes theorem <Cite id="dziugaite2017" />. The bound on $R(Q)$ is the largest $p$ that satisfies this
+inequality, the inverse of the binary divergence $\operatorname{kl}$.
+
+**The prior and the posterior.** Both are Gaussian, so the divergence has a closed form.
+
+- **Prior** $P = \Gauss(\wvec_0, \lambda\eye)$: centred at the random initialisation, which is drawn independently of
+  the data, with variance $\lambda$.
+- **Posterior** $Q = \Gauss(\wvec, \diag(\svec))$: a mean $\wvec$ and one variance $s_j$ per weight, both free.
+- **Divergence:**
+
+$$
+\KL(Q \,\|\, P) = \frac12\LB\frac{\norm{\svec}_1}{\lambda} - d + \frac{\norm{\wvec - \wvec_0}^2}{\lambda} + d\ln\lambda - \sum_{j=1}^d \ln s_j\RB.
+$$
+
+The divergence is small when the mean stays near the initialisation and the variances $s_j$ stay near the prior
+variance $\lambda$.
+
+## Solution
+
+**Step 1: the VC bound is vacuous.** The best known upper bound on the VC dimension of this ReLU network is about 26
+million <Cite id="dziugaite2017" />, nearly 500 times the sample size. A realisable VC bound of order
+$d_{\mathrm{VC}}\ln(m)/m$ is about $26 \times 10^6 \times 10.9/55{,}000 \approx 5{,}000$, which says nothing about a
+risk in $[0, 1]$ (<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>). The network can also fit random
+labels (<NoteLink to="measuring-capacity-empirically">measuring capacity empirically</NoteLink>), so no bound that
+depends only on the class can be small <Cite id="zhang2017" />.
+
+**Step 2: choose the prior variance by a <NoteLink to="union-bound">union bound</NoteLink>.** No single $\lambda$ is
+right in advance. The prior variance is restricted to the grid $\lambda_j = c\,e^{-j/b}$ for $j = 1, 2, \dots$, with
+$c = 0.1$ and $b = 100$, and the bound for $\lambda_j$ is given confidence $6\delta/(\pi^2 j^2)$. These shares sum to
+$\delta$, so the bound holds for every grid value at once. The union bound adds about $2\ln j + \ln(\pi^2/6)$ nats to
+the numerator.
+
+**Step 3: optimise a differentiable surrogate.** The posterior is found by minimising
+
+$$
+\hat L_S(Q) + \sqrt{\frac{B(\wvec, \svec, \lambda)}{2}}, \qquad
+B = \frac{\KL(Q \,\|\, P) + 2\ln(b\ln(c/\lambda)) + \ln(\pi^2 m/(6\delta))}{m - 1},
+$$
+
+over $\wvec$, $\svec$ and $\lambda$, starting from $\wvec = \hat\wvec$. Three substitutions make this tractable.
+
+- The 0-1 Gibbs error is replaced by the Gibbs logistic loss $\hat L_S(Q)$, a convex surrogate with useful gradients.
+- The kl inverse is replaced by its Pinsker relaxation $\hat R + \sqrt{B/2}$, which has a gradient everywhere.
+- The expectation over $Q$ is estimated with one draw $\wvec + \xivec\odot\sqrt{\svec}$,
+  $\xivec \sim \Gauss(\zeros, \eye)$, per step, so stochastic gradient descent can differentiate through the sample.
+
+The optimisation trades fit against divergence. It pulls $\wvec$ back towards $\wvec_0$ where this costs little
+training loss, and it widens $s_j$ for weights whose perturbation does not change the predictions.
+
+**Step 4: round the prior variance and bound the Monte Carlo estimate.** After optimisation $\lambda$ is rounded to the
+grid. The Gibbs training error $\hat R_S(Q)$ is an expectation over $Q$ that cannot be computed exactly. It is estimated
+from $n = 150{,}000$ weight draws and replaced by an <Gloss name="ucb">upper confidence bound</Gloss> from the
+binary-divergence inequality at confidence $\delta' = 0.01$. With $\delta = 0.025$ for the PAC-Bayes bound, the final
+certificate holds with probability $1 - 0.025 - 0.01 = 0.965$.
+
+**Step 5: the numbers.** For the 600-unit network the optimised posterior has
+
+- Gibbs training error (upper confidence bound) $\hat R_S(Q) = 0.028$;
+- divergence $\KL(Q \,\|\, P) = 5{,}144$ nats;
+- bound on the Gibbs risk 0.161;
+- Gibbs test error 0.034, estimated on the 10,000 held-out images <Cite id="dziugaite2017" />.
+
+The confidence term is $\ln(\pi^2 m/(6\delta)) = \ln(3.6 \times 10^6) = 15.1$ nats,
+and the grid term $2\ln(b\ln(c/\lambda))$ is between 9 and 13 nats for prior variances between $e^{-9}$ and $0.04$.
+So $B \approx (5{,}144 + 15 + 11)/54{,}999 = 0.094$. The largest $p$ with
+$\operatorname{kl}(0.028 \,\|\, p) \le 0.094$ is $p = 0.161$. The Pinsker relaxation used during training would give
+$0.028 + \sqrt{0.047} = 0.245$, so inverting the divergence exactly lowers the bound by 0.084.
+
+**Step 6: read the result.** The certificate of 16.1% is far above the measured 3.4%, but far below the trivial 50% for
+a balanced binary problem. It is non-vacuous. The divergence of 5,144 nats is about 7,400 bits, a small fraction of the
+472,000 parameters: the posterior specifies the network to within a few thousand bits relative to its random
+initialisation. As a control, the same procedure on a network trained on random labels gives a divergence of 201,131
+nats and a bound of 1.352, which is vacuous, as it should be <Cite id="dziugaite2017" />.
+
+## Simulation
+
+{/* figure pending engine (B2 pacBayesLinear with optimise; A1 pacBayesBound, klInverse): the optimisation trace of
+Steps 3–4 for a linear classifier on a small dataset (bound, Gibbs training error and <Gloss name="kl" /> against steps), with the
+final kl bound beside the Gibbs test error, and the same run on random labels */}
+
+The optimisation can be reproduced at small scale with a linear classifier in place of the network: a Gaussian
+posterior around trained weights, a Gaussian prior around a fixed initial point, and the same surrogate objective.
+
+## What it illustrates
+
+- **Bounds that depend on the output, not the class.** The <NoteLink to="pac-bayes-bounds">PAC-Bayes</NoteLink>
+  capacity term is a divergence between the returned posterior and the prior. It is small for this network although the
+  class is large enough to fit random labels.
+- **The prior's centre sets what the divergence measures.** Centring the prior at the random initialisation, rather than
+  at zero, makes the divergence measure $\norm{\wvec - \wvec_0}$, the distance travelled in training. The initialisation
+  is random and independent of the data, so the bound remains valid.
+- **Flatness enters as posterior width.** Weights that tolerate large perturbations get large $s_j$ and contribute
+  little to the divergence. This is the quantitative form of the idea that solutions in
+  <NoteLink to="flat-minima-and-sharpness">flat minima</NoteLink> generalise.
+- **Exact kl inversion gives a tighter bound than Pinsker's inequality when the training error is small.** The kl
+  inversion turns a training error of 0.028 into a bound of 0.161; Pinsker's inequality would give 0.245.
+- **Every estimated quantity needs its own confidence.** The Monte Carlo estimate of the Gibbs error and the choice of
+  the prior variance each take a share of the failure probability.
+
+## Variations
+
+- **Data-dependent priors.** Pérez-Ortiz, Rivasplata, Shawe-Taylor and Szepesvári trained the prior on one part of the
+  training data and certified the posterior on the rest. A small convolutional network on ten-class MNIST reached 1%
+  test error with a risk certificate of 1.5%, and a large convolutional network on <Gloss name="cifar-10" /> had a
+  certificate of 18% for a test error of 14.6% <Cite id="perezortiz2021" />.
+- **Compression.** Zhou, Veitch, Austern, Adams and Orbanz pruned and quantised the trained network and used its
+  compressed size as the description length in a PAC-Bayes bound (<NoteLink to="minimum-description-length">minimum
+  description length</NoteLink>). They obtained top-1 error bounds below 46% on MNIST and the first non-vacuous bound on
+  <Gloss name="imagenet" />: top-1 error below 96.5% and top-5 error below 89% <Cite id="zhou2019nonvacuous" />.
+- **Compression in a subspace.** Lotfi, Finzi, Kapoor, Potapczynski, Goldblum and Wilson trained the network in a
+  random low-dimensional subspace and quantised the coordinates. With priors independent of the data their bounds were
+  11.6% on MNIST, 58.2% on CIFAR-10 and 93.5% on ImageNet; with data-dependent priors they were 1.4%, 16.6% and 40.9%
+  <Cite id="lotfi2022" />.
+- **Larger networks.** In the original study the bound grew little with width or depth: five other architectures,
+  with up to three hidden layers and up to 2.4 million parameters, gave bounds between 0.170 and 0.223
+  <Cite id="dziugaite2017" />.
+
+What makes these bounds tight is the same in each variation. The bound must charge only for what the training data
+actually determined, measured relative to a prior that captures what was known without them. A random initialisation,
+a prior trained on held-out data, or a short code for a compressed network each make that charge small. The cost is
+that each certifies a modified predictor: a stochastic network, a network trained on part of the data, or a compressed
+network, not the network that was originally trained.

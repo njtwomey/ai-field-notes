@@ -1,0 +1,186 @@
+---
+title: 'Sample-compression bounds'
+kind: concept
+summary: 'A sample compression scheme of size $k$ rebuilds a learner''s output from $k$ of its $m$ training examples. If the output is correct on the other $m - k$, its risk is at most $(\ln\binom{m}{k} + \ln(1/\delta))/(m - k)$ with probability $1 - \delta$: a bound set by $k$, not by the class.'
+tags: [learning-theory, generalisation, worked-example]
+aliases: [sample compression scheme, compression scheme, compression bound, Littlestone–Warmuth compression, compression set]
+requires: [probably-approximately-correct-learning, union-bound]
+related: [support-vector-machine, kernel-support-vector-machine, vapnik-chervonenkis-dimension, test-set-bounds, occam-bound, realisable-and-agnostic-learning, pac-bayes-bounds, perceptron, algorithmic-stability, algorithm-dependent-bounds]
+references: [littlestone1986, floyd1995, graepel2005, moran2016, blumer1989, vapnik1998, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { SupportVectorCompression } from './SupportVectorCompression'
+
+<Definition>
+A **sample compression scheme** of size $k$ for a learning algorithm $A$ is a pair of maps. The **compression map**
+$\kappa$ selects from any training sample $S = ((x_i, y_i))_{i=1}^m$ a subsequence $S_I = (z_i)_{i \in I}$ of at most
+$k$ examples, the **compression set**. The **reconstruction map** $\rho$ turns any such subsequence into a hypothesis,
+and the scheme reproduces the algorithm: $A(S) = \rho(S_{\kappa(S)})$. In the realisable setting the reconstruction must
+also label every example of $S$ correctly <Cite id="littlestone1986" />. The **sample-compression bound** states that,
+with probability at least $1 - \delta$, an output rebuilt from $k$ examples and correct on the remaining $m - k$ has
+risk at most $(\ln\binom{m}{k} + \ln(1/\delta))/(m - k)$ <Cite id="littlestone1986" /> <Cite id="floyd1995" />.
+</Definition>
+
+## Intuition
+
+Many learners return a hypothesis that is fixed by a few of their training examples. The tightest axis-aligned
+rectangle around the positive points is fixed by the leftmost, rightmost, highest and lowest of them. A
+<NoteLink to="support-vector-machine">support vector machine</NoteLink> is fixed by its support vectors: delete any
+other point and the solution does not change. The <NoteLink to="perceptron">perceptron</NoteLink> is fixed by the
+examples on which it made a mistake.
+
+If a hypothesis is built from $k$ examples, the other $m - k$ examples played no part in choosing it. They are a fresh
+test set for it. A <NoteLink to="test-set-bounds">test-set bound</NoteLink> on those $m - k$ points then controls its
+risk. The learner chose which $k$ examples to keep, so the test-set bound must hold for every possible choice at once.
+There are $\binom{m}{k}$ choices, and a <NoteLink to="union-bound" /> over them costs $\ln\binom{m}{k} \approx
+k\ln(em/k)$ in the exponent.
+
+The capacity in this bound is the size of the compression set, not a property of the hypothesis class. A kernel SVM
+chooses from a class of infinite VC dimension, and its compression bound depends only on how many support vectors it
+used. The bound depends on the algorithm and on the sample it ran on.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, compression makes the
+move that exploits structure through the algorithm: it concentrates on the examples left out, and it makes the bound
+uniform over subsets of the sample rather than over a class.
+
+## Compression schemes
+
+A scheme is defined by its two maps, and the maps need not be computationally simple.
+
+- **Rectangles.** For axis-aligned rectangles in $\reals^D$, keep the positive points that are extreme in some
+  coordinate: at most $2D$ of them. The reconstruction returns the smallest rectangle containing them, which contains
+  every positive point and, in the realisable case, no negative point. The size is $k = 2D$, equal to the VC dimension.
+- **Support vector machines.** Keep the support vectors, the points with dual variable $\alpha_i > 0$. The
+  reconstruction retrains the SVM on them with the same $C$ and kernel. The dual solution restricted to the support
+  vectors still satisfies the optimality conditions of the smaller problem, so the retrained SVM is the original one.
+- **Online learners with a mistake bound.** Run an online algorithm such as the perceptron through the sample until it
+  makes no more mistakes, and keep the examples on which it updated. Replaying those examples rebuilds the final
+  hypothesis. A mistake bound of $M$ gives a compression scheme of size $M$ <Cite id="floyd1995" />.
+
+A compression scheme may also carry a few bits of side information, such as which of the kept points are positive. The
+bound then gains the logarithm of the number of possible messages.
+
+## The bound
+
+**Theorem (realisable).** Let $A$ have a compression scheme of fixed size $k$, and let the data be drawn
+<Gloss name="iid" /> from $\Dcal$. With probability at least $1 - \delta$, if $A(S)$ is correct on every example of $S$
+outside its compression set, then
+
+$$
+R(A(S)) \le \frac{\ln\binom{m}{k} + \ln(1/\delta)}{m - k} \le \frac{k\ln(em/k) + \ln(1/\delta)}{m - k}.
+$$
+
+The derivation has three steps <Cite id="littlestone1986" />.
+
+1. **Fix the indices.** Fix a set $I \subseteq \set{1, \dots, m}$ of $k$ indices, chosen before the data are seen. The
+   hypothesis $h_I = \rho(S_I)$ depends only on the $k$ examples indexed by $I$. The other $m - k$ examples are
+   independent of $S_I$, so they are independent of $h_I$.
+2. **Concentrate on the rest.** Suppose $R(h_I) > \epsilon$. Each of the $m - k$ other examples is classified
+   correctly with probability less than $1 - \epsilon$, independently. The probability that $h_I$ is correct on all of
+   them is less than $(1 - \epsilon)^{m - k} \le e^{-\epsilon(m - k)}$, using $1 - \epsilon \le e^{-\epsilon}$.
+3. **Union over index sets.** The output $A(S)$ equals $h_I$ for the set $I = \kappa(S)$ that the compression map
+   chooses. If $A(S)$ has risk above $\epsilon$ and is correct outside its compression set, then some $h_I$ has risk
+   above $\epsilon$ and is correct outside $I$. By the <NoteLink to="union-bound" /> over the $\binom{m}{k}$ index
+   sets, this has probability less than $\binom{m}{k}e^{-\epsilon(m - k)}$. Setting this equal to $\delta$ and solving
+   for $\epsilon$ gives the first bound. The second uses $\binom{m}{k} \le (em/k)^k$.
+
+The proof is the realisable finite-class bound of <NoteLink to="realisable-and-agnostic-learning">realisable and
+agnostic learning</NoteLink>, applied to the $\binom{m}{k}$ hypotheses that the sample itself can produce, with
+$m - k$ examples left to test them. Littlestone and Warmuth's original statement bounds the failure probability by
+$\binom{m}{k}(1 - \epsilon)^{m - k}$ <Cite id="littlestone1986" />.
+
+**A size chosen by the data.** The number of support vectors is not known in advance. Splitting the confidence
+$\delta$ evenly over the sizes $k = 1, \dots, m$ replaces $\ln(1/\delta)$ by $\ln(m/\delta)$, and the bound then holds
+for the size the algorithm actually used.
+
+**Errors outside the compression set.** If $A(S)$ makes $r$ errors on the $m - k$ examples outside its compression set,
+step 2 becomes a test-set bound with $r$ errors. With <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink> and the union bound over index sets and sizes,
+
+$$
+R(A(S)) \le \frac{r}{m - k} + \sqrt{\frac{\ln\binom{m}{k} + \ln(m/\delta)}{2(m - k)}}.
+$$
+
+Binomial-tail and relative-entropy versions are tighter when $r/(m - k)$ is small <Cite id="graepel2005" />.
+
+**Compression and the VC dimension.** A class with a compression scheme of size $k$ has finite VC dimension, so it is
+<Gloss name="pac" /> learnable. Littlestone and Warmuth asked whether the converse holds. Moran and Yehudayoff proved
+that every class of VC dimension $d$ has a compression scheme of size $\exp(O(d))$ <Cite id="moran2016" />. Whether size
+$O(d)$ always suffices is open.
+
+## Support vectors as a compression set
+
+The soft-margin SVM with penalty $C$ solves a convex problem whose solution
+is $f(x) = \sum_i\alpha_i y_i k(x_i, x) + b$. A point with $\alpha_i = 0$ satisfies $y_i f(x_i) \ge 1$: it lies
+outside the margin, on the correct side. So the SVM is correct on every point outside its support set, even when the
+data are not separable and some support vectors are training errors. The realisable bound applies with $k$ equal to
+the number of support vectors and no errors outside the set.
+
+Vapnik gave a related bound in expectation. The leave-one-out error of an SVM is at most the fraction of support
+vectors, because leaving out a non-support vector does not change the solution. The
+<NoteLink to="empirical-risk-minimisation">expected risk</NoteLink> of an SVM trained on $m - 1$ points is therefore at
+most $\expect[k]/m$ <Cite id="vapnik1998" />.
+
+<SupportVectorCompression />
+
+{/* figure pending engine (A1 compressionBound, sampleComplexity): the compression bound against m for the support
+sets measured here, beside the SVM's test error and its <NoteLink to="margin-bounds">margin bound</NoteLink> */}
+
+## Worked example
+
+**Rectangles in the plane.** Take axis-aligned rectangles in $\reals^2$, so $k = 4$ and the VC dimension is $d = 4$.
+Take $m = 1{,}000$ and $\delta = 0.05$.
+
+1. **The compression bound.** $\ln\binom{1000}{4} = \ln(4.14 \times 10^{10}) = 24.45$ and $\ln 20 = 3.00$. The bound
+   is $(24.45 + 3.00)/996 = 0.0276$.
+2. **The VC bound.** The realisable VC bound of Blumer et al., $\epsilon = \frac{2}{m}\paren{d\log_2(2em/d) +
+   \log_2(2/\delta)}$ <Cite id="blumer1989" />, gives $\frac{2}{1000}(4 \times 10.41 + 5.32) = 0.0939$.
+3. **Sample sizes.** For $\epsilon = 0.05$ the compression bound needs $m = 497$ and the VC bound $m = 2{,}044$. For
+   $\epsilon = 0.01$ they need 3,216 and 12,287.
+
+Both bounds have the same $d\ln m/m$ shape. The compression bound's constants are about four times smaller.
+
+**An SVM with support vectors.** Take $m = 1{,}000$ and $\delta = 0.05$, with the size chosen by the data, so the bound
+is $(\ln\binom{1000}{k} + \ln(1000/0.05))/(1{,}000 - k)$.
+
+| Support vectors $k$ | Bound on $R$ |
+| --- | --- |
+| 10 | 0.065 |
+| 50 | 0.216 |
+| 100 | 0.369 |
+| 200 | 0.634 |
+
+The <NoteLink to="kernel-support-vector-machine">Gaussian-kernel SVM</NoteLink> chooses from a class of infinite VC
+dimension, so no VC bound applies at all. The compression bound is informative when the support vectors are a small
+fraction of the sample. It becomes vacuous when they are a large fraction: at $k = 200$ the bound is 0.63 whatever the
+test error is.
+
+**Errors outside the set.** If an SVM-like learner with $k = 50$ makes $r = 10$ errors outside its compression set, the
+Hoeffding form gives $10/950 + \sqrt{(\ln\binom{1000}{50} + \ln 20{,}000)/1{,}900} = 0.011 + 0.329 = 0.34$. The
+square root makes the agnostic form much looser than the realisable one.
+
+## Assumptions
+
+- **Independent, identically distributed data.** Step 2 needs the examples outside the compression set to be
+  independent of those inside it.
+- **The scheme must reproduce the algorithm exactly.** The bound is about $\rho(S_I)$. A numerical solver that stops at
+  a tolerance can return a slightly different solution when retrained on the support vectors, and then the bound is
+  about the retrained solution.
+- **Reconstruction from the compression set alone.** The map $\rho$ may not look at the other examples, or the test-set
+  argument of step 2 fails.
+
+## Pitfalls
+
+- **The compression set counts, not the class.** A learner that keeps half its sample gets a
+  <NoteLink to="non-vacuous-generalisation-bounds">vacuous bound</NoteLink> even from a simple class. Kernel SVMs with a
+  short lengthscale or a large $C$ on noisy data can have most points as support vectors.
+- **Compression size is random.** The data-dependent size needs the union over $k$; quoting the fixed-$k$ bound at the
+  observed $k$ understates the risk slightly.
+- **A different question from the VC dimension.** The bound certifies one algorithm on one sample. It does not say how
+  hard the class is to learn in the worst case; the <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>
+  and the <NoteLink to="sample-complexity-lower-bounds">lower bounds</NoteLink> do.
+- **Related to Occam and <NoteLink to="pac-bayes-bounds">PAC-Bayes bounds</NoteLink>.** A compression set is a
+  description of the hypothesis by $k$ indices into the sample. The <NoteLink to="occam-bound" /> charges description
+  length, and PAC-Bayes bounds over compression sets combine the two views <Cite id="graepel2005" />.

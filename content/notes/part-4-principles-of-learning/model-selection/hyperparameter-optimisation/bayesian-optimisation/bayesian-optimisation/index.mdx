@@ -1,0 +1,106 @@
+---
+title: 'Bayesian optimisation'
+kind: overview
+summary: 'Bayesian optimisation minimises an expensive objective, such as a validation loss, in few evaluations. A surrogate, usually a Gaussian process, gives a posterior over the objective, and an acquisition function such as expected improvement chooses each next evaluation.'
+tags: [model-selection, hyperparameters, optimisation, bayesian]
+aliases: [Bayesian optimization, BO, sequential model-based optimisation, SMBO, surrogate-based optimisation]
+requires: [gaussian-process, hyperparameter-search]
+related: [random-search, acquisition-functions, multi-fidelity-hyperparameter-optimisation, gaussian-processes, multi-armed-bandit, evolution-strategies-and-covariance-matrix-adaptation]
+references: [garnett2023, frazier2018, shahriari2016, jones1998, snoek2012]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Bayesian optimisation** minimises an objective $f(\lambdavec)$ over a
+<NoteLink to="hyperparameter-search-spaces">search space</NoteLink> $\Lambda$ when each evaluation is expensive, noisy
+and gives no gradient. It keeps a probabilistic **surrogate** of $f$, fitted to every evaluation so far, and chooses the
+next evaluation by maximising an **acquisition function** $\alpha_t(\lambdavec)$ computed from the surrogate's
+posterior. In machine learning the objective is usually the validation loss of a model trained with hyperparameters
+$\lambdavec$ <Cite id="snoek2012" /> <Cite id="garnett2023" />.
+</Definition>
+
+## What it is for
+
+Training a model with one setting of its hyperparameters can take hours. A budget of a few dozen trainings rules out a
+fine grid and makes every trial count. <NoteLink to="random-search">Random search</NoteLink> ignores what earlier trials
+showed. Bayesian optimisation uses it: a trial that scored badly makes its neighbourhood less attractive, and a region
+with no trials stays attractive because it is uncertain.
+
+The method pays when an evaluation costs far more than the bookkeeping around it. That means expensive trainings, few
+hyperparameters (it works best below about 20 dimensions <Cite id="frazier2018" />) and budgets of tens to hundreds of
+trials. The same loop tunes engineering designs evaluated by slow simulations, where it became standard as "efficient
+global optimization" <Cite id="jones1998" />.
+
+## Main ideas
+
+**The loop.** Every method in this topic runs the same cycle <Cite id="shahriari2016" />:
+
+1. Evaluate an initial design of a few points, chosen at random or by a space-filling design such as a Latin hypercube
+   (see <NoteLink to="quasi-random-search">quasi-random search</NoteLink>).
+2. Fit the surrogate to the evaluations $\Dcal_t = \set{(\lambdavec_i, y_i)}_{i=1}^{t}$, where $y_i = f(\lambdavec_i) +
+   \varepsilon_i$ includes noise. With a Gaussian process this gives a posterior mean $\mu_t(\lambdavec)$ and standard
+   deviation $\sigma_t(\lambdavec)$ at every candidate.
+3. Choose $\lambdavec_{t+1} = \argmax_{\lambdavec} \alpha_t(\lambdavec)$, an inner optimisation over a function that is
+   cheap to evaluate.
+4. Evaluate $y_{t+1}$, add it to the data, and return to step 2 until the budget is spent.
+5. Recommend a configuration: the best observed, $f^\star_t = \min_i y_i$, or the minimiser of the posterior mean.
+
+The walk-through in <NoteLink to="acquisition-functions">acquisition functions</NoteLink> runs this loop one evaluation
+at a time.
+
+**The surrogate.** A <NoteLink to="gaussian-process">Gaussian process</NoteLink> is the standard surrogate. It gives
+calibrated error bars from few points, and its kernel hyperparameters are refitted by
+<NoteLink to="gaussian-process-hyperparameter-learning">marginal likelihood</NoteLink> at every step, with a Matérn 5/2
+kernel and <NoteLink to="automatic-relevance-determination">one length-scale per hyperparameter</NoteLink> as the usual
+defaults <Cite id="snoek2012" />. <NoteLink to="random-forest">Random forests</NoteLink>
+(<NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink>) and density estimates
+(<NoteLink to="tree-structured-parzen-estimator">TPE</NoteLink>) replace it for mixed, conditional or large search
+spaces.
+
+**The acquisition function.** The acquisition trades exploitation, evaluating where the posterior mean is low, against
+exploration, evaluating where it is uncertain. <NoteLink to="expected-improvement">Expected improvement</NoteLink>
+averages the gain over the incumbent and is the common default.
+<NoteLink to="gaussian-process-upper-confidence-bound">GP-UCB</NoteLink> takes an optimistic bound and carries a regret
+guarantee. Thompson sampling minimises a posterior draw. <NoteLink to="entropy-search">Entropy search</NoteLink> chooses
+the evaluation that teaches most about the optimum.
+
+**Extensions of the loop.** Parallel workers need several proposals at once
+(<NoteLink to="batch-bayesian-optimisation">batch Bayesian optimisation</NoteLink>). Many hyperparameters need structure
+in the surrogate (<NoteLink to="high-dimensional-bayesian-optimisation">high-dimensional Bayesian
+optimisation</NoteLink>). Unknown feasibility, such as a model that runs out of memory, needs a model of the constraint
+(<NoteLink to="constrained-bayesian-optimisation">constrained Bayesian optimisation</NoteLink>). Several objectives,
+such as accuracy and latency, need a Pareto front (<NoteLink to="multi-objective-bayesian-optimisation">multi-objective
+Bayesian optimisation</NoteLink>).
+
+**Data reuse.** The search evaluates many configurations on the same validation data and keeps the best. The best
+validation loss is therefore biased low, as in every search
+(<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Bayesian optimisation
+sharpens the effect, because it concentrates evaluations where earlier values were low, including values that were low
+by noise. The error of the recommended configuration needs data the search never saw: a test set or
+<NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>.
+
+## How the notes fit together
+
+Start with <NoteLink to="acquisition-functions">acquisition functions</NoteLink>, which compares the rules on one
+posterior and on a full run. <NoteLink to="expected-improvement">Expected improvement</NoteLink>,
+<NoteLink to="gaussian-process-upper-confidence-bound">GP-UCB</NoteLink> and <NoteLink to="entropy-search">entropy
+search</NoteLink> each derive one family. The surrogates come next:
+<NoteLink to="tree-structured-parzen-estimator">TPE</NoteLink> and
+<NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink> trade the Gaussian process for models that
+scale to mixed spaces and many trials. The batch, high-dimensional, constrained and multi-objective notes extend the
+loop. <NoteLink to="tuning-a-support-vector-machine-by-bayesian-optimisation">Tuning a support vector machine by
+Bayesian optimisation</NoteLink> runs it against random search at an equal budget.
+
+## Prerequisites and next steps
+
+The surrogate is a Gaussian process, so <NoteLink to="gaussian-process">Gaussian process</NoteLink> regression and its
+<NoteLink to="covariance-functions">covariance functions</NoteLink> come first, with the problem setting of
+<NoteLink to="hyperparameter-search">hyperparameter optimisation</NoteLink>. The bandit notes of Part VII, especially
+<NoteLink to="upper-confidence-bound-algorithm">UCB1</NoteLink> and <NoteLink to="thompson-sampling">Thompson
+sampling</NoteLink>, are the discrete-arm versions of the same trade-off.
+<NoteLink to="multi-fidelity-hyperparameter-optimisation">Multi-fidelity hyperparameter optimisation</NoteLink> cuts the
+cost of each evaluation by stopping poor trials early, and
+<NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> combines the two approaches. Derivative-free
+optimisers such as <NoteLink to="evolution-strategies-and-covariance-matrix-adaptation">CMA-ES</NoteLink> are the
+alternative when evaluations are cheap enough to spend by the thousand.

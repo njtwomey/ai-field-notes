@@ -1,0 +1,190 @@
+---
+title: 'Bernstein''s inequality'
+kind: concept
+summary: 'Bernstein''s inequality bounds how far a mean of $n$ independent variables, each within $b$ of its mean and of average variance $v$, strays above its expectation: with probability $1 - \delta$ by at most $\sqrt{2v\ln(1/\delta)/n} + 2b\ln(1/\delta)/3n$.'
+tags: [probability, limit-theorems, concentration, tail-bounds, learning-theory, worked-example]
+aliases: [Bernstein bound, Bernstein inequality, variance-sensitive tail bound]
+requires: [hoeffdings-inequality, variance-and-covariance]
+related: [chernoff-bounds, sub-gaussian-random-variables, fast-rates-and-noise-conditions, test-set-bounds, realisable-and-agnostic-learning, upper-confidence-bound-algorithm]
+references: [bennett1962, boucheron2013, maurer2009, wainwright2019]
+status: draft
+updated: 2026-10-12
+---
+
+import { BernsteinVsHoeffding } from './BernsteinVsHoeffding'
+
+<Definition>
+Let $X_1, \dots, X_n$ be independent with $\abs{X_i - \expect X_i} \le b$ almost surely. Write
+$\bar X_n = \frac1n\sum_{i=1}^n X_i$ for their mean, $\mu = \expect\bar X_n$, and
+$v = \frac1n\sum_{i=1}^n\var(X_i)$ for their average variance. **Bernstein's inequality** states that for every
+$t > 0$,
+
+$$
+\prob(\bar X_n - \mu \ge t) \le \exp\paren{-\frac{n t^2}{2(v + bt/3)}}.
+$$
+
+The same bound holds for $\prob(\bar X_n - \mu \le -t)$, and the two-sided tail is at most twice it
+<Cite id="boucheron2013" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> uses only the range of each variable. A variable
+in $[0, 1]$ has variance at most $\frac14$, and Hoeffding's bound is as wide as if every variable had that variance.
+Many averages in machine learning have far smaller variance. The test error of a good classifier is a mean of indicators
+that are 1 with probability $p = 0.02$, and their variance is $p(1 - p) = 0.0196$, about 13 times smaller than
+$\frac14$. Bernstein's inequality uses the actual variance, so its <NoteLink to="confidence-intervals">confidence
+interval</NoteLink> shrinks with it.
+
+The bound has two regimes, set by the denominator $v + bt/3$:
+
+- **Small deviations**, $t \ll 3v/b$. The denominator is close to $v$ and the bound is close to $\exp(-nt^2/2v)$. That
+  is the tail of a Gaussian with variance $v/n$, the variance of $\bar X_n$. The
+  <NoteLink to="central-limit-theorem">central limit theorem</NoteLink> predicts this shape, and Bernstein's inequality
+  guarantees it at every $n$.
+- **Large deviations**, $t \gg 3v/b$. The denominator is close to $bt/3$ and the bound is close to
+  $\exp(-3nt/2b)$, an exponential tail. A mean of $n$ variables can only move far by several of them taking extreme
+  values, and the exponent of that probability is linear in $t$, not quadratic.
+
+## Statement in confidence form
+
+Set the right-hand side of the inequality equal to $\delta$ and write $L = \ln(1/\delta)$. The deviation $t$ then
+solves the quadratic $nt^2 - \frac{2bL}{3}t - 2vL = 0$. Its positive root is
+
+$$
+t^\star = \frac{bL/3 + \sqrt{(bL/3)^2 + 2nvL}}{n}.
+$$
+
+The inequality $\sqrt{x^2 + y} \le x + \sqrt y$, for $x, y \ge 0$, gives a simpler upper bound. With probability at
+least $1 - \delta$,
+
+$$
+\bar X_n - \mu \le \sqrt{\frac{2vL}{n}} + \frac{2bL}{3n}, \qquad L = \ln(1/\delta).
+$$
+
+The first term is the Gaussian width $\sqrt{v/n}$ times $\sqrt{2L}$. The second term is a correction of order
+$1/n$, which dominates only when $v$ is below about $bL/n$. Bennett's sharper inequality gives the same form with
+$bL/3n$ in place of $2bL/3n$ <Cite id="bennett1962" />.
+
+## Derivation
+
+The proof is a <NoteLink to="chernoff-bounds">Chernoff bound</NoteLink>: bound the <Gloss name="mgf">moment-generating
+function</Gloss> of each centred variable, multiply the bounds by <NoteLink to="independence">independence</NoteLink>,
+and choose the free parameter. The variance enters through the second moment of each variable, and the bound $b$
+controls all higher moments.
+
+Write $Y_i = X_i - \expect X_i$, so that $\expect Y_i = 0$, $\abs{Y_i} \le b$ and $\expect Y_i^2 = \sigma_i^2$, with
+$v = \frac1n\sum_i\sigma_i^2$. Fix $\lambda$ with $0 < \lambda < 3/b$.
+
+1. **Higher moments from the variance.** For every $k \ge 2$, $\abs{Y_i}^{k-2} \le b^{k-2}$, so
+   $\abs{\expect Y_i^k} \le \expect\brack{\abs{Y_i}^{k-2}Y_i^2} \le b^{k-2}\sigma_i^2$.
+2. **Expand the exponential.** The power series of $e^{\lambda Y_i}$ has the terms $1$, $\lambda Y_i$ and
+   $\lambda^k Y_i^k/k!$ for $k \ge 2$. The linear term has mean zero, so step 1 gives
+
+   $$
+   \expect e^{\lambda Y_i} \le 1 + \sigma_i^2\sum_{k=2}^\infty\frac{\lambda^k b^{k-2}}{k!}.
+   $$
+
+3. **Bound the factorials.** $k! \ge 2 \cdot 3^{k-2}$ for every $k \ge 2$: it holds with equality at $k = 2$ and
+   $k = 3$, and each further factor $k \ge 4$ exceeds 3. The series is then at most a geometric series with ratio
+   $\lambda b/3 < 1$:
+
+   $$
+   \sum_{k=2}^\infty\frac{\lambda^k b^{k-2}}{k!} \le \frac{\lambda^2}{2}\sum_{j=0}^\infty\paren{\frac{\lambda b}{3}}^j
+   = \frac{\lambda^2}{2(1 - \lambda b/3)}.
+   $$
+
+4. **Return to an exponential.** Since $1 + u \le e^u$,
+   $\expect e^{\lambda Y_i} \le \exp\paren{\frac{\lambda^2\sigma_i^2}{2(1 - \lambda b/3)}}$.
+5. **Chernoff and independence.** <NoteLink to="markov-and-chebyshev-inequalities">Markov's inequality</NoteLink>
+   applied to $e^{\lambda\sum_i Y_i}$, and the product rule for independent variables, give
+
+   $$
+   \prob\paren{\sum_{i=1}^n Y_i \ge nt} \le e^{-\lambda nt}\prod_{i=1}^n\expect e^{\lambda Y_i}
+   \le \exp\paren{-\lambda nt + \frac{\lambda^2 nv}{2(1 - \lambda b/3)}}.
+   $$
+
+6. **Choose $\lambda$.** Take $\lambda = t/(v + bt/3)$, which is below $3/b$. Then
+   $1 - \lambda b/3 = v/(v + bt/3)$, the second term of the exponent becomes $nt^2/(2(v + bt/3))$, and the first
+   becomes $-nt^2/(v + bt/3)$. Their sum is $-nt^2/(2(v + bt/3))$, which is the inequality.
+
+The choice in step 6 is not the exact minimiser of the exponent. The exact minimiser gives Bennett's inequality, whose
+exponent is $-(nv/b^2)\,h(bt/v)$ with $h(u) = (1 + u)\ln(1 + u) - u$ <Cite id="bennett1962" />. Bernstein's exponent
+is slightly weaker than Bennett's, but it can be inverted in closed form.
+
+The lower tail follows by applying the argument to $-Y_i$.
+
+## Against Hoeffding
+
+For variables in $[0, 1]$ the deviation from the mean is at most $b = 1$. At confidence $1 - \delta$ the two one-sided
+widths are
+
+$$
+t_{\text{Hoeffding}} = \sqrt{\frac{L}{2n}}, \qquad t_{\text{Bernstein}} = \sqrt{\frac{2vL}{n}} + \frac{2L}{3n}.
+$$
+
+- **The leading terms differ by the factor $2\sqrt v$.** Hoeffding's width is Bernstein's leading term with
+  $v = \frac14$, the largest variance a $[0, 1]$ variable can have. At $v = 0.0196$ the factor is $0.28$, and
+  Bernstein's interval is about 3.5 times narrower.
+- **At the largest variance Hoeffding wins slightly.** With $v = \frac14$ the leading terms agree and Bernstein's
+  $2L/3n$ term makes it wider. At $n = 10{,}000$ and $\delta = 0.05$ the widths are $0.01224$ and $0.01244$.
+- **Sample sizes.** Solving each tail bound for the $n$ that reaches a width $t$ gives
+  $n_{\text{Hoeffding}} = L/2t^2$ and $n_{\text{Bernstein}} = 2L(v + t/3)/t^2$. The ratio is $4(v + t/3)$: the
+  sample-size saving is proportional to the variance.
+
+<BernsteinVsHoeffding />
+
+## Worked example: the test error of a good classifier
+
+A classifier has true error $p = 0.02$. Its test error $\bar X_n$ is the mean of $n = 10{,}000$ independent indicators,
+each 1 with probability $0.02$. How far above $p$ can the test error lie at confidence $95\%$?
+
+1. **Constants.** $\delta = 0.05$, so $L = \ln 20 = 2.996$. The indicators lie in $[0, 1]$, so $b = 1$. Their
+   variance is $v = 0.02 \times 0.98 = 0.0196$.
+2. **Hoeffding.** $\sqrt{L/2n} = \sqrt{2.996/20{,}000} = 0.0122$.
+3. **Bernstein.** $\sqrt{2vL/n} = \sqrt{2 \times 0.0196 \times 2.996/10{,}000} = 0.00343$, and
+   $2L/3n = 0.00020$. The width is $0.00363$, 3.4 times narrower than Hoeffding's. The exact root $t^\star$ is
+   $0.00353$.
+4. **Normal approximation.** The normal approximation to the binomial gives a one-sided $95\%$ width of
+   $1.645\sqrt{0.0196/10{,}000} = 0.0023$. Bernstein's width is 1.6 times that; Hoeffding's is 5.3 times that. Neither
+   bound is vacuous.
+5. **Sample size.** A width of $t = 0.005$ needs $n = L/2t^2 = 59{,}915$ test points under Hoeffding and
+   $n = 2L(v + t/3)/t^2 = 5{,}097$ under Bernstein, nearly 12 times fewer.
+
+The variance is rarely known. The **empirical Bernstein bound** of Maurer and Pontil replaces $v$ by the sample
+variance $V_n$ at a small price: with probability at least $1 - \delta$,
+$\mu - \bar X_n \le \sqrt{2V_n\ln(2/\delta)/n} + 7\ln(2/\delta)/(3(n - 1))$ <Cite id="maurer2009" />. With
+$V_n = 0.0196$ the width is $0.00380 + 0.00086 = 0.0047$, still 2.6 times narrower than Hoeffding's.
+
+## In machine learning
+
+- **Fast rates.** A loss in $[0, 1]$ satisfies $\ell^2 \le \ell$, so its variance is at most its mean. For a
+  hypothesis with small risk $R$, Bernstein's width is at most $\sqrt{2RL/n} + 2L/3n$. At $R = 0$ only the second term
+  is left and the width falls as $1/n$, not $1/\sqrt n$. This is the mechanism behind the $1/\epsilon$ sample complexity
+  of <NoteLink to="realisable-and-agnostic-learning">realisable learning</NoteLink> and behind
+  <NoteLink to="fast-rates-and-noise-conditions">fast rates under low noise</NoteLink>.
+- **Test-set bounds.** For a classifier with small error, a Bernstein or exact binomial
+  <NoteLink to="test-set-bounds">test-set bound</NoteLink> is several times tighter than Hoeffding's.
+- **Bandits.** Variance-aware versions of the <NoteLink to="upper-confidence-bound-algorithm">upper confidence bound
+  algorithm</NoteLink> replace Hoeffding's radius with an empirical Bernstein radius, so arms with low-variance rewards
+  are resolved faster.
+
+## Assumptions
+
+- **Independence** of the $X_i$. <NoteLink to="martingale">Martingale</NoteLink> versions (Freedman's inequality)
+  replace the variances by conditional variances.
+- **A bound $b$ on each deviation.** Bernstein's inequality also holds under the weaker moment condition
+  $\abs{\expect Y_i^k} \le \frac12 k!\,\sigma_i^2 b^{k-2}$ for all $k \ge 2$, which admits unbounded sub-exponential
+  variables such as the exponential distribution <Cite id="wainwright2019" />. Under that condition the series in step
+  2 is geometric with ratio $\lambda b$, and the same argument gives the inequality with $bt$ in place of $bt/3$.
+- **A known variance**, or an upper bound on it. With an estimated variance use the empirical Bernstein bound.
+
+## Pitfalls
+
+- **Plugging in the sample variance.** $v$ is the true variance. Replacing it by the sample variance without the
+  correction term of the empirical Bernstein bound breaks the guarantee, because the sample variance can itself be
+  too small.
+- **The $1/n$ term matters for rare events.** When $v$ is of order $L/n$ or smaller, the term $2bL/3n$ dominates.
+  Dropping it, or reading the bound as a Gaussian interval, understates the width.
+- **The range still matters.** A variable with tiny variance and a huge range $b$, such as a lottery payout, gets
+  little benefit: the $b$ term takes over at the deviations of interest.

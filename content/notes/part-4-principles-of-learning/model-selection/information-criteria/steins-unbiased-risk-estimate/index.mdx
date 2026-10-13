@@ -1,0 +1,228 @@
+---
+title: 'Stein''s unbiased risk estimate'
+kind: concept
+summary: 'Stein''s unbiased risk estimate (SURE) estimates the squared-error risk of an estimator of a Gaussian mean from one sample: $\norm{\yvec - \hat\muvec}^2 - n\sigma^2 + 2\sigma^2\nabla\cdot\hat\muvec$. The divergence acts as degrees of freedom; for the lasso it is the number of non-zero coefficients.'
+tags: [model-selection, information-criteria, regularisation, worked-example]
+aliases: [SURE, Stein's unbiased risk estimator, SURE threshold, divergence degrees of freedom, degrees of freedom of the lasso]
+requires: [mallows-cp-and-covariance-penalties, gaussian-distribution]
+related: [lasso, james-stein-estimator, effective-degrees-of-freedom, wavelet-denoising, sparsity-inducing-penalties, integration-by-parts, choosing-the-regularisation-strength]
+references: [stein1981, stein1956, james1961, donoho1995adapting, zou2007, tibshirani2012lasso, tibshirani2015search, efron2004covariance]
+status: draft
+updated: 2026-10-13
+---
+
+import { SureCurve } from './SureCurve'
+
+<Definition>
+Let $\yvec \sim \Gauss(\muvec, \sigma^2\eye_n)$ with unknown mean $\muvec \in \reals^n$ and known $\sigma^2$, and let
+$\hat\muvec(\yvec)$ be an estimator of $\muvec$ that is weakly differentiable with integrable
+<NoteLink to="partial-derivatives">partial derivatives</NoteLink>. **Stein's unbiased risk estimate** is
+
+$$
+\operatorname{SURE}(\yvec) = \norm{\yvec - \hat\muvec(\yvec)}^2 - n\sigma^2 + 2\sigma^2\sum_{i=1}^n
+\frac{\partial\hat\mu_i}{\partial y_i}(\yvec).
+$$
+
+It is unbiased for the risk: $\expect\brack{\operatorname{SURE}(\yvec)} = \expect\norm{\hat\muvec(\yvec) - \muvec}^2$
+<Cite id="stein1981" />.
+</Definition>
+
+## Intuition
+
+The risk of an estimator, $\expect\norm{\hat\muvec - \muvec}^2$, depends on the unknown $\muvec$, so it cannot be
+computed. The residual $\norm{\yvec - \hat\muvec}^2$ can be computed, but it is optimistic: each $y_i$ pulled
+$\hat\mu_i$ towards itself. The size of the pull is the covariance $\cov(\hat\mu_i, y_i)$, the quantity behind
+<NoteLink to="mallows-cp-and-covariance-penalties">covariance penalties</NoteLink>. A covariance is a property of the
+distribution of $\yvec$, not of the one sample at hand.
+
+Stein's lemma removes that obstacle for Gaussian noise. It says the covariance equals $\sigma^2$ times the expected
+derivative $\partial\hat\mu_i/\partial y_i$. The derivative can be computed at the observed $\yvec$: nudge one
+observation and see how far its own fitted value follows. Summing over $i$ gives the **divergence** of the estimator,
+$\nabla\cdot\hat\muvec = \sum_i \partial\hat\mu_i/\partial y_i$, which acts as its degrees of freedom. SURE is the
+residual sum of squares corrected by that divergence, and it needs only one sample and no refitting.
+
+SURE answers the first question of <NoteLink to="model-selection">model selection</NoteLink>, how well an estimator will
+do, for a whole family of estimators at once. Minimising it over a tuning parameter, such as a threshold or a penalty,
+selects the parameter.
+
+## Stein's lemma
+
+Let $Y \sim \Gauss(\mu, \sigma^2)$ and let $g$ be a function with $\expect\abs{g'(Y)} < \infty$ that is the integral of
+its derivative. Then
+
+$$
+\expect[(Y - \mu)\,g(Y)] = \sigma^2\,\expect[g'(Y)].
+$$
+
+The Gaussian density $\varphi_\sigma(y) = (2\pi\sigma^2)^{-1/2}e^{-(y - \mu)^2/(2\sigma^2)}$ satisfies
+$\varphi_\sigma'(y) = -\frac{y - \mu}{\sigma^2}\varphi_\sigma(y)$. So
+
+$$
+\expect[(Y - \mu)g(Y)] = \int g(y)(y - \mu)\varphi_\sigma(y)\,dy = -\sigma^2\int g(y)\varphi_\sigma'(y)\,dy =
+\sigma^2\int g'(y)\varphi_\sigma(y)\,dy,
+$$
+
+by <NoteLink to="integration-by-parts">integration by parts</NoteLink>. The boundary term $g\varphi_\sigma$ vanishes at
+$\pm\infty$ under the integrability condition <Cite id="stein1981" />. In $n$ dimensions with independent coordinates,
+the same argument applied to coordinate $i$ with the others held fixed gives
+$\expect[(y_i - \mu_i)\hat\mu_i(\yvec)] = \sigma^2\expect[\partial\hat\mu_i/\partial y_i]$.
+
+## The derivation of SURE
+
+Write the error of the estimator as the residual plus the noise:
+$\hat\muvec - \muvec = (\hat\muvec - \yvec) + (\yvec - \muvec)$. Expanding the square,
+
+$$
+\norm{\hat\muvec - \muvec}^2 = \norm{\yvec - \hat\muvec}^2 + \norm{\yvec - \muvec}^2 + 2(\hat\muvec - \yvec)^\top(\yvec
+- \muvec).
+$$
+
+Take expectations term by term.
+
+1. **The noise.** $\expect\norm{\yvec - \muvec}^2 = n\sigma^2$.
+2. **The cross term, part one.** $\expect[\yvec^\top(\yvec - \muvec)] = \expect\norm{\yvec - \muvec}^2 = n\sigma^2$,
+   because $\expect[\muvec^\top(\yvec - \muvec)] = 0$.
+3. **The cross term, part two.** By Stein's lemma in each coordinate,
+   $\expect[\hat\muvec^\top(\yvec - \muvec)] = \sigma^2\expect[\nabla\cdot\hat\muvec]$.
+4. **Combine.** $\expect\norm{\hat\muvec - \muvec}^2 = \expect\norm{\yvec - \hat\muvec}^2 + n\sigma^2 +
+   2\sigma^2\expect[\nabla\cdot\hat\muvec] - 2n\sigma^2$.
+
+The right-hand side is the expectation of $\operatorname{SURE}(\yvec)$, which proves unbiasedness. Comparing with the
+covariance penalty, $\sum_i\cov(\hat\mu_i, y_i) = \sigma^2\expect[\nabla\cdot\hat\muvec]$: the divergence is an
+unbiased one-sample estimate of the <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>.
+
+**Linear smoothers.** For $\hat\muvec = \Smat\yvec$ with $\Smat$ fixed, the divergence is $\trace\Smat$, a constant.
+Then $\operatorname{SURE} = \operatorname{RSS} - n\sigma^2 + 2\sigma^2\trace\Smat$, which is $n$ times Mallows' $C_p$ in
+the error scale minus $n\sigma^2$. For least squares, <NoteLink to="ridge-regression">ridge regression</NoteLink> and
+<NoteLink to="smoothing-splines">smoothing splines</NoteLink>, SURE and $C_p$ choose the same model. SURE matters for
+estimators whose divergence changes with $\yvec$.
+
+**James–Stein.** The estimator $\hat\muvec = \paren{1 - c/\norm{\yvec}^2}\yvec$ with $c = (n - 2)\sigma^2$ has residual
+$c^2/\norm{\yvec}^2$ and divergence $n - c(n - 2)/\norm{\yvec}^2$. Substituting, its SURE is
+$n\sigma^2 - (n - 2)^2\sigma^4/\norm{\yvec}^2$, which is below $n\sigma^2$, the risk of $\hat\muvec = \yvec$, for every
+$\yvec$ once $n \ge 3$. So the shrunken estimate has smaller risk than $\yvec$ whatever $\muvec$ is
+<Cite id="stein1956" /> <Cite id="james1961" /> <Cite id="stein1981" /> (see
+<NoteLink to="james-stein-estimator">James–Stein estimator</NoteLink>).
+
+## Soft thresholding and the lasso
+
+**Soft thresholding.** The estimator $\hat\mu_i = \operatorname{sgn}(y_i)\max(\abs{y_i} - t, 0)$, with threshold
+$t \ge 0$, sets small observations to zero and shrinks the rest towards zero by $t$. It is the
+<NoteLink to="lasso">lasso</NoteLink> for an orthonormal design. Its derivative is 1 where $\abs{y_i} > t$ and 0 where
+$\abs{y_i} < t$, so the divergence is the number of observations above the threshold. The residual of coordinate $i$
+is $y_i$ when it is zeroed and $\pm t$ otherwise. So
+
+$$
+\operatorname{SURE}(t) = -n\sigma^2 + \sum_{i=1}^n\min(y_i^2, t^2) + 2\sigma^2\,\#\set{i : \abs{y_i} > t}.
+$$
+
+The first sum rewards a small threshold and the count rewards a large one. Donoho and Johnstone's SureShrink chooses the
+threshold of each level of a wavelet transform by minimising $\operatorname{SURE}(t)$, which needs only a sort of the
+$\abs{y_i}$ <Cite id="donoho1995adapting" /> (see <NoteLink to="wavelet-denoising">wavelet denoising</NoteLink>).
+
+**The lasso.** Let $\hat\betavec$ minimise $\frac12\norm{\yvec - \Xmat\betavec}^2 + \lambda\norm{\betavec}_1$, with
+fitted values $\hat\muvec = \Xmat\hat\betavec$. Let $\Acal$ be the set of non-zero coefficients and $\svec_\Acal$ their
+signs. The optimality conditions on $\Acal$ give $\Xmat_\Acal^\top(\yvec - \Xmat_\Acal\hat\betavec_\Acal) =
+\lambda\svec_\Acal$. When $\Xmat_\Acal$ has full column rank, solving gives
+
+$$
+\hat\muvec = \Xmat_\Acal(\Xmat_\Acal^\top\Xmat_\Acal)^{-1}\paren{\Xmat_\Acal^\top\yvec - \lambda\svec_\Acal}.
+$$
+
+For almost every $\yvec$, a small change in $\yvec$ leaves $\Acal$ and $\svec_\Acal$ unchanged. Locally, $\hat\muvec$ is
+then a projection of $\yvec$ onto the columns of $\Xmat_\Acal$ minus a constant vector. The Jacobian is the projection
+matrix, whose trace is $\abs\Acal$. So the divergence is the number of non-zero coefficients, and $\abs\Acal$ is an
+unbiased estimate of the lasso's degrees of freedom <Cite id="zou2007" />. Tibshirani and Taylor extended the result to
+any design: the degrees of freedom equal the expected rank of $\Xmat_\Acal$ <Cite id="tibshirani2012lasso" />.
+
+The result is surprising. The lasso uses $\yvec$ to choose which coefficients to keep, a search that usually adds
+degrees of freedom beyond the count of kept coefficients. The shrinkage of the kept coefficients by $\lambda$ removes
+exactly as many degrees of freedom as the search adds, in expectation. SURE for the
+<NoteLink to="regularisation-paths">lasso path</NoteLink> is therefore
+$\operatorname{RSS}(\lambda) - n\sigma^2 + 2\sigma^2\abs{\Acal(\lambda)}$, computable along the path at no extra cost
+(see <NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>).
+
+**Hard thresholding does not get this discount.** The estimator $\hat\mu_i = y_i\indicator[\abs{y_i} > t]$, the
+orthonormal version of <NoteLink to="best-subset-and-stepwise-selection">best-subset selection</NoteLink>, jumps at
+$\pm t$. Stein's lemma needs continuity, and the plain divergence, the count of kept coordinates, misses the jumps.
+Tibshirani extended Stein's formula to such discontinuous estimators <Cite id="tibshirani2015search" />.
+
+<Derivation title="Degrees of freedom of hard thresholding">
+Take one coordinate, $Y \sim \Gauss(\mu, \sigma^2)$, and $g(y) = y\indicator[\abs y > t]$. The function has derivative 1
+on $\abs y > t$ and 0 on $\abs y < t$, and it jumps by $+t$ at $y = t$ (from 0 to $t$) and by $+t$ at $y = -t$ (from
+$-t$ to 0).
+
+Split the integral in the proof of Stein's lemma at $\pm t$. On each piece, integration by parts gives the derivative
+term plus boundary terms, and the boundary terms at $\pm t$ no longer cancel: each leaves the size of the jump times
+the density there. So
+
+$$
+\frac{1}{\sigma^2}\cov(g(Y), Y) = P(\abs Y > t) + \frac{t}{\sigma}\brack{\varphi\paren{\frac{t - \mu}{\sigma}} +
+\varphi\paren{\frac{t + \mu}{\sigma}}},
+$$
+
+with $\varphi$ the standard Gaussian density. The first term is the expected count; the second is the extra price of
+the search. With $\mu = 0$, $\sigma = 1$ and $t = 2$, the first term is $0.046$ and the second is $2 \times 2 \times
+0.054 = 0.216$. A coordinate that is pure noise costs $0.26$ degrees of freedom, almost six times what the count
+suggests.
+</Derivation>
+
+<SureCurve />
+
+## Worked example
+
+Let $n = 10$, $\sigma = 1$ and $\muvec = (4, 0, 0, -3, 0, 0, 2, 0, 0, 0)$. One draw of the noise gives
+
+$$
+\yvec = (4.6, -1.1, 0.4, -3.7, 1.3, -0.3, 2.5, 0.9, -1.6, 0.2).
+$$
+
+Apply soft thresholding at $t = 1$.
+
+1. **The estimate.** Coordinates with $\abs{y_i} > 1$ are $4.6, -1.1, -3.7, 1.3, 2.5, -1.6$. They shrink by 1 to
+   $3.6, -0.1, -2.7, 0.3, 1.5, -0.6$; the other four become 0.
+2. **The residual.** The six kept coordinates each contribute $t^2 = 1$. The four zeroed ones contribute
+   $0.4^2 + 0.3^2 + 0.9^2 + 0.2^2 = 1.10$. So $\norm{\yvec - \hat\muvec}^2 = 7.10$.
+3. **The divergence.** Six coordinates exceed the threshold, so $\nabla\cdot\hat\muvec = 6$.
+4. **SURE.** $7.10 - 10 + 2 \times 6 = 9.10$.
+5. **The truth.** The generator is known, so the loss on this sample is
+   $\norm{\hat\muvec - \muvec}^2 = 0.96$, and the risk at $t = 1$, the average loss over noise draws, is $6.59$.
+
+Repeating for other thresholds:
+
+| $t$ | residual | divergence | SURE | loss on this sample | risk |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 0 | 10 | 10.00 | 7.66 | 10.00 |
+| 0.5 | 2.04 | 7 | 6.04 | 2.42 | 6.54 |
+| 1 | 7.10 | 6 | 9.10 | 0.96 | 6.59 |
+| 1.5 | 13.00 | 4 | 11.00 | 2.46 | 8.85 |
+| 2 | 18.56 | 3 | 14.56 | 5.90 | 12.34 |
+
+The risk column is the average of SURE over noise draws, by unbiasedness. Its minimum, $6.21$, is at $t \approx 0.75$.
+On this sample SURE is smallest near $t = 0.4$, while the loss is smallest near $t = 1$. The noise in this draw is
+small, $\norm{\yvec - \muvec}^2 = 7.66$ against an expected 10, and SURE cannot know that. With $n = 10$ its sampling
+error is a few units, larger than the differences between thresholds. SureShrink works because a wavelet level holds
+hundreds or thousands of coefficients, and the error of SURE per coefficient shrinks like $1/\sqrt n$.
+
+## Assumptions
+
+- **Gaussian noise with known variance.** Stein's lemma characterises the Gaussian. For other noise, the covariance
+  penalty still holds but the divergence no longer estimates it. An estimated $\sigma^2$ must come from elsewhere, for
+  example the median absolute value of the finest wavelet coefficients divided by $0.6745$.
+- **Weak differentiability.** The estimator must be continuous and almost everywhere differentiable. Soft thresholding,
+  the lasso and James–Stein qualify; hard thresholding and best-subset selection do not.
+- **Independent coordinates with a common variance.** For correlated noise the divergence is replaced by
+  $\trace(\Sigmamat\,\partial\hat\muvec/\partial\yvec)$ with $\Sigmamat$ the noise covariance.
+
+## Pitfalls
+
+- **High variance for small $n$.** SURE is unbiased, not accurate. On short vectors its minimiser can be far from the
+  best threshold, as in the worked example.
+- **Minimising SURE reuses the data.** The SURE value at its minimum is biased low as an estimate of the chosen
+  estimator's risk, as any minimum of noisy estimates is (see <NoteLink to="overfitting-in-model-selection">overfitting
+  in model selection</NoteLink>). The divergence counts the fit at a fixed threshold, not the choice of threshold.
+- **Counting kept coefficients for a discontinuous rule.** For hard thresholding, best subset and stepwise selection,
+  the count of kept coefficients understates the degrees of freedom. Use the extended formula or a parametric bootstrap
+  <Cite id="efron2004covariance" />.
+- **Using the wrong $\sigma^2$.** SURE's penalty scales with $\sigma^2$, so an underestimate favours small thresholds
+  and overfitting.

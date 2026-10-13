@@ -1,0 +1,207 @@
+---
+title: 'Mallows'' Cp and covariance penalties'
+kind: concept
+summary: 'Mallows'' $C_p = \overline{\operatorname{err}} + 2p\hat\sigma^2/n$ estimates the in-sample prediction error of a least-squares fit with $p$ coefficients. Efron''s covariance penalty $\frac2n\sum_i\cov(\hat y_i, y_i)$ extends it to any fitting rule. For Gaussian errors $C_p$ ranks models as AIC does.'
+tags: [model-selection, information-criteria, linear-models, worked-example]
+aliases: [Mallows Cp, Mallows' Cp, Cp statistic, C_p statistic, covariance penalty, covariance penalties, Cp plot, parametric bootstrap degrees of freedom]
+requires: [optimism-of-the-training-error, linear-regression]
+related: [effective-degrees-of-freedom, steins-unbiased-risk-estimate, akaike-information-criterion, generalised-cross-validation, best-subset-and-stepwise-selection, information-criteria]
+references: [mallows1973, efron1986, efron2004covariance, ye1998, hastie2009, li1987]
+status: draft
+updated: 2026-10-13
+---
+
+import { CpPlot } from './CpPlot'
+
+<Definition>
+Let $\yvec = \fvec + \epsilonb$, with fixed inputs, mean vector $\fvec \in \reals^n$ and independent noise of variance
+$\sigma^2$. Fit a least-squares model with $p$ coefficients, and let $\operatorname{RSS}_p$ be its residual sum of
+squares and $\overline{\operatorname{err}} = \operatorname{RSS}_p/n$ its training error. With an estimate
+$\hat\sigma^2$ of the noise variance, **Mallows' $C_p$** is
+
+$$
+C_p = \frac{\operatorname{RSS}_p}{\hat\sigma^2} - n + 2p
+$$
+
+in Mallows' scale, or $\overline{\operatorname{err}} + 2p\hat\sigma^2/n$ in the scale of the prediction error
+<Cite id="hastie2009" />. For any
+fitting rule with fitted values $\hat y_i$, the **covariance penalty** estimate of the in-sample prediction error is
+$\overline{\operatorname{err}} + \frac2n\sum_{i=1}^n\widehat{\cov}(\hat y_i, y_i)$ <Cite id="mallows1973" />
+<Cite id="efron2004covariance" />.
+</Definition>
+
+## Intuition
+
+The training error of a fit is optimistic, because each target helped place the fitted value it is then compared with.
+For squared error the expected optimism is $\frac2n\sum_i\cov(\hat y_i, y_i)$, which is $2p\sigma^2/n$ for least squares
+with $p$ coefficients (see <NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>).
+$C_p$ adds that amount back. The result estimates the error the fit would make on fresh targets at the same inputs,
+without holding any data out.
+
+The covariance penalty keeps the general form and drops the parameter count. It asks directly how much each fitted
+value moves when its own target moves. That makes it apply to fits that have no parameter count: smoothers, trees,
+<NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> and procedures that search over models.
+
+Both answer the first question of <NoteLink to="model-selection">model selection</NoteLink>, how well a candidate will
+predict, and both reuse all $n$ points for fitting and scoring. They target the **in-sample** error, at the training
+inputs. They do not account for new inputs, which a held-out set or
+<NoteLink to="cross-validation">cross-validation</NoteLink> does.
+
+## What $C_p$ estimates
+
+Mallows' scale has a direct reading. Let $\Hmat_p$ be the $n \times n$ projection onto the columns of the
+$p$-coefficient design, so $\hat\yvec = \Hmat_p\yvec$. Define the **scaled total squared error** of the fit,
+
+$$
+J_p = \frac{1}{\sigma^2}\expect\norm{\hat\yvec - \fvec}^2.
+$$
+
+$J_p$ measures how far the fitted values are from the true means, in units of the noise variance. It splits into
+variance and bias.
+
+1. **Variance.** $\hat\yvec - \expect\hat\yvec = \Hmat_p\epsilonb$, whose expected squared length is
+   $\sigma^2\trace\Hmat_p = p\sigma^2$.
+2. **Bias.** $\expect\hat\yvec - \fvec = -(\eye - \Hmat_p)\fvec$. Write $B_p = \norm{(\eye - \Hmat_p)\fvec}^2$, the part
+   of $\fvec$ the model cannot represent. It is zero when the model contains $\fvec$.
+3. **Together,** $J_p = p + B_p/\sigma^2$.
+
+Now take the expectation of $C_p$ with $\sigma^2$ known. The residual vector is $(\eye - \Hmat_p)\yvec = (\eye -
+\Hmat_p)\fvec + (\eye - \Hmat_p)\epsilonb$. Its expected squared length is $B_p + (n - p)\sigma^2$, because
+$\eye - \Hmat_p$ is a projection of rank $n - p$. So
+
+$$
+\expect[C_p] = \frac{B_p + (n - p)\sigma^2}{\sigma^2} - n + 2p = p + \frac{B_p}{\sigma^2} = J_p.
+$$
+
+$C_p$ is an unbiased estimate of $J_p$ when $\sigma^2$ is known. A model without bias has $\expect[C_p] = p$, and a
+biased model sits above that. The **$C_p$ plot** draws $C_p$ against $p$ for every candidate with the line $C_p = p$.
+Candidates near or below the line have little bias, and among them the smallest $C_p$ has the smallest estimated total
+error <Cite id="mallows1973" />.
+
+The two scales are affine images of each other: $C_p^\text{Mallows} = (n/\hat\sigma^2)\,C_p^\text{error} - n$. They
+choose the same model.
+
+## Estimating $\sigma^2$
+
+$C_p$ needs $\hat\sigma^2$ from outside the candidate being scored. The usual choice is the residual variance of the
+largest model under consideration, $\hat\sigma^2 = \operatorname{RSS}_\text{full}/(n - p_\text{full})$, which is
+unbiased when the largest model has no bias. With that choice the largest model always has $C_p = p_\text{full}$
+exactly.
+
+The choice matters. A $\hat\sigma^2$ from a candidate that overfits is too small, which shrinks every penalty exactly
+when large models need it. A $\hat\sigma^2$ from a biased model is too large and pushes the choice towards small
+models. Replicate measurements at the same inputs give an estimate that depends on no model.
+
+## Covariance penalties
+
+Efron wrote the optimism as a covariance and turned it into a recipe for any fitting rule
+<Cite id="efron1986" /> <Cite id="efron2004covariance" />:
+
+$$
+\widehat{\operatorname{Err}}_\text{in} = \overline{\operatorname{err}} + \frac2n\sum_{i=1}^n\widehat{\cov}(\hat y_i, y_i).
+$$
+
+The penalty in units of $\sigma^2$, $\operatorname{df} = \frac{1}{\sigma^2}\sum_i\cov(\hat y_i, y_i)$, is the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> of the rule. There are three ways to
+compute the covariances.
+
+- **Linear smoothers.** When $\hat\yvec = \Smat\yvec$ with $\Smat$ fixed, $\cov(\hat y_i, y_i) = \sigma^2 S_{ii}$ and
+  the penalty is $2\sigma^2\trace\Smat/n$. This covers <NoteLink to="ridge-regression">ridge regression</NoteLink>,
+  <NoteLink to="smoothing-splines">smoothing splines</NoteLink> and $k$-nearest neighbours at fixed $k$.
+- **Stein's lemma.** For Gaussian noise, $\cov(\hat y_i, y_i) = \sigma^2\expect[\partial\hat y_i/\partial y_i]$, so the
+  divergence of the fit estimates the degrees of freedom from one sample. This gives
+  <NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink>, which owns the derivation.
+- **The parametric bootstrap.** For any rule, simulate the covariances. This is Efron's general method.
+
+**The parametric bootstrap, step by step.**
+
+1. Fit a flexible model with little bias to get a mean vector $\tilde\fvec$ and a noise estimate $\hat\sigma^2$.
+2. For $b = 1, \dots, B$, draw $\yvec^{(b)} = \tilde\fvec + \hat\sigma\,\zvec^{(b)}$ with $\zvec^{(b)}$ standard
+   Gaussian, and refit the rule to get $\hat\yvec^{(b)}$. Every step of the rule is repeated, including any search over
+   models.
+3. Estimate each covariance by the sample covariance over the $B$ replicates,
+   $\widehat{\cov}_i = \frac{1}{B - 1}\sum_b \hat y_i^{(b)}\paren{y_i^{(b)} - \bar y_i}$ with $\bar y_i$ the mean of the
+   $y_i^{(b)}$.
+4. Add $\frac2n\sum_i\widehat{\cov}_i$ to the training error of the original fit.
+
+Repeating the search in step 2 is the point of the method. A rule that selects variables, stops early or tunes a
+penalty uses $\yvec$ to decide its own shape, and its degrees of freedom exceed the number of coefficients it ends with.
+Ye called the result the **generalised degrees of freedom** of the procedure <Cite id="ye1998" />. A parameter count
+cannot see the search; the simulated covariance can.
+
+Efron compared covariance penalties with cross-validation and found that cross-validation behaves like a randomised
+version of a covariance penalty. When the noise model is believable, the penalty estimates the in-sample error with
+less variance <Cite id="efron2004covariance" />.
+
+## $C_p$ and AIC
+
+For Gaussian errors with known $\sigma^2$, the maximised log-likelihood of a least-squares fit is
+$\log\hat L = -\operatorname{RSS}_p/(2\sigma^2) - \frac n2\ln(2\pi\sigma^2)$. Then
+
+$$
+\AIC = \frac{\operatorname{RSS}_p}{\sigma^2} + 2p + n\ln(2\pi\sigma^2) = C_p + n + n\ln(2\pi\sigma^2).
+$$
+
+The last two terms are the same for every candidate, so <NoteLink to="akaike-information-criterion">AIC</NoteLink> and
+$C_p$ choose the same model. With $\sigma^2$ estimated inside each model,
+$\AIC = n\ln(\operatorname{RSS}_p/n) + 2(p + 1)$ up to a constant. Expanding the logarithm around $\sigma^2$ for
+candidates whose $\operatorname{RSS}_p/n$ is close to $\sigma^2$ gives
+$n\ln(\operatorname{RSS}_p/n) \approx n\ln\sigma^2 + \operatorname{RSS}_p/\sigma^2 - n$, which again differs from $C_p$
+by a constant. $C_p$, AIC, leave-one-out and <Gloss name="gcv">generalised cross-validation</Gloss> are asymptotically
+equivalent, and each chooses a model whose error approaches the best candidate's when no candidate is exactly right
+<Cite id="li1987" /> (see <NoteLink to="consistency-and-efficiency-of-selection-criteria">consistency and efficiency of
+selection criteria</NoteLink>).
+
+## Worked example
+
+Let $n = 40$ inputs be equally spaced on $[-1, 1]$ and $f(x) = 1 + 2x - 1.5x^2 + 0.6x^3$, with noise $\sigma = 1$. The
+candidates are polynomials with $p = 1, \dots, 6$ coefficients, of degree $p - 1$. The true model has $p = 4$, but its
+cubic term is small.
+
+1. **Bias.** Projecting $\fvec$ onto each design gives $B_p = 88.48$, $9.20$ and $0.38$ for $p = 1, 2, 3$, and zero
+   from $p = 4$. So $J_p = p + B_p$ is $89.48$, $11.20$, $3.38$, $4$, $5$ and $6$. The best candidate for prediction is
+   $p = 3$: dropping the cubic costs $0.38$ in bias and saves $1$ in variance.
+2. **One sample.** A draw of the noise gives the residual sums of squares below. The largest model gives
+   $\hat\sigma^2 = 44.26/34 = 1.302$, an overestimate of the true value 1 on this sample.
+3. **$C_p$.** For $p = 3$, $C_p = 46.88/1.302 - 40 + 6 = 2.01$. The other rows follow in the same way.
+
+| $p$ | $\operatorname{RSS}_p$ | $C_p$ | $J_p$ (truth) | $C_p^\text{error}$ |
+| --- | --- | --- | --- | --- |
+| 1 | 169.71 | 92.37 | 89.48 | 4.308 |
+| 2 | 64.73 | 13.72 | 11.20 | 1.748 |
+| 3 | 46.88 | 2.01 | 3.38 | 1.367 |
+| 4 | 45.97 | 3.31 | 4.00 | 1.410 |
+| 5 | 45.69 | 5.10 | 5.00 | 1.468 |
+| 6 | 44.26 | 6.00 | 6.00 | 1.497 |
+
+4. **Choose.** $C_p$ is smallest at $p = 3$, which is also the minimiser of the true $J_p$. The error scale,
+   $\overline{\operatorname{err}} + 2p\hat\sigma^2/n$, ranks the candidates identically. AIC with $\sigma^2$ estimated
+   in each model, $40\ln(\operatorname{RSS}_p/40) + 2(p + 1)$, gives $14.35$ at $p = 3$ against $15.56$ at $p = 4$,
+   and chooses $p = 3$ too.
+5. **Read the plot.** $p = 1$ and $p = 2$ sit far above the line $C_p = p$: they are biased. $p = 3$ to $6$ sit close
+   to it. $C_p$ does not recover the true degree; it recovers the degree that predicts best at this $n$.
+
+<CpPlot />
+
+## Assumptions
+
+- **Fixed inputs and independent noise with a common variance.** The optimism formula and $\expect[C_p] = J_p$ need
+  both. Heteroscedastic noise needs a weighted version.
+- **Least squares for the $2p$ penalty.** Other linear smoothers need $\trace\Smat$, and adaptive rules need the
+  covariance penalty.
+- **Gaussian noise only for the AIC equivalence and Stein's route.** $C_p$'s unbiasedness needs only the first two
+  moments of the noise.
+
+## Pitfalls
+
+- **Minimising $C_p$ over a large search.** The minimum of many $C_p$ values is biased low, and the chosen subset's
+  $C_p$ understates its error. Mallows warned against reading the minimiser as the answer and recommended inspecting the
+  plot <Cite id="mallows1973" />. Searching many subsets also adds degrees of freedom the $2p$ penalty does not count;
+  the parametric bootstrap counts them (see <NoteLink to="best-subset-and-stepwise-selection">best subset and stepwise
+  selection</NoteLink>).
+- **A $\hat\sigma^2$ from the wrong model.** An overfitting model underestimates $\sigma^2$, and a biased one
+  overestimates it. Either moves the choice.
+- **Reading in-sample error as test error.** $C_p$ estimates the error at the training inputs. New inputs, especially
+  outside the range of the training data, raise the error further.
+- **Counting coefficients of a regularised fit.** A ridge or lasso fit with $p$ coefficients does not have $p$ degrees
+  of freedom. Use $\trace\Smat$ for ridge and the divergence for the lasso.

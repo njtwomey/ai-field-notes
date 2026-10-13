@@ -1,0 +1,223 @@
+---
+title: 'Marginal likelihood and Bayesian Occam''s razor'
+kind: concept
+summary: 'The marginal likelihood $p(\Dcal \mid \Mcal)$ is the probability a model gave the data before fitting: its likelihood averaged over the prior. It equals the best-fit likelihood times an Occam factor, the fraction of prior mass the data leave plausible, so extra flexibility costs evidence.'
+tags: [model-selection, bayesian, worked-example]
+aliases: [marginal likelihood, Bayesian evidence, Bayesian Occam's razor, Occam factor, prior predictive probability of the data]
+requires: [bayesian-inference]
+related: [bayes-factors-and-model-comparison, bayesian-information-criterion, laplace-approximation, empirical-bayes-for-hyperparameters, gaussian-process-hyperparameter-learning, minimum-description-length, bayesian-model-averaging]
+references: [mackay1992, mackay2003, fong2020, lotfi2022marginal, llorente2023, newton1994]
+status: draft
+updated: 2026-10-13
+---
+
+import { OccamDensities } from './OccamDensities'
+import { EvidenceAgainstDegree } from './EvidenceAgainstDegree'
+
+<Definition>
+A model $\Mcal$ is a likelihood $p(\Dcal \mid \thetavec, \Mcal)$ together with a prior $p(\thetavec \mid \Mcal)$ on its
+parameters $\thetavec \in \reals^p$. Its **marginal likelihood**, or **evidence**, is the probability of the data
+$\Dcal$ with the parameters integrated out,
+
+$$
+p(\Dcal \mid \Mcal) = \int p(\Dcal \mid \thetavec, \Mcal)\, p(\thetavec \mid \Mcal)\, d\thetavec.
+$$
+
+It is the prior predictive probability of the observed data: the probability the model assigned to them before any
+parameter was fitted. Ranking candidate models $\Mcal_1, \dots, \Mcal_J$ by their evidence is
+<NoteLink to="bayesian-model-selection">Bayesian model selection</NoteLink> with equal prior probabilities on the models
+<Cite id="mackay1992" />.
+</Definition>
+
+## Intuition
+
+Fitting a model makes its training likelihood larger, and a larger model always fits at least as well as a smaller one
+nested inside it. The maximised likelihood therefore cannot choose between models of different size. The evidence does
+not fit anything. It asks how probable the data were under the model as specified, prior included, so a model earns
+evidence only by having predicted the data in advance.
+
+A probability distribution over data sets sums to one. A model with a narrow prior can produce only a few kinds of data
+set, so it gives each of them high probability. A flexible model can produce many kinds, so it spreads the same unit of
+probability thinly and gives each one less. When the data are of a kind both models can produce, the narrow model wins.
+When the data are of a kind only the flexible model can produce, the flexible model wins, because the narrow model gave
+them almost no probability. This is the **Bayesian Occam's razor**: the simplest model that can account for the data
+has the largest evidence, and the penalty for flexibility comes from normalisation, not from an added term
+<Cite id="mackay2003" />.
+
+<OccamDensities />
+
+The answer depends on the prior as much as on the likelihood. Two models with the same likelihood and different priors
+are different models, and they have different evidence.
+
+## The evidence
+
+### What it answers
+
+<NoteLink to="model-selection">Model selection</NoteLink> asks three questions (see
+<NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>): how well a
+candidate predicts, which candidate to choose, and how well the chosen one predicts. The evidence answers a version of
+the second. Under equal prior probabilities $P(\Mcal_j) = 1/J$, <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>
+applied to the model index gives
+
+$$
+P(\Mcal_j \mid \Dcal) = \frac{p(\Dcal \mid \Mcal_j)}{\sum_{k=1}^J p(\Dcal \mid \Mcal_k)},
+$$
+
+so the model with the largest evidence is the most probable model. The ratio of two evidences is the
+<NoteLink to="bayes-factors-and-model-comparison">Bayes factor</NoteLink>, which owns the comparison of two models and
+Lindley's paradox. The posterior probability is meaningful when one of the candidates generated the data. The evidence
+estimates nothing about predictive error directly, so it does not answer the first or the third question.
+
+### The evidence is a sequential predictive score
+
+The <NoteLink to="conditional-probability">chain rule of probability</NoteLink> writes the joint probability of
+$\Dcal = (y_1, \dots, y_n)$ as a product of conditionals. Applied to the evidence,
+
+$$
+\log p(\Dcal \mid \Mcal) = \sum_{i=1}^n \log p(y_i \mid y_1, \dots, y_{i-1}, \Mcal),
+$$
+
+where each factor $p(y_i \mid y_{<i}, \Mcal) = \int p(y_i \mid \thetavec)\, p(\thetavec \mid y_{<i})\, d\thetavec$ is
+the posterior predictive density of point $i$ given the points before it, and the first factor is the prior predictive
+$p(y_1 \mid \Mcal)$. The log evidence is the total log score of a forecaster that predicts each point from the ones
+before it. The identity holds for every ordering of the data, because the joint probability does not depend on the
+order.
+
+Averaging over orderings gives a <NoteLink to="cross-validation">cross-validation</NoteLink> reading. Fong and Holmes
+showed that the log evidence equals the sum over $p = 1, \dots, n$ of the exhaustive leave-$p$-out cross-validation
+score, the average log predictive density of $p$ held-out points given the other $n - p$, averaged over all
+$\binom{n}{p}$ held-out sets <Cite id="fong2020" />. The term with $p = n$ predicts every point from the prior alone.
+The evidence therefore weighs predictions made from very little data as heavily as predictions made from nearly all of
+it. That explains its sensitivity to the prior, and it is the main difference from
+<NoteLink to="leave-one-out-cross-validation">leave-one-out cross-validation</NoteLink>, which scores only predictions
+from $n - 1$ points.
+
+## The Occam factor
+
+For $n$ observations the likelihood $p(\Dcal \mid \thetavec)$ is sharply peaked at the maximum-likelihood estimate
+$\hat\thetavec$, with a width that shrinks like $n^{-1/2}$. When the prior is much broader than the peak, the integral
+in the definition is the height of the peak times its width. In one dimension, write $\sigma_{\theta \mid \Dcal}$ for
+the width of the posterior and $\sigma_\theta$ for the width of the prior, and approximate the prior density at the
+peak by $1/\sigma_\theta$:
+
+$$
+p(\Dcal \mid \Mcal) \approx \underbrace{p(\Dcal \mid \hat\theta, \Mcal)}_{\text{best fit}} \times
+\underbrace{\frac{\sigma_{\theta \mid \Dcal}}{\sigma_\theta}}_{\text{Occam factor}}.
+$$
+
+The **Occam factor** is the fraction of the prior's range that remains plausible after seeing the data. It is at most
+about one, and it is small when the prior was broad and the data pinned the parameter down. A model pays it once per
+parameter, so a flexible model with many parameters must improve the fit by a factor that beats the product of its
+Occam factors <Cite id="mackay1992" />.
+
+In $p$ dimensions the same argument is the <NoteLink to="laplace-approximation">Laplace approximation</NoteLink>. Let
+$\Amat = -\nabla^2 \log p(\Dcal \mid \thetavec)p(\thetavec)$ be the curvature of the log posterior at its mode
+$\hat\thetavec$. Then
+
+$$
+\log p(\Dcal \mid \Mcal) \approx \log p(\Dcal \mid \hat\thetavec) + \underbrace{\log p(\hat\thetavec) + \frac{p}{2}\log 2\pi
+- \frac12 \log\abs{\Amat}}_{\log \text{Occam factor}}.
+$$
+
+The term $(2\pi)^{p/2}\abs{\Amat}^{-1/2}$ is the volume of the posterior, and $p(\hat\thetavec)$ is one over the volume
+of the prior when the prior is flat near the mode. For $n$ independent observations $\Amat$ grows like $n$, so
+$\log\abs{\Amat} = p\log n + O(1)$ and the log Occam factor is $-\frac{p}{2}\log n + O(1)$. Dropping the $O(1)$ terms
+and multiplying by $-2$ gives the <NoteLink to="bayesian-information-criterion">Bayesian information
+criterion</NoteLink>. BIC keeps the part of the Occam factor that grows with $n$ and discards the part that depends on
+the prior.
+
+The penalty is not a count of parameters. A parameter that the data do not constrain has a posterior as wide as its
+prior, so its Occam factor is one and it costs nothing. A parameter whose prior already concentrates where the data put
+it also costs little. The evidence charges mainly for the directions in which the data are much more informative than
+the prior. In a linear-Gaussian model their number is the effective number of parameters $\gamma$ of
+<NoteLink to="empirical-bayes-for-hyperparameters">evidence maximisation</NoteLink>, which equals the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> of the fit.
+
+## Worked example
+
+Let $y_1, \dots, y_{16}$ be independent $\Gauss(\mu, 1)$, with sample mean $\bar y = 0.5$. Compare four models of the
+mean: $\Mcal_0$ fixes $\mu = 0$, and $\Mcal_\tau$ gives $\mu$ a $\Gauss(0, \tau^2)$ prior with $\tau = 0.5$, $2$ or
+$20$.
+
+**Step 1: split off the best fit.** Write $y_i - \mu = (y_i - \bar y) + (\bar y - \mu)$. The cross term sums to zero, so
+$\sum_i (y_i - \mu)^2 = \sum_i (y_i - \bar y)^2 + n(\bar y - \mu)^2$ and
+
+$$
+p(\Dcal \mid \mu) = p(\Dcal \mid \hat\mu)\, \exp\paren{-\tfrac{n}{2}(\bar y - \mu)^2}, \qquad \hat\mu = \bar y.
+$$
+
+The first factor is the same for every model, so the models differ only through the second.
+
+**Step 2: the model with no parameter.** $\Mcal_0$ sets $\mu = 0$, so its evidence is
+$p(\Dcal \mid \hat\mu)\, e^{-n\bar y^2/2} = p(\Dcal \mid \hat\mu)\, e^{-2}$. Its factor is $e^{-2} = 0.135$. It pays
+nothing for flexibility and everything for misfit.
+
+**Step 3: the models with a prior.** Integrating the second factor against the $\Gauss(0, \tau^2)$ prior is a
+<NoteLink to="gaussian-integral">Gaussian integral</NoteLink>. The exponential is $\sqrt{2\pi/n}$ times a
+$\Gauss(\mu \mid \bar y, 1/n)$ density in $\mu$, and the integral of a product of two Gaussian densities is a
+Gaussian density of the difference of their means with the variances added:
+
+$$
+\frac{p(\Dcal \mid \Mcal_\tau)}{p(\Dcal \mid \hat\mu)} = \sqrt{\frac{2\pi}{n}}\; \Gauss\paren{\bar y \mid 0,\, \tau^2 +
+\tfrac1n}.
+$$
+
+This is the exact Occam factor. When $\tau$ is large the Gaussian density is about $1/(\sqrt{2\pi}\,\tau)$, and the
+factor tends to $(1/\sqrt n)/\tau$: the posterior width $0.25$ over the prior width $\tau$.
+
+**Step 4: the numbers.**
+
+| Model | prior sd $\tau$ | posterior sd of $\mu$ | Occam factor | log factor |
+| --- | --- | --- | --- | --- |
+| $\Mcal_0$ | 0 | 0 | 0.135 | −2.00 |
+| $\Mcal_{0.5}$ | 0.5 | 0.224 | 0.300 | −1.20 |
+| $\Mcal_2$ | 2 | 0.248 | 0.120 | −2.12 |
+| $\Mcal_{20}$ | 20 | 0.250 | 0.0125 | −4.38 |
+
+**Step 5: read the table.** $\Mcal_{0.5}$ has the largest evidence. Its prior expected small means, and $\bar y = 0.5$
+is a small mean, so most of its prior mass stayed plausible. $\Mcal_{20}$ has the same best fit and almost the same
+posterior as $\Mcal_{0.5}$, yet its evidence is $e^{4.38 - 1.20} = 24$ times smaller, because it spent 99% of its prior
+on means the data ruled out. $\Mcal_0$ fits worse than $\Mcal_{20}$ but beats it, since a misfit of $e^{-2}$ costs less
+than an Occam factor of $1/80$. The sequential reading gives the same verdict: $\Mcal_{20}$ predicted the first
+observation with a $\Gauss(0, 401)$ density, which is at most $0.020$ anywhere.
+
+## Polynomial degree
+
+A polynomial of degree $d$ with an isotropic Gaussian prior on its $d + 1$ coefficients is
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink>, whose evidence has a closed form.
+Raising $d$ improves the best fit and adds a coefficient whose Occam factor is below one. The evidence first rises,
+while each coefficient buys more fit than it costs, and then falls.
+
+<EvidenceAgainstDegree />
+
+The held-out log predictive density in the figure is the truth that the evidence is trying to track. The two curves
+usually peak at nearby degrees. They differ in what they reward: the held-out score judges the posterior predictive
+after all $n$ points, while the evidence also charges for the predictions made from the first few.
+
+## Pitfalls
+
+- **Vague priors.** The evidence of a model with a $\Gauss(0, \tau^2)$ prior falls like $1/\tau$ once $\tau$ is much
+  wider than the posterior, while the posterior barely changes. An arbitrarily vague prior makes any model lose to a
+  simpler one. An improper prior has an arbitrary constant and no evidence at all. Choose prior scales from the problem
+  (see <NoteLink to="prior-choice">prior choice</NoteLink>) and report how the comparison moves with them.
+- **Evidence is not predictive accuracy.** The evidence asks whether the data were probable under the prior, and the
+  predictive criteria (<NoteLink to="widely-applicable-information-criterion">WAIC</NoteLink>,
+  <NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">PSIS-LOO</NoteLink>) ask whether the posterior
+  predicts new points. Lotfi and colleagues give cases where the evidence prefers the model that generalises worse,
+  including <NoteLink to="neural-architectures">neural architectures</NoteLink>; they propose the conditional marginal
+  likelihood, which drops the first $m - 1$ terms of the sequential sum <Cite id="lotfi2022marginal" />.
+- **Every candidate wrong.** When no candidate generated the data, the posterior model probabilities still concentrate
+  on one model as $n$ grows, the one closest to the truth in <Gloss name="kl">Kullback–Leibler divergence</Gloss>. A
+  probability near one then says that the data distinguish the candidates, not that the chosen one is right. See
+  <NoteLink to="bayesian-model-averaging">Bayesian model averaging</NoteLink> for the M-open case.
+- **Computing it from posterior draws.** The harmonic mean of the likelihood over posterior draws is a consistent
+  estimator of the evidence with infinite variance in common models <Cite id="newton1994" />. Use a closed form when the
+  model is conjugate, the Laplace approximation when the posterior is near Gaussian, and otherwise bridge sampling,
+  nested sampling or thermodynamic integration <Cite id="llorente2023" />.
+- **Maximising it over many hyperparameters.** The evidence is an integral over parameters, not over hyperparameters.
+  Maximising it over a rich family of priors fits the prior to the data and can overfit like any training objective;
+  see <NoteLink to="empirical-bayes-for-hyperparameters">empirical Bayes</NoteLink>.
+- **Reusing it as an assessment.** The evidence of the model that won a comparison is the largest of $J$ noisy scores,
+  so it is optimistic about that model in the same way as the best cross-validation score
+  (<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Assess the chosen model on
+  held-out data.

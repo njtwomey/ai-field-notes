@@ -1,0 +1,142 @@
+---
+title: 'Tuning budgets in comparisons'
+kind: concept
+summary: 'A method tuned with many trials against a baseline tuned with few wins by tuning, not by design. Fair comparisons give every method the same search budget, or report each method''s score as a function of budget; equal-budget re-evaluations erased many reported gains.'
+tags: [model-selection, evaluation, hyperparameters, reproducibility, worked-example]
+aliases: [tuning budget, equal tuning budget, expected validation performance, under-tuned baseline]
+requires: [comparing-learning-algorithms, random-search]
+related: [variance-in-machine-learning-benchmarks, hyperparameter-search, overfitting-in-model-selection, nested-cross-validation, comparing-classifiers-over-multiple-datasets]
+references: [melis2018, lucic2018, musgrave2020, dodge2019, bouthillier2021]
+status: draft
+updated: 2026-10-13
+---
+
+import { BudgetCurves } from './BudgetCurves'
+
+<Definition>
+The **tuning budget** of a method in a comparison is the effort spent choosing its hyperparameters: the number of
+configurations tried, the compute they used and the size of the space they were drawn from. What a comparison measures
+is a method together with its tuning, so a difference in budgets is a difference in the methods compared. A fair
+comparison either gives every method the same budget under the same search procedure, or reports each method's
+performance as a function of the budget <Cite id="dodge2019" />.
+</Definition>
+
+## Intuition
+
+A learning algorithm with hyperparameters is not one model but a family. Its reported score is the score of the member
+that a search found, and a longer search finds a better member. A new method tuned for a week against a baseline run at
+the defaults from its original paper compares a week of search with none. The new method's advantage can come entirely
+from the search.
+
+The bias runs one way. Authors tune the method they propose with care and the baselines with less, because the
+proposal is what they want to work. Nobody needs to act in bad faith for this to happen. The reader sees two numbers and
+cannot see the budgets behind them.
+
+## Re-evaluations with equal budgets
+
+Several large studies re-ran published comparisons with every method tuned by the same procedure and budget.
+
+- **<Gloss name="language-model">Language models</Gloss>.** Melis, Dyer and Blunsom tuned standard
+  <Gloss name="lstm" plural /> and two newer recurrent architectures, recurrent highway networks and an architecture
+  found by <Gloss name="nas">neural architecture search</Gloss>, with the same black-box tuner, using thousands of
+  trials. On Penn Treebank at 10 million parameters the tuned LSTM reached a test perplexity of 59.6, against 63.5 for
+  the highway network and 62.7 for the searched architecture. The published results for the newer architectures had
+  beaten the LSTM baselines of the time <Cite id="melis2018" />.
+- **<Gloss name="gan" plural />.** Lucic and colleagues tuned several generative adversarial network variants with 100
+  hyperparameter samples each and found that most reach similar scores given enough tuning and random restarts. Given
+  enough budget, a "bad" model could beat a "good" one, and with a small budget no statistically significant ranking was
+  possible. They concluded that improvements can come from a higher computational budget and more tuning rather than
+  from algorithmic changes <Cite id="lucic2018" />.
+- **<NoteLink to="metric-learning">Metric learning</NoteLink>.** Musgrave, Belongie and Lim found papers comparing
+  against baselines with different network backbones, embedding sizes, augmentation and optimisers, and tuning on the
+  test set for lack of a validation set. Papers had reported relative improvements of over 100% over the contrastive
+  loss. Re-run with the same backbone and 50 rounds of <NoteLink to="bayesian-optimisation">Bayesian
+  optimisation</NoteLink> per loss, cross-validated on held-out classes, the progress since then was close to flat
+  <Cite id="musgrave2020" />.
+
+## Performance as a function of budget
+
+Dodge and colleagues proposed reporting, for each method, the expected best validation score of a
+<NoteLink to="random-search">random search</NoteLink> with $b$ trials, as a curve over $b$ <Cite id="dodge2019" />.
+
+**The expected maximum.** Let $V_1, \dots, V_b$ be the validation scores of $b$ independent random trials, each with
+<Gloss name="cdf">cumulative distribution function</Gloss> $F(v) = P(V \le v)$. The best of them is at most $v$ exactly
+when all $b$ are, and the trials are independent, so
+
+$$
+P\paren{\max_i V_i \le v} = F(v)^b.
+$$
+
+Given $N$ trials already run, with scores $v_{(1)} \le \dots \le v_{(N)}$, replace $F$ by the empirical distribution
+function $\hat F$, which jumps by $1/N$ at each score. The expected best of $b$ draws from it is
+
+$$
+\hat\expect\brack{\max_i V_i} = \sum_{j=1}^N v_{(j)}\paren{\hat F(v_{(j)})^b - \hat F(v_{(j - 1)})^b},
+$$
+
+the sum of each score times the probability that it is the best of the $b$. At $b = 1$ the curve is the mean score of a
+random configuration. As $b$ grows it rises towards the best score observed. One pool of $N$ trials gives the whole
+curve without running new searches.
+
+**What the curve shows.** A method with a narrow region of good hyperparameters starts low and climbs; a method that
+works over a wide region starts high and flattens. The curves can cross. On five-way sentiment classification,
+<NoteLink to="logistic-regression">logistic regression</NoteLink> had a higher expected validation accuracy than a
+convolutional network for budgets below about 10 trials, and the network won above it <Cite id="dodge2019" />. A
+comparison at one budget is a comparison at one point of two curves.
+
+**Validation against test.** The expected maximum of validation scores is optimistic about the selected configuration,
+because the best of $b$ noisy scores is biased upwards (see <NoteLink to="overfitting-in-model-selection">overfitting in
+model selection</NoteLink>). The figure plots the fresh-data error of the configuration each search selects, which has
+no such bias.
+
+<BudgetCurves />
+
+## Worked example
+
+**The expected maximum by hand.** Five random trials of a method gave validation accuracies 0.70, 0.74, 0.78, 0.80 and
+0.85, so $\hat F$ climbs by 0.2 at each.
+
+1. **One trial.** $b = 1$ gives the mean, 0.774.
+2. **Two trials.** The probability that each score is the best of two draws is $\hat F(v_{(j)})^2 - \hat
+   F(v_{(j-1)})^2$: 0.04, 0.12, 0.20, 0.28 and 0.36. The expected best is $0.70 \times 0.04 + 0.74 \times 0.12 + 0.78
+   \times 0.20 + 0.80 \times 0.28 + 0.85 \times 0.36 = 0.803$.
+3. **Five trials.** The weights become $\hat F^5$ differences: 0.0003, 0.0099, 0.0675, 0.2499 and 0.6723, and the
+   expected best is 0.832, close to the largest observed score.
+
+**Two learners on one problem.** In the figure's default setting, 150 training rows, $k$-nearest neighbours and an RBF
+<Gloss name="svm">support vector machine</Gloss> are each given a pool of 30 random configurations.
+
+1. **At one trial.** A random configuration of $k$-NN has expected test
+   error 0.322; a random SVM configuration 0.387. Most of the SVM's space underfits or overfits, and its
+   median configuration has error 0.45.
+2. **The crossing.** By three trials the two are level, at 0.28. From then on the SVM pulls ahead: 0.240 against 0.270
+   at five trials, 0.183 against 0.273 at thirty.
+3. **Unequal budgets.** Give $k$-NN thirty trials and the SVM two, and $k$-NN looks better, 0.273 against 0.304. With
+   equal budgets of thirty the SVM's error is a third lower. The ranking reported depends on a choice the reader never
+   sees.
+
+## A fair protocol
+
+- **Same procedure, same budget.** Tune every method, baselines included, with the same search procedure and the same
+  number of trials or the same compute. Report the budget.
+- **Comparable <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink>.** A space that includes the
+  baseline's known good region, on the same scales (log scales for rates and penalties) as the proposed method's.
+- **Tune without the test set.** Select on a validation set or by
+  <NoteLink to="cross-validation">cross-validation</NoteLink> inside the training data; the test set scores the selected
+  configuration once (see <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink> and
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink>).
+- **Report the curve.** Expected performance against budget shows where each method wins. A single number hides it.
+- **Count the seeds.** Random restarts are part of the budget: the best of ten seeds is a search over seeds, and the
+  search's own randomness adds variance (see <NoteLink to="variance-in-machine-learning-benchmarks">variance in machine
+  learning benchmarks</NoteLink>) <Cite id="bouthillier2021" />.
+
+## Pitfalls
+
+- **Defaults as the baseline.** A baseline's published hyperparameters were tuned for another data set, another code
+  base or another budget.
+- **Budget in trials when costs differ.** One trial of a large model costs more than one of a small model. Equal trials
+  can be unequal compute; state which budget is equal.
+- **Search spaces of different sizes.** A method with more hyperparameters needs more trials to cover its space. Giving
+  it a larger space without a larger budget handicaps it; giving it a larger budget without saying so flatters it.
+- **Reporting the best validation score as the result.** It carries <NoteLink to="winners-curse">the winner's
+  curse</NoteLink> of the search. Report the test score of the configuration the search selected.

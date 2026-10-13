@@ -1,0 +1,68 @@
+---
+title: 'Attention variants'
+kind: overview
+summary: 'Changes to the attention layer of modern transformers: the key-value cache and the multi-query, grouped-query and latent attention that shrink it, QK normalisation and logit soft-capping for stable training, attention sinks, and differential attention.'
+tags: [transformer, attention, inference, overview]
+aliases: [modern attention variants]
+requires: [multi-head-attention, causal-masking]
+related: [modern-decoder-block, efficient-and-state-space-sequence-models, positional-encoding]
+references: [pope2022, ainslie2023]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Attention variants** are modifications of multi-head attention that keep its form, a softmax-weighted average of
+values selected by query-key scores, while changing how keys and values are stored, how scores are bounded or how
+weights are formed. Most were introduced for <NoteLink to="autoregressive-transformer-language-model">decoder-only
+language models</NoteLink>, where generating text one token at a time makes the stored keys and values the main cost
+<Cite id="pope2022" />.
+</Definition>
+
+## What it is for
+
+When a decoder generates a token, it attends to the keys and values of every earlier token. Storing them, the key-value
+cache, avoids recomputing them, but the cache grows with context length, batch size and number of heads, and reading it
+from memory at every step limits generation speed. Several variants exist to shrink it. Others address problems that
+appear only at scale: attention logits that grow until training diverges, and heads that concentrate weight on the first
+token. These choices separate a 2017 transformer from a current <Gloss name="llm">large language model</Gloss> as much
+as any change in size does.
+
+## Main ideas
+
+**Cache keys and values, then shrink the cache.** The <NoteLink to="key-value-cache" /> stores every earlier token's
+keys and values, which cuts attention per generated token from $O(t^2 d)$ to $O(td)$ at length $t$. Its size is the
+problem the next two variants solve. <NoteLink to="multi-query-and-grouped-query-attention" /> lets groups of query
+heads share one key head and one value head, shrinking the cache by the group size at a small cost in quality
+<Cite id="ainslie2023" />. <NoteLink to="multi-head-latent-attention" /> caches one compressed vector per token and
+layer, from which every head's keys and values are reconstructed.
+
+**Bound the logits.** Attention logits grow with the norms of the query and key weights; very large logits make
+attention one-hot and training unstable. <NoteLink to="query-key-normalisation-and-logit-soft-capping" /> covers two
+fixes: normalising queries and keys before the dot product, and squashing each logit with $c\tanh(s/c)$.
+
+**Softmax needs somewhere to put its weight.** Softmax weights sum to one, so a head with nothing relevant to retrieve
+still has to place its weight somewhere. <NoteLink to="attention-sinks" /> shows that models learn to park it on the
+first token, and that a sliding-window cache that evicts that token breaks generation unless a few sink tokens are
+kept.
+
+**Change how scores become weights.** <NoteLink to="differential-and-other-attention-variants" /> covers differential
+attention, which subtracts a second softmax map to cancel weight on irrelevant tokens, talking-heads attention, which
+mixes logits across heads, and related proposals.
+
+## How the notes fit together
+
+Start with the <NoteLink to="key-value-cache" />, which explains the cost that motivates the next two notes:
+<NoteLink to="multi-query-and-grouped-query-attention" />, then <NoteLink to="multi-head-latent-attention" />. The
+remaining three notes are independent. <NoteLink to="query-key-normalisation-and-logit-soft-capping" /> is about
+training stability, <NoteLink to="attention-sinks" /> about where attention goes, and
+<NoteLink to="differential-and-other-attention-variants" /> about alternative weightings.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="multi-head-attention" /> and <NoteLink to="causal-masking" />. The block that combines
+these variants with normalisation and <NoteLink to="gated-feed-forward-layers">gated feed-forward layers</NoteLink> is
+the <NoteLink to="modern-decoder-block" />. Variants that change the cost of attention in sequence length, rather than
+its memory per token, are in <NoteLink to="efficient-and-state-space-sequence-models" />. The key-value cache returns in
+the serving techniques of Part VIII, such as <NoteLink to="batching-and-serving-throughput" />, and in
+<NoteLink to="speculative-decoding" />.

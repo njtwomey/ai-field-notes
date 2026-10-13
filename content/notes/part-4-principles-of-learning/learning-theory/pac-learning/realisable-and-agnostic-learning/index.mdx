@@ -1,0 +1,207 @@
+---
+title: 'Realisable and agnostic learning'
+kind: concept
+summary: 'In realisable learning some hypothesis in the finite class $\Hcal$ has zero risk, and any consistent learner needs $(\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$ examples. In agnostic learning no such hypothesis is assumed, and ERM needs order $(\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon^2$.'
+tags: [learning-theory, sample-complexity, generalisation, worked-example]
+aliases: [realisable PAC learning, realizable learning, realizable PAC learning, agnostic learning, consistent learner, realisability assumption, optimistic rate]
+requires: [probably-approximately-correct-learning, union-bound, hoeffdings-inequality]
+related: [occam-bound, test-set-bounds, bernsteins-inequality, fast-rates-and-noise-conditions, sample-complexity-lower-bounds, empirical-risk-minimisation]
+references: [valiant1984, haussler1992, kearns1994agnostic, shalevshwartz2014, mohri2018, blumer1987]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\Hcal$ be a class of classifiers, $\Dcal$ a distribution over labelled examples and $R(h)$ the 0–1 risk. The
+**realisable** setting assumes that some $h^* \in \Hcal$ has $R(h^*) = 0$. A learner is **consistent** if it returns a
+hypothesis with zero training error. For a finite class, every consistent learner reaches $R(\hat h) \le \epsilon$ with
+probability at least $1 - \delta$ once $m \ge (\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$. The **agnostic** setting
+makes no assumption on $\Dcal$ and asks for $R(\hat h) \le \min_{h \in \Hcal}R(h) + \epsilon$. Empirical risk
+minimisation achieves it once $m \ge 2(\ln\abs{\Hcal} + \ln(2/\delta))/\epsilon^2$ <Cite id="shalevshwartz2014" />
+<Cite id="haussler1992" />.
+</Definition>
+
+## Intuition
+
+A hypothesis with risk $\epsilon$ makes a mistake on a fraction $\epsilon$ of examples. In the realisable setting a
+learner only has to rule out every hypothesis with risk above $\epsilon$. One mistake in the sample is enough to rule a
+hypothesis out, and a hypothesis with risk $\epsilon$ shows its first mistake after about $1/\epsilon$ examples. The
+sample size therefore grows as $1/\epsilon$.
+
+In the agnostic setting every hypothesis may make mistakes, including the best one. Ruling a hypothesis out means
+showing that its <NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> is higher than the best one's by
+$\epsilon$. Telling two error rates apart by $\epsilon$ is an estimation problem, and estimating a rate to within
+$\epsilon$ takes about $1/\epsilon^2$ examples, because the standard deviation of an average of $m$ losses shrinks as
+$1/\sqrt m$.
+
+Both bounds follow the first three moves of the <NoteLink to="statistical-learning-theory">recipe for a
+generalisation bound</NoteLink>. The excess risk is decomposed, a single hypothesis is controlled by a concentration
+inequality, and a <NoteLink to="union-bound">union bound</NoteLink> makes the control uniform over the finite class.
+The two settings differ only in the concentration step.
+
+Valiant's original definition of <NoteLink to="probably-approximately-correct-learning">PAC learning</NoteLink> was
+realisable <Cite id="valiant1984" />. Haussler and Kearns, Schapire and Sellie introduced the agnostic version, which
+is the one practice needs <Cite id="haussler1992" /> <Cite id="kearns1994agnostic" />.
+
+## The realisable bound
+
+Call a hypothesis **bad** if $R(h) > \epsilon$. The learner fails exactly when it returns a bad hypothesis. A
+consistent learner returns a hypothesis with zero training error, so it can fail only if some bad hypothesis has zero
+training error. The derivation bounds the probability of that event in three steps.
+
+1. **One bad hypothesis.** Fix a bad $h$. On one random example it is correct with probability
+   $1 - R(h) < 1 - \epsilon$. The $m$ examples are independent, so
+
+$$
+\prob\paren{\hat R_S(h) = 0} < (1 - \epsilon)^m \le e^{-\epsilon m},
+$$
+
+   using $1 - \epsilon \le e^{-\epsilon}$.
+
+2. **All bad hypotheses.** At most $\abs{\Hcal}$ hypotheses are bad. The union bound adds their probabilities:
+
+$$
+\prob\paren{\exists h \in \Hcal: R(h) > \epsilon \text{ and } \hat R_S(h) = 0} \le \abs{\Hcal}\,e^{-\epsilon m}.
+$$
+
+3. **Inversion.** The right side is at most $\delta$ when $m \ge (\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$.
+   Equivalently, at a fixed $m$, with probability at least $1 - \delta$ every hypothesis with zero training error has
+
+$$
+R(h) \le \frac{\ln\abs{\Hcal} + \ln(1/\delta)}{m}.
+$$
+
+The argument never uses the realisability assumption. The assumption guarantees only that a consistent hypothesis
+exists, so that a consistent learner can return one. Whenever a learner observes zero training error, the bound holds
+for its output, whether or not the problem is realisable.
+
+## The agnostic bound
+
+In the agnostic setting the best hypothesis $h^\dagger = \argmin_{h \in \Hcal}R(h)$ may have positive risk, and no
+hypothesis need be consistent. Empirical risk minimisation (<Gloss name="erm" />) returns
+$\hat h = \argmin_{h \in \Hcal}\hat R_S(h)$.
+
+1. **One hypothesis.** For a fixed $h$, the losses $\indicator[h(x_i) \ne y_i]$ are independent, lie in $[0, 1]$ and
+   have mean $R(h)$. <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> gives
+   $\prob(\abs{\hat R_S(h) - R(h)} > t) \le 2e^{-2mt^2}$.
+2. **All hypotheses.** The union bound over $\Hcal$ gives
+   $\prob(\exists h: \abs{\hat R_S(h) - R(h)} > t) \le 2\abs{\Hcal}e^{-2mt^2}$. Setting this to $\delta$, with
+   probability at least $1 - \delta$ every $h \in \Hcal$ satisfies
+
+$$
+\abs{\hat R_S(h) - R(h)} \le t_m = \sqrt{\frac{\ln\abs{\Hcal} + \ln(2/\delta)}{2m}}.
+$$
+
+3. **Decomposition.** On that event,
+
+$$
+R(\hat h) \le \hat R_S(\hat h) + t_m \le \hat R_S(h^\dagger) + t_m \le R(h^\dagger) + 2t_m.
+$$
+
+   The first and third inequalities are the <NoteLink to="uniform-convergence">uniform deviation</NoteLink>; the middle
+   one holds because $\hat h$ minimises the empirical risk. Requiring $2t_m \le \epsilon$ gives
+   $m \ge 2(\ln\abs{\Hcal} + \ln(2/\delta))/\epsilon^2$.
+
+The same event also bounds the risk of the returned hypothesis from its training error: $R(\hat h) \le \hat R_S(\hat h)
++ t_m$. A one-sided version, which needs only the upper deviations, replaces $\ln(2/\delta)$ by $\ln(1/\delta)$.
+
+## Why the rates differ
+
+The rates differ because of the variance of the losses, not because of the union bound. The
+<NoteLink to="surrogate-losses">0–1 loss</NoteLink> of a hypothesis with risk $p$ is a Bernoulli variable with variance
+$p(1 - p)$. Hoeffding's inequality ignores the variance and bounds the deviation as if $p = 1/2$. The realisable
+argument works only at the bad hypotheses with risk near $\epsilon$, and their losses have variance about $\epsilon$. An
+average of $m$ such losses has standard deviation about $\sqrt{\epsilon/m}$, which is below $\epsilon$ once
+$m \gtrsim 1/\epsilon$.
+
+<NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink> uses the variance and interpolates between the
+two settings. Write $R^\dagger = R(h^\dagger)$ for the smallest risk in the class and
+$L = \ln(2\abs{\Hcal}/\delta)$. With probability at least $1 - \delta$, ERM satisfies
+
+$$
+R(\hat h) \le R^\dagger + 2\sqrt{\frac{2R^\dagger L}{m}} + \frac{5L}{m}.
+$$
+
+When $R^\dagger = 0$ the excess risk is of order $L/m$, the realisable rate. When $R^\dagger$ is a constant it is of
+order $\sqrt{L/m}$, the agnostic rate. Bounds of this form are called **optimistic rates**. They show that the
+$1/\epsilon$ rate needs only a small best-in-class risk, not exact realisability. Lower noise near the decision
+boundary gives intermediate rates (<NoteLink to="fast-rates-and-noise-conditions">fast rates and noise
+conditions</NoteLink>).
+
+<Derivation title="The optimistic rate from Bernstein's inequality">
+**Concentration.** For a fixed $h$ with risk $p = R(h)$, the losses lie in $[0, 1]$ with variance
+$p(1 - p) \le p$. One-sided Bernstein inequalities in each direction, at confidence $\delta/(2\abs{\Hcal})$ each, and a
+union bound over $\Hcal$ give, with probability at least $1 - \delta$, for every $h \in \Hcal$,
+
+$$
+\abs{\hat R_S(h) - R(h)} \le \sqrt{\frac{2R(h)L}{m}} + \frac{2L}{3m}.
+$$
+
+**Chaining the inequalities.** On this event, as in the agnostic bound,
+
+$$
+R(\hat h) \le \hat R_S(\hat h) + \sqrt{\frac{2R(\hat h)L}{m}} + \frac{2L}{3m}
+\le \hat R_S(h^\dagger) + \sqrt{\frac{2R(\hat h)L}{m}} + \frac{2L}{3m}
+\le B + \sqrt{\frac{2R(\hat h)L}{m}},
+$$
+
+where $B = R^\dagger + \sqrt{2R^\dagger L/m} + 4L/(3m)$.
+
+**Solving for $R(\hat h)$.** Write $x = \sqrt{R(\hat h)}$ and $a = \sqrt{2L/m}$. The inequality reads
+$x^2 \le B + ax$. Its positive root gives $x \le (a + \sqrt{a^2 + 4B})/2 \le a + \sqrt B$, and so
+$x^2 \le B + ax \le B + a^2 + a\sqrt B$.
+
+**Simplifying.** Because $\sqrt{2R^\dagger L/m} \le 2\sqrt{R^\dagger}\sqrt{4L/(3m)}$, $B$ is at most
+$(\sqrt{R^\dagger} + \sqrt{4L/(3m)})^2$, and $\sqrt B \le \sqrt{R^\dagger} + \sqrt{4L/(3m)}$. Substituting,
+
+$$
+R(\hat h) \le R^\dagger + \sqrt{\frac{2R^\dagger L}{m}} + \frac{4L}{3m} + \frac{2L}{m} + \sqrt{\frac{2R^\dagger L}{m}} +
+\sqrt{\frac{8}{3}}\,\frac{L}{m},
+$$
+
+and $4/3 + 2 + \sqrt{8/3} = 4.97 \le 5$.
+</Derivation>
+
+## Worked example
+
+Take decision stumps on 50 numerical features: each hypothesis picks a feature, one of 1,000 candidate thresholds and a
+sign. The class has $\abs{\Hcal} = 50 \times 1{,}000 \times 2 = 100{,}000$ hypotheses and
+$\ln\abs{\Hcal} = 11.51$. Set $\epsilon = 0.02$ and $\delta = 0.05$.
+
+1. **Realisable.** $m \ge (11.51 + \ln 20)/0.02 = (11.51 + 3.00)/0.02 = 726$ examples.
+2. **Agnostic, ERM.** $m \ge 2(11.51 + \ln 40)/0.02^2 = 2 \times 15.20/0.0004 = 76{,}009$ examples, 105 times as many.
+3. **Small best-in-class risk.** With $R^\dagger = 0.05$ and $L = \ln(2 \times 100{,}000/0.05) = 15.20$, the optimistic
+   rate reaches excess risk $0.02$ at $m = 22{,}163$. Its constants are worse than the realisable bound's: at
+   $R^\dagger = 0$ it asks for $3{,}803$ examples instead of 726.
+
+The bounds also certify a trained stump. With $m = 5{,}000$ examples and a training error of $0.06$, the one-sided
+agnostic bound gives $R(\hat h) \le 0.06 + \sqrt{(11.51 + 3.00)/10{,}000} = 0.06 + 0.038 = 0.098$. A stump with zero
+training error on the same sample has $R(\hat h) \le 14.51/5{,}000 = 0.0029$. Neither bound is vacuous, because
+$\ln\abs{\Hcal}$ is small compared with $m$. A held-out set of the same size would give a tighter certificate,
+because a <NoteLink to="test-set-bounds">test-set bound</NoteLink> has no $\ln\abs{\Hcal}$ term.
+
+{/* figure pending engine (A2 learningCurve with finite-thresholds, A1 finiteClassBound): ERM's excess risk against m
+on a log–log scale for <NoteLink to="label-noise">label noise</NoteLink> η = 0 and η > 0, with slopes −1 and −1/2, beside the realisable and agnostic
+bounds */}
+
+## Assumptions
+
+- **A finite class** fixed before the data are seen. Infinite classes replace $\ln\abs{\Hcal}$ by a capacity measure
+  such as the <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>; countable classes with a prior use
+  the <NoteLink to="occam-bound">Occam bound</NoteLink>.
+- **Independent, identically distributed examples** and the 0–1 loss.
+- **Realisability** in the first setting. It is a joint property of the class and the distribution: the labels must be
+  a deterministic function that belongs to $\Hcal$.
+
+## Pitfalls
+
+- **Label noise breaks realisability.** When the label of any input is random with a probability bounded away from 0
+  and 1, every hypothesis has positive risk, and only the agnostic bound applies.
+- **Zero training error is evidence only for a small class.** The realisable bound $R \le (\ln\abs{\Hcal} +
+  \ln(1/\delta))/m$ is small only when $\ln\abs{\Hcal} \ll m$. A large class can fit any labels, including noise, and
+  then its bound exceeds 1.
+- **The comparison point differs.** The realisable bound controls $R(\hat h)$; the agnostic bound controls
+  $R(\hat h) - \min_{h \in \Hcal}R(h)$. A small agnostic excess risk says nothing about the approximation error
+  $\min_{h \in \Hcal}R(h)$ itself.
+- **The constants are not the rates.** Bounds with better rates can have worse constants, as the optimistic rate shows
+  at $R^\dagger = 0$.

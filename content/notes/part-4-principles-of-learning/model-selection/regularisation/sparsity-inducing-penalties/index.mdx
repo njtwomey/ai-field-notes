@@ -1,0 +1,286 @@
+---
+title: 'Sparsity-inducing penalties'
+kind: concept
+summary: 'A penalty with a corner at zero sets coefficients exactly to zero. The $L^1$ penalty is convex but shifts every large coefficient towards zero by $\lambda$. The $L^0$ count, bridge $L^q$ ($q < 1$), SCAD and MCP leave large coefficients unbiased at the price of a non-convex objective.'
+tags: [model-selection, regularisation, sparsity, worked-example]
+aliases:
+  [
+    sparsity penalty,
+    SCAD,
+    smoothly clipped absolute deviation,
+    MCP,
+    minimax concave penalty,
+    bridge regression,
+    adaptive lasso,
+    firm thresholding,
+    non-convex penalty,
+    oracle property,
+  ]
+requires: [penalised-and-constrained-regularisation, lasso]
+related:
+  [
+    elastic-net,
+    best-subset-and-stepwise-selection,
+    structured-sparsity-penalties,
+    wavelet-denoising,
+    proximal-gradient-methods,
+    coordinate-descent,
+    steins-unbiased-risk-estimate,
+    regularisation-paths,
+  ]
+references: [tibshirani1996, frank1993, fan2001, zhang2010, zou2006, breheny2011, donoho1994, natarajan1995, hastie2015sparsity]
+status: draft
+updated: 2026-10-13
+---
+
+import { ThresholdingRules } from './ThresholdingRules'
+
+<Definition>
+A **sparsity-inducing penalty** is a regulariser $\sum_j p_\lambda(\abs{w_j})$ whose per-coefficient term
+$p_\lambda(\theta)$, $\theta \ge 0$, has a strictly positive slope at $\theta = 0$, so that penalised estimates contain
+exact zeros. The main members are the $L^0$ count, the $L^1$ norm of the <NoteLink to="lasso">lasso</NoteLink>, the
+bridge penalties $\lambda\theta^q$ with $0 < q < 1$ <Cite id="frank1993" />, the smoothly clipped absolute deviation
+(SCAD) <Cite id="fan2001" /> and the minimax concave penalty (MCP) <Cite id="zhang2010" />. For orthonormal features,
+each penalty acts on each least-squares coefficient $z$ through a **thresholding rule** $\hat w = \Theta_\lambda(z)$.
+</Definition>
+
+## Intuition
+
+A penalty decides how much a coefficient must earn in fit before it is allowed to be non-zero, and how much it is taxed
+once it is. Ridge's penalty $\lambda w^2$ has zero slope at the origin. A coefficient pays almost nothing for being
+slightly non-zero, so no coefficient is ever set exactly to zero. A penalty with a positive slope at the origin charges
+a fixed price for the first unit of size, and a coefficient whose evidence is weaker than that price stays at zero. That
+is the source of sparsity, seen in the geometry of
+<NoteLink to="penalised-and-constrained-regularisation">penalised and constrained regularisation</NoteLink> as the
+corners of the constraint ball.
+
+The $L^1$ penalty keeps charging the same slope $\lambda$ for every unit of size. A large coefficient, whose existence
+is not in doubt, is still pulled towards zero by $\lambda$. Fan and Li asked for three properties of a good penalty
+<Cite id="fan2001" />:
+
+- **sparsity:** small coefficients are set to zero;
+- **near-unbiasedness:** large coefficients are left almost unchanged;
+- **continuity:** the estimate changes continuously with the data, so a small change in the data cannot make a
+  coefficient jump.
+
+No convex penalty has all three. $L^1$ has sparsity and continuity. The $L^0$ count has sparsity and unbiasedness. SCAD
+and MCP get all three by letting the slope of the penalty fall to zero for large coefficients, which makes the penalty
+concave and the objective non-convex.
+
+## Thresholding rules
+
+With an orthonormal design, $\Xmat^\top\Xmat = \eye$, the problem separates. With least-squares coefficients
+$\zvec = \Xmat^\top\yvec$ and the loss written as $\frac12\norm{\yvec - \Xmat\wvec}^2$, each coefficient solves
+
+$$
+\hat w_j = \argmin_{w}\ \tfrac12(z_j - w)^2 + p_\lambda(\abs{w}).
+$$
+
+Its solution $\Theta_\lambda(z_j)$ is the thresholding rule of the penalty. With correlated features,
+<NoteLink to="coordinate-descent">coordinate descent</NoteLink> applies the same rule to one coefficient at a time,
+with $z_j$ replaced by the least-squares coefficient of feature $j$ on the current partial residual
+<Cite id="breheny2011" />. The rule therefore describes each penalty completely.
+
+**$L^1$: soft thresholding.** With $p_\lambda(\theta) = \lambda\theta$ the solution is
+$S_\lambda(z) = \sgn(z)\max(\abs z - \lambda, 0)$, derived in the <NoteLink to="lasso">lasso</NoteLink> note.
+Coefficients with $\abs z \le \lambda$ become zero, and every other coefficient moves towards zero by exactly
+$\lambda$.
+
+**$L^0$: hard thresholding.** With $p_\lambda(\theta) = \frac{\lambda^2}{2}\indicator[\theta \ne 0]$, a coefficient is
+either zero, costing $\frac12 z^2$ in fit, or free to equal $z$, costing $\frac{\lambda^2}{2}$ in penalty. It is kept
+when $\frac12 z^2 > \frac{\lambda^2}{2}$:
+
+$$
+H_\lambda(z) = z\,\indicator[\abs z > \lambda].
+$$
+
+Kept coefficients are not shrunk at all, but the estimate jumps from 0 to $\pm\lambda$ as $\abs z$ crosses $\lambda$.
+
+**Bridge, $0 < q < 1$.** With $p_\lambda(\theta) = \lambda\theta^q$ the rule shrinks large coefficients by
+$\lambda q\abs{w}^{q - 1}$, which vanishes as $\abs w$ grows. Like $L^0$ it jumps: for $q = \frac12$ and $\lambda = 1$
+the estimate is 0 for $\abs z \le 1.5$ and jumps to $\pm 1$ beyond (derivation below).
+
+**MCP: firm thresholding.** The minimax concave penalty is
+
+$$
+p_\lambda(\theta) = \begin{cases} \lambda\theta - \dfrac{\theta^2}{2\gamma} & \theta \le \gamma\lambda, \\[4pt]
+\tfrac12\gamma\lambda^2 & \theta > \gamma\lambda, \end{cases}
+\qquad \gamma > 1.
+$$
+
+Its slope $p_\lambda'(\theta) = (\lambda - \theta/\gamma)_+$ starts at $\lambda$, like $L^1$, and falls linearly to
+zero at $\theta = \gamma\lambda$. For $0 < w \le \gamma\lambda$ the scalar objective has derivative
+$w - z + \lambda - w/\gamma$, which vanishes at $w = \gamma(z - \lambda)/(\gamma - 1)$. That point lies in the range
+exactly when $z \le \gamma\lambda$. Beyond it the penalty is flat and $\hat w = z$. So
+
+$$
+\Theta^{\text{MCP}}_\lambda(z) = \begin{cases} \dfrac{\gamma}{\gamma - 1}S_\lambda(z) & \abs z \le \gamma\lambda,
+\\[4pt] z & \abs z > \gamma\lambda. \end{cases}
+$$
+
+The rule is continuous: at $\abs z = \gamma\lambda$ both pieces equal $z$. It is zero below $\lambda$, unbiased above
+$\gamma\lambda$, and linear in between. As $\gamma \to \infty$ it becomes soft thresholding; as $\gamma \to 1$ it
+becomes hard thresholding. Zhang chose this penalty as the one that is least concave among penalties with these
+properties, hence "minimax concave" <Cite id="zhang2010" />.
+
+**SCAD.** The smoothly clipped absolute deviation has slope
+$p_\lambda'(\theta) = \lambda$ for $\theta \le \lambda$, $(a\lambda - \theta)/(a - 1)$ for
+$\lambda < \theta \le a\lambda$, and 0 beyond, with $a > 2$. Its rule is soft thresholding for $\abs z \le 2\lambda$,
+the identity for $\abs z > a\lambda$, and the linear interpolation
+$\paren{(a - 1)z - \sgn(z)a\lambda}/(a - 2)$ in between. Fan and Li suggest $a = 3.7$ <Cite id="fan2001" />.
+
+<Derivation title="The jump of the bridge rule">
+For $w > 0$ the scalar objective is $h(w) = \frac12(z - w)^2 + \lambda w^q$. At the threshold value $\tau$ of $z$, the
+non-zero local minimum $w^\star$ ties with $w = 0$. Two conditions hold there.
+
+1. Stationarity: $h'(w^\star) = 0$, so $z = w^\star + \lambda q\,(w^\star)^{q - 1}$.
+2. The tie: $h(w^\star) = h(0) = \frac12 z^2$. Expanding, $\frac12(w^\star)^2 - zw^\star + \lambda(w^\star)^q = 0$, and
+   dividing by $w^\star$ gives $z = \frac12 w^\star + \lambda(w^\star)^{q - 1}$.
+
+Equating the two expressions for $z$ gives $\frac12 w^\star = \lambda(1 - q)(w^\star)^{q - 1}$, so
+
+$$
+w^\star = \paren{2\lambda(1 - q)}^{1/(2 - q)}, \qquad \tau = w^\star + \lambda q\,(w^\star)^{q - 1}.
+$$
+
+For $q = \frac12$ and $\lambda = 1$: $w^\star = 1^{2/3} = 1$ and $\tau = 1 + \frac12 = 1.5$. The estimate is 0 for
+$z \le 1.5$ and jumps to 1 at $z = 1.5$. The limits check the formula: as $q \to 1$, $w^\star \to 0$ and
+$\tau \to \lambda$, the soft threshold with no jump; as $q \to 0$, $\tau \to \sqrt{2\lambda}$, the hard threshold of the
+penalty $\lambda\indicator[\theta \neq 0]$.
+</Derivation>
+
+## L0 and L1
+
+The $L^0$ penalty counts non-zero coefficients. Penalising or constraining it is
+<NoteLink to="best-subset-and-stepwise-selection">best-subset selection</NoteLink>: for each size $k$, find the $k$
+features whose least-squares fit has the smallest residual sum of squares. In general this is NP-hard
+<Cite id="natarajan1995" />, and exhaustive search over $2^p$ subsets is limited to a few dozen features. With an
+orthonormal design it is easy: the best subset of size $k$ keeps the $k$ largest $\abs{z_j}$, and the penalised form is
+hard thresholding.
+
+The $L^1$ norm is the tightest convex function below the $L^0$ count on the box $\norm{\wvec}_\infty \le 1$, its convex
+envelope. Replacing $L^0$ by $L^1$ turns a combinatorial search into a convex problem with a global minimum, a
+continuous path in $\lambda$ and fast solvers <Cite id="tibshirani1996" />. Under conditions on the design, such as the
+<Gloss name="rip">restricted isometry property</Gloss> of <NoteLink to="compressed-sensing">compressed
+sensing</NoteLink>, the two problems even have the same solution. The price is the shrinkage of large coefficients by
+$\lambda$ and, through it, two failures of the lasso as a selector <Cite id="hastie2015sparsity" />:
+
+- **It needs a large $\lambda$ to remove noise features**, and that $\lambda$ shrinks the real ones. The lasso therefore
+  tends to choose a smaller $\lambda$ and admit some noise features.
+- **It can be inconsistent.** When a noise feature is correlated with the true ones beyond a limit set by the design,
+  no value of $\lambda$ recovers the true set, even with unlimited data <Cite id="zou2006" />.
+
+## Non-convex penalties
+
+SCAD and MCP remove the bias on large coefficients while keeping sparsity and continuity. With a suitable
+$\lambda_n$ falling as the sample grows, SCAD has the **oracle property**: with probability tending to one it sets the
+zero coefficients to zero, and it estimates the non-zero ones as efficiently as least squares fitted to the true
+support <Cite id="fan2001" />.
+
+The objective is non-convex, which has three consequences.
+
+- **Local minima.** The objective $\frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2 + \sum_j p_\lambda(\abs{w_j})$ is convex
+  only when the curvature of the loss outweighs the concavity of the penalty. With standardised features this holds
+  when the smallest eigenvalue of $\Xmat^\top\Xmat/n$ exceeds $1/\gamma$ for MCP, or $1/(a - 1)$ for SCAD
+  <Cite id="breheny2011" />. When $p > n$ that eigenvalue is 0, and different starting points can lead to different
+  solutions.
+- **Coordinate descent still works**, because each one-dimensional problem is convex when $\gamma > 1$ or $a > 2$:
+  the scalar objective has curvature $1 - 1/\gamma > 0$. Solving along a decreasing grid of $\lambda$ from the all-zero
+  solution, each fit warm-started from the last, follows a continuous local path <Cite id="breheny2011" />.
+- **A second tuning parameter.** $\gamma$ or $a$ moves the penalty between $L^1$ and $L^0$, and it is usually fixed
+  ($\gamma = 3$ for MCP, $a = 3.7$ for SCAD) or chosen with $\lambda$ by
+  <NoteLink to="cross-validation">cross-validation</NoteLink>.
+
+## The adaptive lasso
+
+The adaptive lasso keeps convexity and reduces the bias by giving each coefficient its own weight
+<Cite id="zou2006" />:
+
+$$
+\hat\wvec = \argmin_{\wvec}\ \tfrac12\norm{\yvec - \Xmat\wvec}^2 + \lambda\sum_j \frac{\abs{w_j}}{\abs{\tilde w_j}^\nu},
+$$
+
+with $\tilde\wvec$ a pilot estimate, such as least squares or ridge, and $\nu > 0$. A coefficient that the pilot finds
+large gets a small penalty, and one that the pilot finds near zero gets a large one. With orthonormal features and
+$\nu = 1$, $\tilde w_j = z_j$, and the rule is soft thresholding with a threshold $\lambda/\abs{z_j}$ that falls as
+$\abs{z_j}$ grows:
+
+$$
+\hat w_j = \sgn(z_j)\paren{\abs{z_j} - \frac{\lambda}{\abs{z_j}}}_+.
+$$
+
+The shrinkage of a large coefficient falls like $1/\abs{z_j}$, and the adaptive lasso has the oracle property
+<Cite id="zou2006" />. It is a lasso problem after rescaling column $j$ by $\abs{\tilde w_j}^\nu$, so any lasso solver
+fits it. The pilot uses the same data, and its errors pass into the weights.
+
+## Worked example
+
+Take $\lambda = 1$, noise of standard deviation $\sigma = 1$, and four least-squares coefficients
+$z = 0.5, 1.5, 2.5, 4$. The rules give:
+
+| $z$ | hard ($L^0$) | soft ($L^1$) | MCP, $\gamma = 3$ | SCAD, $a = 3.7$ | adaptive lasso |
+| --- | --- | --- | --- | --- | --- |
+| 0.5 | 0 | 0 | 0 | 0 | 0 |
+| 1.5 | 1.5 | 0.5 | 0.75 | 0.5 | 0.83 |
+| 2.5 | 2.5 | 1.5 | 2.25 | 1.79 | 2.1 |
+| 4 | 4 | 3 | 4 | 4 | 3.75 |
+
+Each entry follows from the rules above.
+
+1. **$z = 0.5$** is below every threshold, so all rules return 0.
+2. **$z = 1.5$**: hard thresholding keeps it unchanged. Soft subtracts $\lambda$. MCP multiplies the soft value by
+   $\gamma/(\gamma - 1) = 1.5$. SCAD is still in its soft range ($\abs z \le 2\lambda$). The adaptive lasso subtracts
+   $\lambda/\abs z = 0.67$.
+3. **$z = 2.5$**: MCP gives $1.5 \times 1.5 = 2.25$. SCAD is in its middle range:
+   $(2.7 \times 2.5 - 3.7)/1.7 = 1.79$.
+4. **$z = 4$**: MCP and SCAD are past their flat points ($\gamma\lambda = 3$ and $a\lambda = 3.7$) and return $z$.
+   Soft thresholding is still short by $\lambda = 1$.
+
+The risk $\expect(\Theta_\lambda(z) - \theta)^2$ for $z \sim \Gauss(\theta, 1)$, computed by
+<NoteLink to="numerical-integration">numerical integration</NoteLink>, shows the trade. Least squares, $\Theta(z) = z$,
+has risk 1 everywhere.
+
+| true $\theta$ | hard | soft | MCP | SCAD |
+| --- | --- | --- | --- | --- |
+| 0 | 0.80 | 0.15 | 0.34 | 0.19 |
+| 2 | 1.24 | 1.59 | 1.66 | 1.83 |
+| 5 | 1.00 | 2.00 | 1.02 | 1.13 |
+
+At $\theta = 0$ soft thresholding is best: it shrinks noise hardest. At $\theta = 5$ its constant bias of 1 adds $1^2$
+to the variance, and its risk is $1 + \lambda^2 = 2$, while MCP and SCAD have returned to 1. Near the threshold,
+$\theta = 2$, every rule is worse than least squares, because the data cannot tell whether the coefficient should be
+there.
+
+<ThresholdingRules />
+
+## Choosing λ
+
+$\lambda$ sets the level of evidence a coefficient needs. Two reference points help.
+
+- **The universal threshold.** With $p$ orthonormal features that are all noise, the $z_j$ are independent
+  $\Gauss(0, \sigma^2)$, and their largest absolute value is close to $\sigma\sqrt{2\ln p}$ (see
+  <NoteLink to="maximal-inequalities">maximal inequalities</NoteLink>). The threshold $\lambda = \sigma\sqrt{2\ln p}$
+  therefore removes all pure-noise coefficients with high probability <Cite id="donoho1994" />. For $p = 1000$ it is
+  $3.72\sigma$. It is the threshold of <NoteLink to="wavelet-denoising">wavelet denoising</NoteLink>, and it is
+  conservative when the aim is prediction.
+- **Prediction error.** Cross-validation or <NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk
+  estimate</NoteLink> along the <NoteLink to="regularisation-paths">regularisation path</NoteLink>. For the lasso the
+  number of non-zero coefficients is an unbiased estimate of the degrees of freedom; for hard thresholding the degrees
+  of freedom exceed the number kept, because the choice of which to keep used the data.
+
+## Pitfalls
+
+- **Selection and estimation on the same data.** The coefficients kept by a threshold are those whose $\abs{z_j}$
+  happened to be large, so refitting them without shrinkage overstates them. A coefficient of true size $\theta = 1$ at
+  noise $\sigma = 1$, kept by a hard threshold at $\lambda = 1$ when $z > 1$, has expected value
+  $\expect[z \mid z > 1] = 1 + \varphi(0)/(1 - \Phi(0)) = 1.80$, where $\varphi$ and $\Phi$ are the standard normal
+  density and distribution function. The nearly unbiased rules of SCAD and MCP remove the bias of large coefficients,
+  not this selection bias near the threshold. <NoteLink to="confidence-intervals">Confidence intervals</NoteLink> and
+  p-values after selection need methods built for it.
+- **Non-convex solutions depend on the algorithm.** Two solvers, or one solver from two starting points, can return
+  different SCAD or MCP fits on the same data. Report the algorithm and the path.
+- **Standardise first.** A threshold applies to $z_j$, whose scale is that of feature $j$. Without standardisation the
+  penalty selects by units.
+- **Unbiased is not lower risk.** Near the threshold, the non-convex rules have higher risk than soft thresholding, and
+  in low signal-to-noise settings the lasso often predicts better than less biased penalties
+  <Cite id="hastie2015sparsity" />.

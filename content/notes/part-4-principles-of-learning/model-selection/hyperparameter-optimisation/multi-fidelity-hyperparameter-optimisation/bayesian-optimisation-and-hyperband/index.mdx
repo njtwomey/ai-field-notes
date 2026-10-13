@@ -1,0 +1,167 @@
+---
+title: 'Bayesian optimisation and Hyperband'
+kind: technique
+summary: 'BOHB keeps Hyperband''s brackets of successive halving but draws each new configuration from a tree-structured Parzen estimator fitted at the largest budget with enough results, plus a fixed fraction at random. It pairs cheap early stopping with model-based proposals.'
+tags: [model-selection, hyperparameters, bayesian, early-stopping, worked-example]
+aliases: [BOHB, HpBandSter, DEHB]
+requires: [hyperband, tree-structured-parzen-estimator]
+related: [multi-fidelity-bayesian-optimisation, asynchronous-successive-halving, bayesian-optimisation, kernel-density-estimation, random-search]
+references: [falkner2018bohb, li2018hyperband, bergstra2011, li2020asha, awad2021dehb]
+status: draft
+updated: 2026-10-13
+---
+
+import { BohbModelBudget } from './BohbModelBudget'
+
+<Definition>
+**BOHB** (Bayesian optimisation and Hyperband) is a <NoteLink to="hyperparameter-search">hyperparameter
+search</NoteLink> that keeps the budget schedule of <NoteLink to="hyperband">Hyperband</NoteLink> and changes how
+configurations are drawn <Cite id="falkner2018bohb" />. Hyperband draws them uniformly at random. BOHB draws a fixed
+fraction $\rho$ at random and the rest from a <NoteLink to="tree-structured-parzen-estimator">tree-structured Parzen
+estimator</NoteLink> (TPE) fitted to the results at the largest budget that has enough of them. The model sees every
+result of every bracket, so later brackets start from configurations that earlier brackets found promising.
+</Definition>
+
+## Problem
+
+Hyperband and <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> fail in opposite ways.
+
+- **Hyperband** finds a good configuration quickly, because it judges many configurations at small budgets. It keeps
+  drawing configurations at random, so with a large budget it improves little faster than
+  <NoteLink to="random-search">random search</NoteLink>.
+- **Bayesian optimisation** learns where good configurations lie, so given enough evaluations it converges to the
+  optimum. Each evaluation is a full training run, and until the model has enough of them it does no better than random
+  search, so it starts slowly.
+
+Falkner, Klein and Hutter showed the two patterns on a six-hyperparameter neural network: Hyperband ahead early,
+Bayesian optimisation ahead late <Cite id="falkner2018bohb" />. A method that combines Hyperband's
+<NoteLink to="early-stopping">early stopping</NoteLink> with a model's proposals should be ahead at both ends. The
+difficulty is that the model must learn from results at many different budgets, most of them small and less reliable.
+
+## Mechanism
+
+### The schedule
+
+BOHB runs Hyperband's brackets unchanged. With minimum and maximum budgets $b_{\min}$ and $b_{\max}$, reduction factor
+$\eta$ and $s_{\max} = \lfloor \log_\eta(b_{\max}/b_{\min}) \rfloor$, bracket $s$ draws
+$\lceil (s_{\max} + 1)\eta^s/(s + 1) \rceil$ configurations and runs
+<NoteLink to="successive-halving">successive halving</NoteLink> on them from budget $b_{\max}\eta^{-s}$. Every
+evaluation of a configuration $\lambdavec$ at a budget $b$ is stored with its loss in a set $D_b$, one per budget.
+
+### Drawing a configuration
+
+Each new configuration is drawn as follows <Cite id="falkner2018bohb" />:
+
+1. With probability $\rho$, draw it uniformly at random from the <NoteLink to="hyperparameter-search-spaces">search
+   space</NoteLink>.
+2. Otherwise, choose the **model budget**: the largest budget $b$ with $\abs{D_b} \ge N_{\min} + 2$, where
+   $N_{\min} = d + 1$ for $d$ hyperparameters. If no budget has that many results, draw at random.
+3. Split $D_b$, of size $N_b$, into the best $N_{b,l} = \max(N_{\min}, \lfloor qN_b \rfloor)$ results and the worst
+   $N_{b,g} = \max(N_{\min}, N_b - N_{b,l})$, with $q$ a fraction such as 15%.
+4. Fit one multivariate <NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink> $\ell(\lambdavec)$
+   to the good configurations and another, $g(\lambdavec)$, to the bad ones.
+5. Draw $N_s$ candidates from $\ell$ with its bandwidths multiplied by a factor $b_w > 1$, and return the candidate with
+   the largest ratio $\ell(\lambdavec)/g(\lambdavec)$.
+
+Steps 3 to 5 are TPE, with one difference: TPE multiplies one-dimensional densities, while BOHB uses one
+multidimensional kernel density per group to capture interactions between hyperparameters. Maximising $\ell/g$ maximises
+<NoteLink to="expected-improvement">expected improvement</NoteLink> under the model, as the TPE note derives. The
+reference implementation, HpBandSter, uses $\rho = 1/3$, $q = 15\%$, $N_s = 64$, $b_w = 3$ and $\eta = 3$.
+
+### Why the largest budget with enough results
+
+The goal is a low loss at $b_{\max}$. Results at small budgets are plentiful but rank configurations less faithfully
+than results at large budgets. BOHB resolves this by always modelling the largest budget it can. Early in the search
+only the smallest budgets have enough results, and the model guides the search by cheap, rough evidence. As results
+accumulate at larger budgets, the model moves up, and eventually it uses only full-budget results. Conclusions drawn at
+small budgets are then overridden by results at the budget that matters <Cite id="falkner2018bohb" />.
+
+The threshold $N_{\min} + 2$ with $N_{\min} = d + 1$ ties the move to the dimension: a density over more
+hyperparameters needs more points before it says anything. Each group gets at least $N_{\min}$ points. With few
+results the two groups therefore overlap, both drawing on the middle results, and the overlap shrinks as results
+accumulate <Cite id="falkner2018bohb" />.
+
+### The worst case: a bound against random search
+
+Misleading low budgets can steer the model to the wrong region. The random fraction $\rho$ bounds the damage. In the
+last bracket of each Hyperband pass, $s = 0$, all $s_{\max} + 1$ configurations are trained to $b_{\max}$, and on
+average a fraction $\rho$ of them were drawn at random. One pass of BOHB therefore trains about $\rho(s_{\max} + 1)$
+random configurations to the full budget.
+
+A pass costs about $(s_{\max} + 1)^2 b_{\max}$ (see <NoteLink to="hyperband">Hyperband</NoteLink>). Random search
+with that budget trains $(s_{\max} + 1)^2$ random configurations to $b_{\max}$. The ratio is
+
+$$
+\frac{(s_{\max} + 1)^2}{\rho(s_{\max} + 1)} = \frac{s_{\max} + 1}{\rho},
+$$
+
+so even if every model-based proposal were useless, BOHB samples the space at full budget at least
+$\rho/(s_{\max} + 1)$ as often as random search. It is at most $(s_{\max} + 1)/\rho$ times slower, and it still
+converges, because random search does <Cite id="falkner2018bohb" />. The same argument with $\rho = 1$ gives Hyperband's
+factor of $s_{\max} + 1$.
+
+<BohbModelBudget />
+
+{/* figure pending engine (bohbSteps, see logs/ms-multi-fidelity.md): best final loss against budget for random search, Hyperband and BOHB over configuration-indexed learning curves */}
+
+## Worked example
+
+Take $b_{\max} = 81$, $b_{\min} = 1$, $\eta = 3$, so $s_{\max} = 4$ and each pass runs five rounds of successive halving
+(the brackets are tabulated in <NoteLink to="hyperband">Hyperband</NoteLink>). Let there be $d = 2$ hyperparameters, so
+$N_{\min} = 3$ and a budget needs $N_{\min} + 2 = 5$ results before it can be modelled.
+
+1. **Run 1, bracket 4: 81 configurations at budget 1.** No results exist, so all 81 are random. After the run,
+   $D_1, D_3, D_9, D_{27}, D_{81}$ hold 81, 27, 9, 3 and 1 results.
+2. **Run 2, bracket 3: 34 configurations at budget 3.** Budgets 1, 3 and 9 have at least 5 results; 27 and 81 do not.
+   The model budget is 9. With $N_9 = 9$, the good group has $\max(3, \lfloor 0.15 \times 9 \rfloor) = 3$ results and
+   the bad group $\max(3, 9 - 3) = 6$. With $\rho = 1/3$, about 11 of the 34 configurations are random and 23 come from
+   the density ratio.
+3. **Run 3, bracket 2: 15 configurations at budget 9.** Run 2 added 3 results at 27, so $\abs{D_{27}} = 6 \ge 5$. The
+   model moves to budget 27.
+4. **Run 4, bracket 1** models budget 27 again, with 11 results there. **Run 5, bracket 0** finds 5 results at
+   budget 81 and models the full budget.
+5. **The second pass.** All five runs model budget 81, which now has 10 to 15 results.
+
+With $d = 6$ the threshold is 9 results. Runs 2 and 3 model budget 9, runs 4 and 5 model budget 27, and the model
+reaches the full budget only in the second pass. More hyperparameters keep the model on cheaper, rougher budgets for
+longer.
+
+The worst-case bound for this schedule is $(s_{\max} + 1)/\rho = 5/(1/3) = 15$: if the model were useless, BOHB would
+need up to 15 times the budget of random search to sample as many random configurations at full budget.
+
+## Cost
+
+BOHB costs what Hyperband costs in training, plus fitting two kernel density estimates per drawn configuration. A
+kernel density estimate costs time linear in the number of results, negligible beside training. BOHB parallelises by
+drawing configurations for the next run of successive halving whenever a worker is free, preferring waiting jobs at
+small budgets. Falkner et al. report close to linear speed-ups up to four workers and about 15 times with 32 workers
+<Cite id="falkner2018bohb" />.
+
+## Trade-offs
+
+- **Against Hyperband and TPE alone.** Falkner et al. report BOHB ahead of both Hyperband and Bayesian optimisation on
+  <Gloss name="svm">support vector machines</Gloss>, feed-forward and Bayesian neural networks, deep
+  <Gloss name="rl">reinforcement learning</Gloss> and <NoteLink to="convolutional-networks">convolutional
+  networks</NoteLink> <Cite id="falkner2018bohb" />. The gain over Hyperband appears late, once the model has
+  full-budget results.
+- **Against ASHA.** BOHB's rungs are synchronous within each run of successive halving. With many workers and training
+  times that vary a lot, Li et al. found <NoteLink to="asynchronous-successive-halving">ASHA</NoteLink> faster to a good
+  configuration, and BOHB slightly better at the end on one benchmark <Cite id="li2020asha" />.
+- **Other models.** The same scheme works with other proposal mechanisms. DEHB replaces the density model with
+  differential evolution, with which Awad, Mallik and Hutter report better results on high-dimensional and discrete
+  spaces <Cite id="awad2021dehb" />. <NoteLink to="multi-fidelity-bayesian-optimisation">Multi-fidelity Bayesian
+  optimisation</NoteLink> models the budget as an input instead of fitting one model per budget.
+
+## Pitfalls
+
+- **A misleading minimum budget.** The model's first proposals come from the smallest budgets. If those rank
+  configurations badly, the early proposals concentrate in the wrong region until results at larger budgets take over.
+  The random fraction limits the damage; it does not prevent it.
+- **Blindness to cost.** The model learns which configurations are good, not which are cheap. Li et al. observed BOHB
+  favouring computationally expensive configurations on one benchmark, which reduced the number trained to completion
+  within a fixed time <Cite id="li2020asha" />. Under a wall-clock budget, a model that prefers expensive
+  configurations finishes fewer of them.
+- **High dimension.** With $d$ large, $N_{\min} = d + 1$ delays every model, and kernel density estimates in many
+  dimensions are poor. BOHB then behaves much like Hyperband for most of its budget.
+- **The incumbent's loss.** The best validation loss found is optimistic about that configuration's error (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

@@ -1,0 +1,171 @@
+---
+title: 'Multi-objective Bayesian optimisation'
+kind: technique
+summary: 'Multi-objective Bayesian optimisation approximates the Pareto front of several expensive objectives, such as error and latency. Expected hypervolume improvement scores a candidate by the dominated volume it should add; ParEGO runs EI on random Chebyshev scalarisations.'
+tags: [model-selection, optimisation, bayesian, hyperparameters, worked-example]
+aliases: [Pareto front, Pareto optimality, Pareto dominance, hypervolume indicator, expected hypervolume improvement, EHVI, qEHVI, ParEGO, augmented Chebyshev scalarisation, multi-objective hyperparameter optimisation]
+requires: [bayesian-optimisation, expected-improvement]
+related: [constrained-bayesian-optimisation, acquisition-functions, neural-architecture-search, batch-bayesian-optimisation, monte-carlo-integration, model-quantisation]
+references: [knowles2006parego, emmerich2006, daulton2020, zitzler1999, balandat2020, garnett2023]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+Let $f_1, \dots, f_M$ be $M$ objectives to minimise over configurations $\lambdavec \in \Lambda$, each expensive to
+evaluate. A configuration $\lambdavec$ **dominates** $\lambdavec'$ if it is no worse in every objective and strictly
+better in at least one. The **Pareto set** is the set of configurations that no configuration dominates, and its image
+in objective space is the **Pareto front**. **Multi-objective Bayesian optimisation** approximates the Pareto front in
+few evaluations. It fits a surrogate to each objective and chooses each evaluation by an acquisition such as the
+expected increase of the **hypervolume** dominated by the evaluations so far <Cite id="emmerich2006" />, or by
+<NoteLink to="expected-improvement">expected improvement</NoteLink> on a randomly weighted scalarisation of the
+objectives (ParEGO) <Cite id="knowles2006parego" />.
+</Definition>
+
+## Problem
+
+Hyperparameters often trade one goal against another. A larger network has lower validation error and higher
+latency. A higher quantisation rate saves memory and loses accuracy (see <NoteLink to="model-quantisation">model
+quantisation</NoteLink>). <NoteLink to="neural-architecture-search">Architecture search</NoteLink> for devices scores
+accuracy, latency and size together.
+
+A single weighted sum $\sum_m w_m f_m$ needs the weights before the search, when the trade-off is still unknown. It also
+cannot reach every Pareto-optimal configuration, as the worked example shows. Running a separate search for each of
+several weightings multiplies the cost. The goal is one search whose evaluations spread along the whole front, so the
+trade-off can be chosen afterwards from evaluated configurations.
+
+## Mechanism
+
+### The hypervolume indicator
+
+The quality of a set of evaluated points needs one number before an acquisition can score improvements to it. Fix a
+**reference point** $\rvec \in \reals^M$ that every point of interest beats in every objective, such as the worst
+acceptable error and latency. The **hypervolume** of a set $\Pcal$ of points in objective space is the volume of the
+region they dominate and $\rvec$ bounds,
+
+$$
+\operatorname{HV}(\Pcal) = \operatorname{vol}\paren{\bigcup_{\yvec \in \Pcal} [y_1, r_1] \times \cdots \times
+[y_M, r_M]}
+$$
+
+<Cite id="zitzler1999" />. Adding a point that the set already dominates adds no volume, and adding a non-dominated
+point inside the reference box adds some. A larger hypervolume therefore means a front that is closer to the ideal,
+wider, or both.
+
+**Two objectives.** Sort the non-dominated points by the first objective, $y_{1,1} < y_{1,2} < \dots < y_{1,n}$. Being
+mutually non-dominated, they are then sorted in decreasing order of the second objective. Between $y_{1,i}$ and the next
+value $y_{1,i+1}$ (with $y_{1,n+1} = r_1$), the points dominating a vertical slice are points $1$ to $i$, and the lowest
+of them in the second objective is point $i$. The slice is dominated from $y_{2,i}$ up to $r_2$, so
+
+$$
+\operatorname{HV}(\Pcal) = \sum_{i=1}^{n} \paren{y_{1,i+1} - y_{1,i}}\paren{r_2 - y_{2,i}},
+$$
+
+a staircase of rectangles computed in $O(n\log n)$ time for the sort.
+
+### Expected hypervolume improvement
+
+The **hypervolume improvement** of a new outcome $\yvec$ over the current front $\Pcal_t$ is
+$\operatorname{HVI}(\yvec) = \operatorname{HV}(\Pcal_t \cup \set{\yvec}) - \operatorname{HV}(\Pcal_t)$. The outcome of a
+candidate is unknown, with posterior $\fvec(\lambdavec) = (f_1(\lambdavec), \dots, f_M(\lambdavec))$ from one surrogate
+per objective. The **expected hypervolume improvement** is
+
+$$
+\operatorname{EHVI}_t(\lambdavec) = \expect\brack{\operatorname{HVI}\paren{\fvec(\lambdavec)} \mid \Dcal_t}
+$$
+
+<Cite id="emmerich2006" />. It is the multi-objective form of expected improvement. With one objective,
+$\Pcal_t$ is the incumbent $f^\star_t$, its hypervolume is the length $r - f^\star_t$, and adding $y$ lengthens it by
+$\max(f^\star_t - y, 0)$ when $y \le r$. So for $r$ above every plausible value,
+$\operatorname{HVI}(y) = \max(f^\star_t - y, 0)$ and EHVI equals EI.
+
+With independent Gaussian posteriors per objective, EHVI has closed forms that split the non-dominated region into
+boxes and integrate over each. Their cost grows quickly with the number of objectives, partly because computing the
+hypervolume itself does <Cite id="daulton2020" />. Daulton, Balandat and Bakshy estimate it by
+<NoteLink to="monte-carlo-integration">Monte Carlo</NoteLink> over posterior samples instead, which extends it to
+batches of $q$ points (qEHVI, see <NoteLink to="batch-bayesian-optimisation">batch Bayesian optimisation</NoteLink>)
+and gives exact gradients of the estimate for optimising the acquisition <Cite id="daulton2020" />. BoTorch implements
+it <Cite id="balandat2020" />.
+
+### ParEGO: random scalarisations
+
+ParEGO turns the problem into a sequence of single-objective ones <Cite id="knowles2006parego" />. Each iteration:
+
+1. Normalise every objective to $[0, 1]$.
+2. Draw a weight vector $\wvec$ with $w_m \ge 0$ and $\sum_m w_m = 1$ from an evenly spread set.
+3. Scalarise every evaluation by the **augmented Chebyshev function**
+   $$
+   s_{\wvec}(\yvec) = \max_m w_m y_m + \rho\sum_m w_m y_m, \qquad \rho = 0.05.
+   $$
+4. Fit one <Gloss name="gp">Gaussian process</Gloss> to the scalarised values and evaluate the configuration with the
+   largest expected improvement.
+
+Each weight vector aims the search at one part of the front, and the random weights spread the evaluations along it.
+The small linear term breaks ties between points that share the maximum term, so a weakly dominated point never scores
+as well as the point that dominates it.
+
+**Why the maximum and not the sum.** Let $\pvec$ be on the Pareto front with positive coordinates, and choose weights
+$w_m \propto 1/p_m$, so that $w_m p_m = c$ for every $m$. If some point $\qvec$ had $\max_m w_m q_m < c$, then
+$w_m q_m < w_m p_m$, hence $q_m < p_m$, for every $m$: $\qvec$ would dominate $\pvec$, a contradiction. So $\pvec$
+minimises $\max_m w_m y_m$, and every Pareto point is reachable by some weighting. A weighted sum has no such
+guarantee: a Pareto point that lies above the straight segment joining two others has a larger weighted sum than one of
+those two, for every choice of positive weights.
+
+{/* figure pending engine (paretoFront, hypervolume, expectedHypervolumeImprovement, chebyshevScalarisation; see log): a two-objective front with its staircase hypervolume, the reference point as a draggable handle, and EHVI against ParEGO's scalarised EI over candidates */}
+
+## Worked example
+
+A search trades validation error $f_1$ against latency $f_2$ in milliseconds. The reference point is
+$\rvec = (0.30, 100)$. The evaluations so far have the non-dominated outcomes
+
+$$
+\pvec_1 = (0.10, 80), \qquad \pvec_2 = (0.15, 40), \qquad \pvec_3 = (0.25, 20).
+$$
+
+**Step 1: the hypervolume.** The points are sorted by error, and their latencies fall. The three rectangles are
+$(0.15 - 0.10)(100 - 80) = 1.0$, $(0.25 - 0.15)(100 - 40) = 6.0$ and $(0.30 - 0.25)(100 - 20) = 4.0$, so
+$\operatorname{HV} = 11.0$ (units of error times milliseconds).
+
+**Step 2: a new outcome.** A candidate returns $\qvec = (0.12, 50)$. It beats $\pvec_1$ on latency and $\pvec_2$ on
+error, so nothing dominates it. With it the staircase has four steps: $0.02 \times 20 = 0.4$, $0.03 \times 50 = 1.5$,
+$0.10 \times 60 = 6.0$ and $0.05 \times 80 = 4.0$, a total of $11.9$. The improvement is $0.9$, the area of the box
+$[0.12, 0.15] \times [50, 80]$ that only $\qvec$ dominates. An outcome such as $(0.16, 45)$, dominated by $\pvec_2$,
+adds nothing.
+
+**Step 3: a point no weighted sum finds.** Replace $\pvec_2$ by $\pvec_2' = (0.20, 55)$, still dominated by neither
+neighbour. The segment from $\pvec_1$ to $\pvec_3$ passes through latency 40 at error 0.20, below 55. So $\pvec_2'$ lies
+above the segment, and for any positive weights its weighted sum exceeds that of $\pvec_1$ or $\pvec_3$. With
+Chebyshev weights proportional to $(1/0.20, 1/55)$, the maximum term is $1$ for $\pvec_2'$, $\max(0.5, 1.45) = 1.45$
+for $\pvec_1$ and $\max(1.25, 0.36) = 1.25$ for $\pvec_3$, so $\pvec_2'$ wins.
+
+## Cost
+
+Each objective needs its own surrogate, so model fitting grows linearly in $M$. ParEGO's acquisition costs one EI per
+candidate. Exact EHVI costs grow with the number of points on the front and steeply with $M$. Monte Carlo EHVI costs
+one hypervolume-improvement computation per posterior sample per candidate <Cite id="daulton2020" />. Both remain small
+next to training runs for two or three objectives.
+
+## Trade-offs
+
+- **EHVI against ParEGO.** EHVI scores the whole front at once and is the stronger acquisition when it is affordable.
+  ParEGO needs only single-objective machinery and one surrogate, and scales to many objectives, but each iteration
+  serves one weighting.
+- **Pareto front against constraints.** When a limit is fixed in advance, such as latency under 10 ms, a
+  <NoteLink to="constrained-bayesian-optimisation">constrained search</NoteLink> spends no evaluations on the parts of
+  the front that break it.
+- **Few objectives.** With four or more objectives almost every point is non-dominated, the front is a large surface,
+  and a fixed budget covers it sparsely.
+
+## Pitfalls
+
+- **The reference point steers the search.** Hypervolume counts only the region below $\rvec$. A reference point that is
+  too generous rewards extreme points nobody wants. One that is too strict ignores points just outside it.
+- **Scales.** Hypervolume and scalarisations depend on the units of each objective. Normalise them, or state the
+  reference point in meaningful units.
+- **An optimistic front.** Every point on the reported front is the best of many evaluations on validation data in its
+  part of the trade-off, so the front is biased towards the origin, as a single best score is (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Reassess the chosen
+  configuration on held-out data and measure latency on the deployment hardware.
+- **Noisy objectives.** Latency and accuracy measurements vary between runs, and a point that looks non-dominated by
+  chance displaces a genuinely better one. Repeated measurements or noise-aware acquisitions are needed when the noise
+  is comparable to the trade-off.

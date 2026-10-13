@@ -1,0 +1,204 @@
+---
+title: 'Measuring capacity empirically'
+kind: technique
+summary: 'The capacity of a class or learner can be measured on data: estimate the empirical Rademacher complexity by fitting random signs, train on randomly relabelled data to see how much it memorises, or fit an effective VC dimension to the largest error gap between two half-samples.'
+tags: [learning-theory, capacity, evaluation, worked-example]
+aliases: [random-label test, randomisation test for generalisation, effective VC dimension, Monte Carlo Rademacher complexity]
+requires: [rademacher-complexity, vapnik-chervonenkis-dimension, mcdiarmids-inequality]
+related: [limits-of-uniform-convergence, symmetrisation, margin-bounds, norm-based-bounds-for-neural-networks, algorithmic-stability, benign-overfitting, generalisation-gap]
+references: [bartlett2002, mohri2018, zhang2017, arpit2017, vapnik1994, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { RademacherEstimate } from './RademacherEstimate'
+
+<Definition>
+**Measuring capacity empirically** means estimating, from a sample, how well a class of functions or a training
+procedure can fit arbitrary labels. Three measurements are standard: a Monte Carlo estimate of the **empirical
+Rademacher complexity** $\hat\Rad_S$ by fitting random signs; the **random-label test**, which trains the learner on
+labels replaced by noise and records the training error it reaches; and the **effective VC dimension**, fitted to the
+largest gap between the <NoteLink to="accuracy-and-balanced-accuracy">error rates</NoteLink> on two halves of a sample.
+</Definition>
+
+## Problem
+
+A capacity bound needs a number. The <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> is known in
+closed form for a few classes, and for many it is only bounded, often loosely. Norm-based bounds on the
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> assume the worst inputs allowed. Neither depends
+on the data, and neither depends on the training algorithm, which may only reach a small part of the class.
+
+The quantities that bounds use are defined as expectations over random labels, and random labels can be simulated. The
+<NoteLink to="symmetrisation">symmetrisation</NoteLink> argument reduces the
+<NoteLink to="generalisation-gap">generalisation gap</NoteLink> to the correlation of the class with random signs on the
+sample in hand. That correlation can be measured by training on random signs. The measurement then replaces a worst-case
+calculation in the third move of the <NoteLink to="statistical-learning-theory">recipe for a generalisation
+bound</NoteLink>.
+
+## Mechanism
+
+### Estimating the empirical Rademacher complexity
+
+For a class $\Hcal$ of classifiers with values $\pm 1$, the correlation with a sign vector $\sigmavec$ is an affine
+function of the error rate on the labels $\sigmavec$. Since $\sigma_i h(x_i) = 1 - 2\,\indicator[h(x_i) \ne \sigma_i]$,
+
+$$
+\frac1m\sum_{i=1}^m\sigma_i h(x_i) = 1 - 2\,\mathrm{err}_{\sigmavec}(h), \qquad
+\mathrm{err}_{\sigmavec}(h) = \frac1m\sum_{i=1}^m\indicator[h(x_i) \ne \sigma_i].
+$$
+
+The supremum over $h$ is attained by the hypothesis with the smallest error on the labels $\sigmavec$, so
+
+$$
+\hat\Rad_S(\Hcal) = 1 - 2\,\expect_{\sigmavec}\brack{\min_{h \in \Hcal}\mathrm{err}_{\sigmavec}(h)}.
+$$
+
+Estimating the complexity is therefore a loop of <Gloss name="erm" /> runs on random labels.
+
+1. **Draw signs.** For $k = 1, \dots, K$ draw $\sigmavec^{(k)} \in \set{-1, +1}^m$ uniformly at random.
+2. **Fit them.** Run ERM on $((x_i, \sigma_i^{(k)}))_{i=1}^m$ and record its training error $e_k$.
+3. **Average.** The estimate is $\tilde\Rad = \frac1K\sum_k(1 - 2e_k)$.
+
+For real-valued classes the same loop maximises $\frac1m\sum_i\sigma_i f(x_i)$ directly. For a linear class with
+$\norm{\wvec} \le B$ the maximum has the closed form $\frac Bm\norm{\sum_i\sigma_i\xvec_i}$ and no training is needed.
+
+**How many draws.** The estimate is a function of $Km$ independent signs. Changing one sign changes one of the $K$
+suprema by at most $2c/m$, where $c$ bounds $\abs{f(x_i)}$ over the class, and the average by $2c/(Km)$.
+<NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink> then gives, with probability at least
+$1 - \delta'$,
+
+$$
+\hat\Rad_S \le \tilde\Rad + c\sqrt{\frac{2\ln(1/\delta')}{Km}}.
+$$
+
+The accuracy depends on the product $Km$. A single draw already estimates $\hat\Rad_S$ to within order $1/\sqrt m$,
+the same order as the other terms of the bound <Cite id="bartlett2002" />.
+
+**From the estimate to a bound.** For a loss class with values in $[0, 1]$, with probability at least $1 - \delta$ every
+hypothesis satisfies $R(h) \le \hat R_S(h) + 2\hat\Rad_S + 3\sqrt{\ln(2/\delta)/(2m)}$, where $\hat\Rad_S$ is the
+complexity of the loss class on the same sample <Cite id="mohri2018" />. For the <NoteLink to="surrogate-losses">0–1
+loss</NoteLink> of a $\pm 1$ class the loss complexity is half the class complexity. Splitting $\delta$ between this
+bound and the Monte Carlo deviation gives a bound computed entirely from the data.
+
+<RademacherEstimate />
+
+### Random-label fitting
+
+The random-label test applies the same idea to a learner that is not an exact ERM, such as a neural network trained by
+<Gloss name="sgd" /> <Cite id="zhang2017" />.
+
+1. **Corrupt the labels.** Replace a fraction $p$ of the training labels with labels drawn uniformly at random, once,
+   and keep them fixed for the whole run.
+2. **Train as usual.** Use the same architecture, optimiser and schedule as for the real labels, to convergence.
+3. **Record the training and test errors.** The test set keeps its true labels.
+
+The training error measures memorisation. If the learner reaches training error $e$ on fully random binary labels,
+its output $h$ correlates with those labels at $1 - 2e$. The set $\Hcal_A$ of hypotheses the algorithm can reach
+therefore has $\sup_{h \in \Hcal_A}\frac1m\sum_i\sigma_i h(x_i) \ge 1 - 2e$ for that draw, and by McDiarmid's
+inequality the expectation $\hat\Rad_S(\Hcal_A)$ is within order $1/\sqrt m$ of it. A learner that fits random labels
+perfectly has empirical Rademacher complexity close to its maximum, 1.
+
+Zhang and colleagues ran the test on CIFAR-10, with 50,000 training images in 10 classes
+<Cite id="zhang2017" />.
+
+- A small Inception network with 1,649,402 parameters reached 100% training accuracy on random labels, with 9.78% test
+  accuracy, which is chance. On the true labels the same network, also without data augmentation or
+  <Gloss name="weight-decay">weight decay</Gloss>, reached 100% training accuracy and 85.75% test accuracy.
+- With partially corrupted labels the networks fitted the training set perfectly at every corruption level, and the
+  test error rose towards 90% as the corrupted fraction approached 1.
+- On <Gloss name="imagenet" /> with random labels (1,281,167 training images in 1,000 classes), an Inception V3 network
+  reached 95.20% top-1 training accuracy with no explicit <NoteLink to="regularisation">regularisation</NoteLink> and no
+  change of hyperparameters.
+
+The class that the training procedure explores can memorise 50,000 random labels. Any bound of the form training error
+plus a multiple of its Rademacher complexity is then vacuous, yet the same procedure generalises on real labels. The
+capacity of the reachable class does not explain the generalisation of these networks. Bounds that depend on the
+algorithm, the norms of the solution found or the data are needed (see
+<NoteLink to="limits-of-uniform-convergence">limits of uniform convergence</NoteLink>,
+<NoteLink to="norm-based-bounds-for-neural-networks">norm-based bounds for neural networks</NoteLink> and
+<NoteLink to="algorithmic-stability">algorithmic stability</NoteLink>). Networks fit the patterns shared by many
+examples before they memorise individual noisy ones <Cite id="arpit2017" />.
+
+{/* figure pending engine (A5 randomLabelStudy): training and test error against the fraction p of random labels for <Gloss name="knn" />, a kernel SVM with large C and a small <Gloss name="mlp" /> on two moons */}
+
+### Measuring an effective VC dimension
+
+Vapnik, Levin and LeCun measured a capacity in VC units for a learning machine whose VC dimension is unknown
+<Cite id="vapnik1994" />. The measured quantity is the largest gap between the error rates on two independent
+half-samples, the same quantity that the ghost sample of <NoteLink to="symmetrisation">symmetrisation</NoteLink>
+introduces.
+
+1. **Two halves.** Draw $2m$ labelled examples and split them into halves $S_1$ and $S_2$ of size $m$. Write
+   $\nu_1(h)$ and $\nu_2(h)$ for the error rates of $h$ on them.
+2. **The maximal deviation.** The target is $\xi(m) = \expect\max_h(\nu_2(h) - \nu_1(h))$.
+3. **Compute it with one ERM run.** Flip the labels of $S_2$ and train ERM on all $2m$ examples. A hypothesis that errs
+   on a fraction $\nu_2$ of $S_2$ errs on a fraction $1 - \nu_2$ of the flipped half, so its error on the combined set
+   is $E(h) = \frac12(\nu_1(h) + 1 - \nu_2(h))$. Rearranging, $\nu_2(h) - \nu_1(h) = 1 - 2E(h)$, and the maximum over
+   $h$ is $1 - 2\min_h E(h)$.
+4. **Repeat over sample sizes.** Average $\xi$ over several draws at each of several values of $m$.
+5. **Fit.** VC theory bounds $\xi(m)$ by a function $\Phi(m/d)$ of the ratio of the sample size to the VC dimension.
+   The paper fixes the free constants of $\Phi$ empirically and then fits $d$ to the measured curve. The fitted $d$ is
+   the effective VC dimension of the machine.
+
+The measurement includes the training procedure: a regulariser, an early stop or a restricted optimiser lowers the
+effective dimension below the VC dimension of the parametrised class.
+
+{/* figure pending engine (effective VC dimension study, sketched in .scratch/learning-theory/logs/lt-capacity.md): ξ(m) measured by flipped-half ERM for thresholds, intervals and half-planes, with the fitted effective dimension beside the true VC dimension */}
+
+## Worked example: a margin bound with a measured complexity
+
+A linear classifier $\sgn(\wvec^\top\xvec)$ with $\norm{\wvec} \le B = 1$ is trained on $m = 10{,}000$ points in
+$\reals^{50}$. The inputs lie in the unit ball, $X = 1$, but most of them are well inside it: their norms are spread
+uniformly over $[0, 1]$. The <NoteLink to="margin-bounds">margin bound</NoteLink> for the ramp loss at margin
+$\gamma = 0.1$ states that, with probability $1 - \delta$, the test error is at most the fraction of training points
+with margin below $\gamma$ plus $(2/\gamma)\hat\Rad_S + 3\sqrt{\ln(2/\delta)/(2m)}$ <Cite id="mohri2018" />. Take
+$\delta = 0.05$.
+
+1. **Worst case.** The analytic bound $\hat\Rad_S \le BX/\sqrt m = 0.01$ gives a capacity term of
+   $20 \times 0.01 = 0.200$. With $3\sqrt{\ln 40/20{,}000} = 0.041$, the slack is $0.241$.
+2. **Measure.** $K = 100$ draws of the signs, each with the closed-form supremum $\frac1m\norm{\sum_i\sigma_i\xvec_i}$,
+   give $\tilde\Rad = 0.0058$, 42% below the worst case.
+3. **Split the confidence.** Give $\delta' = 0.025$ to the Monte Carlo step and $0.025$ to the bound. McDiarmid
+   adds $\sqrt{2\ln 40/(100 \times 10{,}000)} = 0.0027$, and the last term becomes $3\sqrt{\ln 80/20{,}000} = 0.044$.
+   The slack is $20 \times (0.0058 + 0.0027) + 0.044 = 0.214$.
+4. **More draws.** With $K = 1{,}000$ the Monte Carlo term falls to $0.0009$ and the slack to $0.177$.
+5. **Reading it.** The measured bound is below the worst case because most input norms lie well inside the radius
+   $X = 1$ that the worst case assumes. If 5% of training points have margin below $0.1$, the test error is at most
+   about $0.23$ at $K = 1{,}000$: not vacuous, and a bound no worst-case argument gives for these data. For linear
+   classes the Jensen bound $\frac Bm\sqrt{\sum_i\norm{\xvec_i}^2} = 0.0058$ is itself computable from the data and
+   gives the same number without sampling. Monte Carlo is needed for classes without such a formula.
+
+## Cost
+
+- **One ERM per draw.** The Rademacher estimate needs $K$ exact empirical risk minimisations. For half-spaces in
+  general dimension exact ERM on the 0–1 loss is computationally hard, and for most classes only approximate
+  minimisers are available.
+- **Full training runs.** The random-label test needs a complete training run for each corruption level and seed.
+  Zhang and colleagues report that fitting random labels took only a small constant factor longer than fitting the true
+  labels <Cite id="zhang2017" />.
+- **A sweep over sample sizes.** The effective VC dimension needs several sample sizes, several draws each, and one
+  ERM run per draw.
+
+## Trade-offs
+
+- **Data-dependent against worst case.** A measured complexity adapts to the sample, as in the worked example, and can
+  be much smaller than any closed-form bound. It is valid only for the sample measured, which is all a data-dependent
+  bound needs.
+- **Class against algorithm.** Exact ERM measures the class. A practical learner measures the part of the class it
+  reaches, which is the relevant capacity for that learner but is not what the uniform bounds assume.
+- **Bound against diagnosis.** Only the Rademacher estimate with exact ERM gives a valid bound. The random-label test
+  and the effective VC dimension are diagnostics: they show how much a learner can memorise, not a guarantee.
+
+## Pitfalls
+
+- **Approximate ERM breaks the bound.** An optimiser that stops short of the minimum on random labels reports a
+  larger error, hence a smaller complexity, hence an optimistic bound. The estimate is a lower bound on the true
+  empirical complexity unless the minimisation is exact.
+- **Fitting random labels is not overfitting real ones.** A class that can memorise noise can still generalise on
+  structured labels. The test shows that capacity-based bounds are vacuous for such a class, not that the class
+  generalises poorly.
+- **Use the same sample.** The empirical Rademacher complexity in the bound is computed on the training sample. A
+  measurement on other data, or after selecting the class with the data, needs its own <NoteLink to="union-bound">union
+  bound</NoteLink>.
+- **The effective dimension depends on its constants.** The fitted $d$ is only as reliable as the form of $\Phi$ and the
+  constants chosen for it, and it changes with the input distribution used for the measurement.

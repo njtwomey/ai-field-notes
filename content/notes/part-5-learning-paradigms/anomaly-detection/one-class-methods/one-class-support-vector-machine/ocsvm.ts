@@ -1,5 +1,5 @@
 import { oneClassSvm, oneClassScore, type OneClassModel } from 'aifn-methods/unsupervised/anomaly'
-import { fromData } from 'aifn-compute/foundation/tensor'
+import { fromData, toRows } from 'aifn-compute/foundation/tensor'
 
 export type Point = [number, number]
 
@@ -29,8 +29,16 @@ export function trainOcSvm(x: Point[], nu: number, gamma: number): OcSvmFit {
   // Anomaly score is -f(x), so f(x) = -score
   const scores = oneClassScore(model, X)
   const f = Array.from(scores, (s) => -s)
+  // The model keeps only the support points and their weights; give every training point its weight (0 off the
+  // support) by matching the support points back to the training points they are copies of.
+  const index = new Map(x.map((p, i) => [`${p[0]},${p[1]}`, i]))
+  const alpha = new Array<number>(n).fill(0)
+  ;(toRows(model.support) as number[][]).forEach((p, j) => {
+    const i = index.get(`${p[0]},${p[1]}`)
+    if (i !== undefined) alpha[i] = model.alpha[j]
+  })
   return {
-    alpha: Array.from(model.alpha),
+    alpha,
     C,
     rho: model.offset,
     f,

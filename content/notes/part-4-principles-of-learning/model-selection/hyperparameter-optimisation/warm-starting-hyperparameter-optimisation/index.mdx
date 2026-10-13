@@ -1,0 +1,204 @@
+---
+title: 'Warm-starting hyperparameter optimisation'
+kind: technique
+summary: 'Warm-starting reuses tuning results from earlier data sets to begin a new search well: the best configurations of similar data sets, a portfolio of complementary configurations chosen greedily, or a surrogate model transferred across tasks.'
+tags: [model-selection, hyperparameters, meta-learning, worked-example]
+aliases: [transfer hyperparameter optimisation, meta-learning for hyperparameter optimisation, hyperparameter portfolios, portfolio of configurations, learned defaults, transfer Bayesian optimisation]
+requires: [hyperparameter-search, bayesian-optimisation]
+related: [meta-learning, automated-machine-learning, hyperparameter-importance, sequential-model-based-algorithm-configuration, gaussian-process, negative-transfer, model-selection-at-scale, multi-task-learning]
+references: [feurer2015warmstart, feurer2015autosklearn, feurer2022autosklearn2, nemhauser1978, pfisterer2021defaults, swersky2013mtbo, feurer2018rgpe, vanrijn2018importance, probst2019tunability]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+A **warm-started** <Gloss name="hpo">hyperparameter optimisation</Gloss> begins its search on a new data set with
+knowledge from searches on earlier data sets, instead of from a blank slate. The knowledge takes three forms: the
+configurations that worked best on similar data sets, evaluated first <Cite id="feurer2015warmstart" />; a fixed
+**portfolio** of complementary configurations that together work well on many data sets
+<Cite id="feurer2022autosklearn2" />; or a surrogate model of the validation loss fitted to earlier searches and
+transferred to the new one <Cite id="swersky2013mtbo" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="random-search">Random search</NoteLink> and <NoteLink to="bayesian-optimisation">Bayesian
+optimisation</NoteLink> start each search knowing nothing about the loss surface. The first evaluations of a Bayesian
+optimiser are a random or <NoteLink to="quasi-random-search">space-filling design</NoteLink>, because its surrogate has
+no data yet. For an expensive learner, those first evaluations can use most of the budget.
+
+Yet the same learner has usually been tuned before, on other data. Good hyperparameters of a gradient-boosted tree
+ensemble or a <Gloss name="svm">support vector machine</Gloss> fall in similar regions across many data sets, and the
+regions that fail, such as <Gloss name="learning-rate">learning rates</Gloss> that diverge, fail almost everywhere.
+Ignoring that history wastes evaluations. Warm-starting is the hyperparameter case of
+<NoteLink to="meta-learning">meta-learning</NoteLink>: learning from many tasks how to learn a new one faster.
+
+## Mechanism
+
+Write $t = 1, \dots, T$ for the earlier data sets (the **meta-training** tasks), $L_t(\lambdavec)$ for the validation
+loss of configuration $\lambdavec$ on task $t$, and $t_\text{new}$ for the new task.
+
+### Configurations of similar data sets
+
+Describe each data set by a vector of **meta-features**: the number of examples, features and classes, the proportion
+of categorical features, the class entropy, statistics of the feature distributions, and the accuracy of cheap models.
+For a new data set, find the $k$ nearest earlier data sets in meta-feature space and evaluate the best configuration of
+each first. The search then continues from these $k$ results.
+
+Auto-sklearn stored the best configuration found by a day of tuning on each of 140 OpenML data sets. For a new data set
+it computed 38 meta-features, ranked the stored data sets by $L_1$ distance in meta-feature space, and seeded Bayesian
+optimisation with the configurations of the 25 nearest <Cite id="feurer2015autosklearn" />. The method transfers only
+the incumbents. It assumes that data sets close in meta-feature space have close loss surfaces, which the meta-features
+can only partly capture.
+
+### Portfolios
+
+A portfolio drops the meta-features. It is one fixed list of configurations, chosen offline to work well across all the
+meta-training tasks together, and evaluated in order on every new task. The configurations should be complementary:
+a second configuration earns its place by doing well on the tasks where the first does badly.
+
+**The objective.** Run each candidate configuration in a finite pool $C$ on each task, giving a table of losses
+$L_t(\lambdavec)$. A portfolio $P \subseteq C$ is used on a task by evaluating every member and keeping the best, so its
+loss on task $t$ is $\min_{\lambdavec \in P} L_t(\lambdavec)$. Let $L_t^{\max}$ be the worst possible loss on task $t$,
+such as an <NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> of 1. The **gain** of a portfolio is its
+average improvement over that worst value,
+
+$$
+G(P) = \frac{1}{T}\sum_{t=1}^{T}\paren{L_t^{\max} - \min_{\lambdavec \in P} L_t(\lambdavec)}, \qquad G(\emptyset) = 0.
+$$
+
+Choosing the best portfolio of size $k$ is NP-hard in general <Cite id="feurer2022autosklearn2" />. The greedy algorithm
+starts from $P_0 = \emptyset$ and adds, $k$ times, the configuration with the largest increase in $G$.
+
+**Greedy is within a factor $1 - 1/e$ of the best portfolio.** The proof needs two properties of $G$.
+
+1. **Monotone.** Adding a configuration to $P$ cannot raise any $\min_{\lambdavec \in P} L_t$, so $G$ never falls.
+2. **Diminishing returns.** The gain from adding $\lambdavec$ to $P$ is
+   $\Delta(\lambdavec \mid P) = \frac{1}{T}\sum_t \max\paren{0,\ \min_{P} L_t - L_t(\lambdavec)}$. If $P \subseteq Q$,
+   then $\min_Q L_t \le \min_P L_t$ on every task, so each term of the sum is no larger for $Q$:
+   $\Delta(\lambdavec \mid Q) \le \Delta(\lambdavec \mid P)$. A configuration adds less to a larger portfolio. A set
+   function with this property is called **submodular**.
+
+Let $P^\star$ be a best portfolio of size $k$ and $P_i$ the greedy portfolio after $i$ steps. Adding the members of
+$P^\star$ to $P_i$ one at a time, each addition gains at most what it would gain added to $P_i$ alone, by diminishing
+returns. With monotonicity,
+
+$$
+G(P^\star) \le G(P_i \cup P^\star) \le G(P_i) + \sum_{\lambdavec \in P^\star}\Delta(\lambdavec \mid P_i) \le G(P_i) +
+k\,\brack{G(P_{i+1}) - G(P_i)}.
+$$
+
+The last step holds because the greedy step picks the largest $\Delta(\lambdavec \mid P_i)$, which is at least each of
+the $k$ terms in the sum. Write $\delta_i = G(P^\star) - G(P_i)$ for the shortfall after $i$ steps. Rearranged, the
+inequality says $\delta_{i+1} \le (1 - 1/k)\,\delta_i$. Starting from $\delta_0 = G(P^\star)$ and applying it $k$ times,
+
+$$
+G(P^\star) - G(P_k) \le \paren{1 - \tfrac{1}{k}}^{k} G(P^\star) \le e^{-1}\,G(P^\star),
+$$
+
+since $1 - x \le e^{-x}$. So $G(P_k) \ge (1 - 1/e)\,G(P^\star) \approx 0.63\,G(P^\star)$: the greedy portfolio closes at
+least 63% of the gap between the empty portfolio and the best one of its size. This is the classical bound for
+maximising a monotone submodular function under a size limit <Cite id="nemhauser1978" />, and Auto-sklearn 2.0 applies
+it to portfolios <Cite id="feurer2022autosklearn2" />.
+
+Auto-sklearn 2.0 builds a portfolio of 32 pipelines from candidates tuned on 208 meta-training data sets. On a new
+data set it evaluates the portfolio first, optionally under <NoteLink to="successive-halving">successive
+halving</NoteLink>, and spends any remaining time on Bayesian optimisation seeded with the portfolio's results
+<Cite id="feurer2022autosklearn2" />. Pfisterer et al. build the same kind of ordered list for a single learner and
+call it a set of **multiple defaults** <Cite id="pfisterer2021defaults" />. A portfolio needs no meta-features, costs
+nothing to compute on the new task, and parallelises perfectly.
+
+### Transferring the surrogate
+
+The two methods above transfer configurations. The surrogate model of Bayesian optimisation can transfer the shape of
+the loss surface instead.
+
+- **Multi-task Gaussian processes.** Swersky, Snoek and Adams model the losses of all tasks with one
+  <NoteLink to="gaussian-process">Gaussian process</NoteLink> over pairs $(\lambdavec, t)$, whose covariance is a
+  product of a covariance between configurations and a learned covariance between tasks <Cite id="swersky2013mtbo" />.
+  Evaluations on a correlated earlier task then lower the <NoteLink to="uncertainty-quantification">predictive
+  uncertainty</NoteLink> on the new one.
+- **Ensembles of per-task surrogates.** Fit one surrogate to each earlier task and one to the new task's evaluations so
+  far, and predict with a weighted sum. Feurer et al. count, for each surrogate, the pairs of the new task's observed
+  configurations that it orders wrongly, its ranking loss. Each surrogate's weight is the probability that it has the
+  lowest ranking loss of the ensemble. Their ranking-weighted Gaussian process ensemble gives a surrogate from an
+  unrelated task little weight, and they bound its worst case relative to plain Bayesian optimisation
+  <Cite id="feurer2018rgpe" />.
+
+### Priors and search spaces
+
+The lightest transfer narrows the <NoteLink to="hyperparameter-search-spaces">search space</NoteLink>. Van Rijn and
+Hutter fitted priors over each hyperparameter from the good configurations of 100 data sets and sampled random search
+from them, with significant gains <Cite id="vanrijn2018importance" />. Probst, Boulesteix and Bischl derived defaults
+and tuning ranges from 38 data sets <Cite id="probst2019tunability" />. Which hyperparameters deserve a wide range is
+the subject of <NoteLink to="hyperparameter-importance">hyperparameter importance</NoteLink>.
+
+## Worked example
+
+Four candidate configurations have these validation errors on four meta-training data sets.
+
+| | $D_1$ | $D_2$ | $D_3$ | $D_4$ | mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| $\lambdavec_1$ | 0.10 | 0.30 | 0.20 | 0.25 | 0.2125 |
+| $\lambdavec_2$ | 0.15 | 0.15 | 0.25 | 0.30 | 0.2125 |
+| $\lambdavec_3$ | 0.30 | 0.25 | 0.12 | 0.15 | 0.2050 |
+| $\lambdavec_4$ | 0.12 | 0.22 | 0.18 | 0.20 | 0.1800 |
+
+1. **One default.** The best single configuration is $\lambdavec_4$, with mean error 0.180. It is the greedy first
+   pick.
+2. **Second pick.** For each remaining candidate, take the smaller of its error and $\lambdavec_4$'s on each data set
+   and average. Adding $\lambdavec_1$ gives $(0.10 + 0.22 + 0.18 + 0.20)/4 = 0.175$; $\lambdavec_2$ gives
+   $(0.12 + 0.15 + 0.18 + 0.20)/4 = 0.1625$; $\lambdavec_3$ gives $(0.12 + 0.22 + 0.12 + 0.15)/4 = 0.1525$. Greedy adds
+   $\lambdavec_3$, the configuration with the worst mean on its own: it wins exactly where $\lambdavec_4$ is weak.
+3. **Third pick.** Adding $\lambdavec_2$ to $\{\lambdavec_4, \lambdavec_3\}$ gives 0.135 and $\lambdavec_1$ gives
+   0.1475. Greedy adds $\lambdavec_2$.
+4. **Greedy is not optimal.** The best pair is $\{\lambdavec_2, \lambdavec_3\}$, with mean error
+   $(0.15 + 0.15 + 0.12 + 0.15)/4 = 0.1425$, better than the greedy pair's 0.1525. With $L^{\max} = 1$, the gains are
+   $1 - 0.1525 = 0.8475$ and $1 - 0.1425 = 0.8575$, a ratio of 0.99, well above the guaranteed 0.63.
+5. **Honest assessment.** The mean of 0.1525 was measured on the data sets that chose the portfolio. Leave $D_4$ out
+   and build the pair on $D_1$ to $D_3$: greedy picks $\lambdavec_4$ (mean 0.173 there), then $\lambdavec_2$ (pair mean
+   0.150). On the held-out $D_4$ this portfolio scores $\min(0.20, 0.30) = 0.20$, against 0.15 for the best
+   configuration on $D_4$. The in-sample 0.150 was optimistic for a new data set.
+
+Step 5 is <NoteLink to="cross-validation">cross-validation</NoteLink> one level up. A portfolio, a set of defaults or a
+meta-learned prior is fitted to the meta-training tasks, and its quality on a new task is estimated only by leaving
+tasks out.
+
+## Cost
+
+Warm-starting moves cost offline. Building the table for a portfolio costs one tuning run per meta-training task,
+followed by the evaluation of every candidate on every task: $\abs{C} \times T$ training runs. Auto-sklearn's offline
+phase ran its optimiser for 24 hours on each of 140 data sets <Cite id="feurer2015autosklearn" />. The online cost is
+small: computing meta-features, or nothing at all for a portfolio, plus the evaluations of the transferred
+configurations, which replace evaluations a cold search would have spent on its initial design. A transferred
+surrogate adds the cost of fitting $T$ extra models, or one Gaussian process over all tasks' data, which grows as the
+cube of the total number of evaluations.
+
+## Trade-offs
+
+- **Transferring configurations or surfaces.** Configurations are robust and cheap, and help only if one of them is
+  good on the new task. A surrogate can steer the whole search, and misleads when the tasks are unrelated.
+- **Similarity or coverage.** Nearest-neighbour seeding bets on the meta-features. A portfolio bets on coverage and
+  gives every new task the same start.
+- **Size.** A large portfolio covers more tasks and delays the adaptive search. By the diminishing-returns property,
+  its later members add least.
+
+## Pitfalls
+
+- **Meta-overfitting.** Defaults and portfolios chosen on a set of data sets look best on those data sets. Probst,
+  Boulesteix and Bischl report that the gain of their optimised defaults over the package defaults of elastic-net
+  <NoteLink to="logistic-regression">logistic regression</NoteLink> fell from 0.045 to 0.032 in
+  <Gloss name="auc">AUC</Gloss> when the defaults were chosen on four fifths of the data sets and scored on the rest
+  <Cite id="probst2019tunability" />.
+- **Overlap between meta-training and test data.** A benchmark data set that also sits in the meta-training collection,
+  or a near-duplicate of one, leaks its answer. Feurer et al. removed such overlaps by hand before building the
+  Auto-sklearn 2.0 portfolio <Cite id="feurer2022autosklearn2" />.
+- **Negative transfer.** Configurations or surrogates from unrelated tasks can steer the search away from the optimum
+  of the new one (see <NoteLink to="negative-transfer">negative transfer</NoteLink>). Weighted ensembles of surrogates
+  guard against it; plain seeding does not.
+- **Unequal comparisons.** A warm-started search compared with a cold one at the same number of online evaluations
+  hides the offline compute. Report both, and give competing methods the same warm start when comparing search
+  algorithms.
+- **The selection on the new task is still a selection.** Evaluating a portfolio of 32 configurations on the new task's
+  validation data and keeping the best is a search over 32 candidates, with the optimism that brings (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

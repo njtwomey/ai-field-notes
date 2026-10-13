@@ -1,0 +1,234 @@
+---
+title: 'Penalised and constrained regularisation'
+kind: concept
+summary: 'Regularisation can add a penalty $\lambda\Omega(\wvec)$ to the loss (Tikhonov form), bound $\Omega(\wvec) \le t$ (Ivanov form), or minimise $\Omega(\wvec)$ subject to a loss level $\delta$ (Morozov form). For convex problems the three forms give the same solutions, with $\lambda$, $t$ and $\delta$ linked through the data.'
+tags: [model-selection, regularisation, optimisation, worked-example]
+aliases: [Ivanov regularisation, Morozov regularisation, constrained regularisation, penalty form and constraint form]
+requires: [regularisation, karush-kuhn-tucker-conditions]
+related:
+  [
+    ridge-regression,
+    lasso,
+    lagrangian-duality,
+    penalty-and-barrier-methods,
+    structural-risk-minimisation,
+    tikhonov-regularisation,
+    choosing-the-regularisation-strength,
+    best-subset-and-stepwise-selection,
+  ]
+references: [tikhonov1963, ivanov1962, morozov1966, oneto2016, tibshirani1996, hastie2009, boyd2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { ThreeForms } from './ThreeForms'
+
+<Definition>
+Let $L(\wvec) \ge 0$ be a training loss, such as the residual sum of squares $\norm{\yvec - \Xmat\wvec}^2$, and let
+$\Omega(\wvec) \ge 0$ be a regulariser, such as $\norm{\wvec}_2^2$ or $\norm{\wvec}_1$. Regularisation can be posed in
+three forms:
+
+- **Tikhonov (penalised) form:** minimise $L(\wvec) + \lambda\,\Omega(\wvec)$ for a penalty weight $\lambda \ge 0$;
+- **Ivanov (constrained) form:** minimise $L(\wvec)$ subject to $\Omega(\wvec) \le t$ for a budget $t \ge 0$;
+- **Morozov (discrepancy) form:** minimise $\Omega(\wvec)$ subject to $L(\wvec) \le \delta$ for a loss level
+  $\delta \ge 0$.
+
+When $L$ and $\Omega$ are convex, every solution of one form solves the other two for matching values of the
+parameters <Cite id="oneto2016" />. The matching values depend on the data.
+</Definition>
+
+## Intuition
+
+A regularised fit balances two quantities: how well $\wvec$ fits the training data, measured by $L$, and how complex
+$\wvec$ is, measured by $\Omega$. There are three ways to state the balance. One can charge a price $\lambda$ per unit
+of complexity and minimise the total bill. One can fix a complexity budget $t$ and fit as well as the budget allows.
+One can fix an acceptable training loss $\delta$ and find the simplest $\wvec$ that reaches it.
+
+The three statements describe the same set of compromises. Each compromise is a point on the curve of best achievable
+pairs $(\Omega, L)$. A price $\lambda$ picks the point where the curve has slope $-\lambda$. A budget picks the point at
+$\Omega = t$. A loss level picks the point at $L = \delta$. Moving the parameter of any one form moves the solution
+along the same curve.
+
+The forms differ in what their parameter means, and so in how it is chosen. The three names come from the Soviet school
+of <NoteLink to="tikhonov-regularisation">ill-posed problems</NoteLink>: Tikhonov's penalised form
+<Cite id="tikhonov1963" />, Ivanov's quasi-solutions under a norm bound <Cite id="ivanov1962" /> and Morozov's
+discrepancy principle <Cite id="morozov1966" />.
+
+- **$\lambda$** has no meaning outside the optimisation. Its scale changes with the units of $L$. It is chosen by
+  <NoteLink to="cross-validation">cross-validation</NoteLink> or another estimate of prediction error.
+- **$t$** has the units of $\Omega(\wvec)$. It is the form that <NoteLink to="statistical-learning-theory">learning
+  theory</NoteLink> analyses: generalisation bounds hold for a fixed ball $\set{\wvec : \norm{\wvec} \le t}$, and
+  <NoteLink to="structural-risk-minimisation">structural risk minimisation</NoteLink> chooses among nested balls.
+- **$\delta$** has the units of the loss. When the noise level is known, a fit should leave residuals about as large as
+  the noise. For least squares with $n$ observations of noise variance $\sigma^2$, that gives
+  $\delta \approx n\sigma^2$: the discrepancy principle (see
+  <NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>).
+
+## The three forms
+
+Write $\hat\wvec_\lambda$ for a minimiser of the penalised objective $L + \lambda\Omega$. As $\lambda$ grows, the fit
+trades training loss for simplicity. The trade is monotone.
+
+**Claim.** If $0 \le \lambda_1 < \lambda_2$, then $\Omega(\hat\wvec_{\lambda_2}) \le \Omega(\hat\wvec_{\lambda_1})$
+and $L(\hat\wvec_{\lambda_2}) \ge L(\hat\wvec_{\lambda_1})$.
+
+Write $\Omega_k = \Omega(\hat\wvec_{\lambda_k})$ and $L_k = L(\hat\wvec_{\lambda_k})$. Each $\hat\wvec_{\lambda_k}$
+minimises its own objective, so it does at least as well there as the other solution:
+
+$$
+L_1 + \lambda_1\Omega_1 \le L_2 + \lambda_1\Omega_2,
+\qquad
+L_2 + \lambda_2\Omega_2 \le L_1 + \lambda_2\Omega_1.
+$$
+
+Adding the two inequalities cancels the losses and leaves $\lambda_1\Omega_1 + \lambda_2\Omega_2 \le \lambda_1\Omega_2 +
+\lambda_2\Omega_1$, that is $(\lambda_2 - \lambda_1)(\Omega_2 - \Omega_1) \le 0$. Since $\lambda_2 > \lambda_1$,
+$\Omega_2 \le \Omega_1$. The first inequality then gives $L_1 - L_2 \le \lambda_1(\Omega_2 - \Omega_1) \le 0$, so
+$L_2 \ge L_1$. The argument uses no convexity.
+
+The claim defines two maps from the penalty to the other parameters,
+
+$$
+t(\lambda) = \Omega(\hat\wvec_\lambda), \qquad \delta(\lambda) = L(\hat\wvec_\lambda).
+$$
+
+A larger price buys a smaller budget and accepts a larger loss. At $\lambda = 0$ the budget is the complexity of the
+unregularised fit; as $\lambda \to \infty$ the budget falls to $\min\Omega$, which is 0 for a norm.
+
+## Their equivalence
+
+The equivalence has an easy direction, which holds for any $L$ and $\Omega$, and a hard direction, which needs
+convexity.
+
+**Penalised solutions are constrained solutions.** Let $\lambda > 0$ and $t = t(\lambda)$. Suppose some $\wvec$ had
+$\Omega(\wvec) \le t$ and $L(\wvec) < L(\hat\wvec_\lambda)$. Then
+$L(\wvec) + \lambda\Omega(\wvec) < L(\hat\wvec_\lambda) + \lambda\Omega(\hat\wvec_\lambda)$, which contradicts the
+optimality of $\hat\wvec_\lambda$. So $\hat\wvec_\lambda$ solves the Ivanov problem with budget $t(\lambda)$. The same
+argument with the roles of $L$ and $\Omega$ swapped shows that $\hat\wvec_\lambda$ solves the Morozov problem with level
+$\delta(\lambda)$: any $\wvec$ with $L(\wvec) \le \delta(\lambda)$ and $\Omega(\wvec) < \Omega(\hat\wvec_\lambda)$ would
+again lower the penalised objective, because $\lambda > 0$.
+
+**Constrained solutions are penalised solutions, for convex problems.** Let $L$ and $\Omega$ be convex, and let
+$\hat\wvec$ solve the Ivanov problem with a budget $t > \min\Omega$, so that some $\wvec$ satisfies
+$\Omega(\wvec) < t$ strictly. This is Slater's condition, and it gives
+<NoteLink to="lagrangian-duality">strong duality</NoteLink>. The <Gloss name="kkt" /> conditions then hold at
+$\hat\wvec$ with a multiplier $\lambda \ge 0$:
+
+$$
+\zeros \in \partial L(\hat\wvec) + \lambda\,\partial\Omega(\hat\wvec),
+\qquad
+\lambda\paren{\Omega(\hat\wvec) - t} = 0,
+$$
+
+where $\partial$ denotes the set of <NoteLink to="subgradients">subgradients</NoteLink>. The first condition says that
+zero is a subgradient of $L + \lambda\Omega$ at $\hat\wvec$. For a convex function that is the condition for a global
+minimum, so $\hat\wvec$ minimises the penalised objective with this $\lambda$. The second condition, complementary
+slackness, sets $\lambda = 0$ when the constraint is slack: a budget larger than the unregularised fit needs costs
+nothing. The Morozov form reduces the same way. Its Lagrangian is $\Omega + \mu(L - \delta)$ with a multiplier
+$\mu \ge 0$, and when $\mu > 0$ its minimiser is the penalised solution with $\lambda = 1/\mu$.
+
+**The multiplier is a price.** Let $p(t)$ be the smallest loss the Ivanov problem achieves with budget $t$. The
+multiplier of the constraint is the rate at which the optimal loss falls as the budget grows,
+
+$$
+\lambda = -\frac{dp}{dt},
+$$
+
+wherever $p$ is differentiable (see <NoteLink to="lagrange-multipliers">Lagrange multipliers</NoteLink>, where the
+multiplier is a sensitivity). A large $\lambda$ means a small budget, where one more unit of
+norm would lower the training loss a lot. A $\lambda$ near 0 means the budget barely binds.
+
+## The geometry of L1 and L2 balls
+
+The constrained form gives the picture behind sparsity. The Ivanov solution is the point of the ball
+$\set{\wvec : \Omega(\wvec) \le t}$ where the smallest level set of $L$ first touches it. At that point the KKT
+condition says $-\nabla L(\hat\wvec) \in \lambda\,\partial\Omega(\hat\wvec)$ for a smooth loss: the downhill direction
+of the loss must lie in the **normal cone** of the ball, the set of directions that point straight out of it.
+
+- **The $L^2$ ball** is round. At each boundary point the normal cone is a single ray, along $\hat\wvec$ itself. A
+  boundary point on a coordinate axis has its ray along that axis, and only loss gradients pointing exactly that way
+  land there. Such gradients form a set of measure zero, so ridge solutions almost never have a zero coefficient.
+- **The $L^1$ ball** $\set{\wvec : \norm{\wvec}_1 \le t}$ is a cross-polytope. At the vertex $t\evec_1$ the
+  subdifferential of $\norm{\wvec}_1$ is $\set{(1, s_2, \dots, s_p) : s_j \in [-1, 1]}$, so the normal cone is the
+  full-dimensional set of directions $\gvec$ with $g_1 \ge \abs{g_j}$ for every $j$. An open set of loss gradients
+  lands on the vertex. Sparsity is therefore generic: it survives small changes to the data.
+- **$L^q$ balls with $q < 1$** are not convex and are spikier still. Their vertices attract even more gradients, but
+  the hard direction of the equivalence fails (see the pitfalls).
+- **The $L^\infty$ ball** is a cube. Its vertices have every $\abs{w_j}$ equal to $t$, so it pulls coefficients to a
+  common magnitude rather than to zero.
+
+The <NoteLink to="lasso">lasso</NoteLink> note draws the contact of the squared-error ellipses with the $L^1$ diamond
+for two coefficients. <NoteLink to="sparsity-inducing-penalties">Sparsity-inducing penalties</NoteLink> follows the
+same geometry to non-convex balls, and <NoteLink to="structured-sparsity-penalties">structured sparsity
+penalties</NoteLink> to balls whose corners are whole groups or low-rank matrices.
+
+## Worked example
+
+Take an orthonormal design, $\Xmat^\top\Xmat = \eye$, with two coefficients. The least-squares coefficients are
+$\zvec = \Xmat^\top\yvec$, and the residual sum of squares is $\norm{\yvec - \Xmat\wvec}^2 = c + \norm{\wvec - \zvec}^2$
+with a constant $c = \norm{\yvec}^2 - \norm{\zvec}^2$. Drop $c$ and use $L(\wvec) = \norm{\wvec - \zvec}^2$ with
+$\zvec = (3, 1)$.
+
+**Ridge.** With $\Omega = \norm{\wvec}_2^2$ the penalised solution is $\hat\wvec_\lambda = \zvec/(1 + \lambda)$. At
+$\lambda = 1$ it is $(1.5, 0.5)$, with budget $t = 1.5^2 + 0.5^2 = 2.5$ and loss $\delta = 1.5^2 + 0.5^2 = 2.5$.
+
+1. *Ivanov with $t = 2.5$.* The closest point to $\zvec$ in the disc $\norm{\wvec}_2^2 \le 2.5$ lies on the segment from
+   the origin to $\zvec$, at radius $\sqrt{2.5} = 1.581$. Since $\norm{\zvec} = \sqrt{10} = 3.162$, it is
+   $\zvec \times 1.581/3.162 = 0.5\,\zvec = (1.5, 0.5)$.
+2. *Morozov with $\delta = 2.5$.* The point of the disc $\norm{\wvec - \zvec}^2 \le 2.5$ nearest the origin lies on the
+   same segment, at distance $\sqrt{2.5}$ from $\zvec$: $\zvec(1 - 1.581/3.162) = (1.5, 0.5)$.
+3. *The price.* The best loss under budget $t$ is $p(t) = (\sqrt{10} - \sqrt t)^2$, so
+   $dp/dt = -(\sqrt{10} - \sqrt t)/\sqrt t$. At $t = 2.5$ this is $-(3.162 - 1.581)/1.581 = -1.0$, which is $-\lambda$.
+
+**Lasso.** With $\Omega = \norm{\wvec}_1$, minimising $(w_j - z_j)^2 + \lambda\abs{w_j}$ in each coordinate gives
+soft thresholding at $\lambda/2$ (derived in <NoteLink to="regularisation">regularisation</NoteLink>). At $\lambda = 2$
+the solution is $(3 - 1, \max(1 - 1, 0)) = (2, 0)$, with budget $t = 2$ and loss $\delta = 1^2 + 1^2 = 2$.
+
+1. *Ivanov with $t = 2$.* Projecting $\zvec$ onto the diamond $\abs{w_1} + \abs{w_2} \le 2$ subtracts a common
+   amount $\theta$ from both coordinates and clips at zero, with $\theta$ set so that the result has $L^1$ norm 2.
+   With $\theta = 1$ the result is $(2, 0)$, of norm 2.
+2. *Morozov with $\delta = 2$.* The smallest diamond $\abs{w_1} + \abs{w_2} = s$ that touches the disc
+   $\norm{\wvec - \zvec}^2 \le 2$ has its edge $w_1 + w_2 = s$ at distance $\sqrt 2$ from $\zvec$. That distance is
+   $(3 + 1 - s)/\sqrt 2$, so $s = 2$, and the contact point is $\zvec - (1, 1) = (2, 0)$: a vertex of the diamond.
+3. *The price.* For budgets $t \le 2$ only the first coordinate is active, the best point is $(t, 0)$ and
+   $p(t) = (3 - t)^2 + 1$. Then $dp/dt = -2(3 - t) = -2$ at $t = 2$, which is $-\lambda$.
+
+**The map depends on the data.** Change the data to $\zvec' = (4, 1)$ and keep $\lambda = 2$. The lasso now gives
+$(3, 0)$, with budget $t = 3$ instead of 2. The same penalty is a different constraint on a different sample.
+
+The figure computes the three parameters along a whole path on simulated data, on the engine.
+
+<ThreeForms />
+
+## Assumptions
+
+- **Convexity for the hard direction.** Penalised solutions solve the constrained problems for any $L$ and $\Omega$.
+  The converse needs $L$ and $\Omega$ convex and a strictly feasible point.
+- **A strictly feasible point.** The Ivanov problem needs $t > \min\Omega$ and the Morozov problem needs
+  $\delta > \min L$. At the boundary the multiplier can be infinite: $t = 0$ forces $\wvec = \zeros$, which is
+  $\lambda = \infty$.
+- **Unique solutions for a clean map.** When $L + \lambda\Omega$ has several minimisers, as the lasso can when
+  $p > n$, $t(\lambda)$ can take several values and the correspondence is between sets of solutions.
+
+## Pitfalls
+
+- **A fixed $\lambda$ is not a fixed constraint across resamples.** The maps $t(\lambda)$ and $\delta(\lambda)$ are
+  computed from the sample. In $K$-fold <NoteLink to="cross-validation">cross-validation</NoteLink> each fold's fit
+  with the same $\lambda$ has a different budget. Cross-validating over $\lambda$ and over $t$ therefore pick different
+  models. Tibshirani's original lasso used the relative budget $s = t/\norm{\hat\wvec_{\text{OLS}}}_1$
+  <Cite id="tibshirani1996" />; glmnet and scikit-learn use $\lambda$.
+- **Non-convex penalties break the equivalence.** With $\Omega(\wvec) = \norm{\wvec}_0$, the number of non-zero
+  coefficients, the Ivanov form with $t = k$ is best-subset selection of size $k$ (see
+  <NoteLink to="best-subset-and-stepwise-selection">best subset and stepwise selection</NoteLink>). The penalised form
+  minimises $\operatorname{RSS}_k + \lambda k$ over $k$, where $\operatorname{RSS}_k$ is the residual sum of squares of
+  the best subset of size $k$. It can only reach sizes on the lower convex hull of the points
+  $(k, \operatorname{RSS}_k)$. If the best subsets of sizes 0 to 3 have $\operatorname{RSS} = 10, 6, 5, 1$, size 2 is
+  never chosen: the slope from size 1 to size 3 is $-2.5$, steeper than the slope $-1$ from size 1 to size 2, so every
+  $\lambda$ that prefers size 2 to size 1 prefers size 3 to size 2.
+- **Software scales the loss differently.** Writing the loss as $\frac{1}{2n}\norm{\yvec - \Xmat\wvec}^2$ instead of
+  $\norm{\yvec - \Xmat\wvec}^2$ divides the matching $\lambda$ by $2n$ and leaves $t$ unchanged. A budget is portable
+  between conventions; a penalty weight is not.
+- **The penalised form is the one to compute.** It is unconstrained, so <NoteLink to="coordinate-descent">coordinate
+  descent</NoteLink> and <NoteLink to="proximal-gradient-methods">proximal gradient methods</NoteLink> apply directly.
+  The constrained form needs a projection onto the ball at every step, and the Morozov form needs a search over
+  $\lambda$ until the loss hits $\delta$.

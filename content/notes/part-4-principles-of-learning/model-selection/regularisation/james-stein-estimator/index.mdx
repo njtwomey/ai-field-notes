@@ -1,0 +1,251 @@
+---
+title: 'James–Stein estimator'
+kind: concept
+summary: 'For $d \ge 3$ Gaussian means, each observed once with known variance $\sigma^2$, the James–Stein estimator multiplies the observation vector $\xvec$ by $1 - (d - 2)\sigma^2/\norm{\xvec}^2$. Its expected total squared error is below that of $\xvec$ itself for every value of the means.'
+tags: [model-selection, regularisation, shrinkage, worked-example]
+aliases: [Stein's paradox, Stein shrinkage, James–Stein shrinkage, positive-part James–Stein estimator, Stein's phenomenon]
+requires: [gaussian-distribution, bias-variance-decomposition]
+related:
+  [
+    hierarchical-models,
+    steins-unbiased-risk-estimate,
+    empirical-bayes-for-hyperparameters,
+    ridge-regression,
+    shrinkage-covariance-estimation,
+    penalised-and-constrained-regularisation,
+  ]
+references: [stein1956, james1961, efron1973, efron1975, stein1981, lehmann1998]
+status: draft
+updated: 2026-10-13
+---
+
+import { SteinRisk } from './SteinRisk'
+
+<Definition>
+Let $\xvec \sim \MvGauss(\thetavec, \sigma^2\eye_d)$: one observation $x_j$ of each of $d$ unknown means $\theta_j$,
+with independent Gaussian noise of known variance $\sigma^2$. For $d \ge 3$ the **James–Stein estimator** is
+
+$$
+\hat\thetavec_{\text{JS}} = \paren{1 - \frac{(d - 2)\sigma^2}{\norm{\xvec}^2}}\xvec.
+$$
+
+Under the total squared error $\norm{\hat\thetavec - \thetavec}^2$, its risk (expected loss) is strictly smaller than
+the risk $d\sigma^2$ of the observations $\hat\thetavec = \xvec$, for every $\thetavec \in \reals^d$
+<Cite id="james1961" />. The observations are therefore **inadmissible**: another estimator is never worse and
+sometimes better <Cite id="stein1956" />.
+</Definition>
+
+## Intuition
+
+The natural estimate of $\thetavec$ is $\xvec$ itself. It is the maximum-likelihood estimate, it is unbiased, and each
+$x_j$ is the best unbiased estimate of its own $\theta_j$. Stein showed in 1956 that it can still be beaten whenever
+$d \ge 3$, even when the $\theta_j$ have nothing to do with each other <Cite id="stein1956" />. This is the origin of
+shrinkage, and of <NoteLink to="regularisation">regularisation</NoteLink> as a way to reduce
+estimation error rather than only to make a problem solvable.
+
+The reason is that $\xvec$ is too long. The noise $\xvec - \thetavec$ has expected squared length $d\sigma^2$, and in
+many dimensions it is nearly orthogonal to $\thetavec$. The two lengths therefore add:
+
+$$
+\expect\norm{\xvec}^2 = \norm{\thetavec}^2 + 2\,\expect\brack{\thetavec^\top(\xvec - \thetavec)} + \expect\norm{\xvec -
+\thetavec}^2 = \norm{\thetavec}^2 + d\sigma^2.
+$$
+
+Pulling $\xvec$ towards the origin removes some of the excess length. The best multiple of $\xvec$ is
+$c^\star = \thetavec^\top\xvec/\norm{\xvec}^2$, the projection coefficient of $\thetavec$ on $\xvec$. On average its
+numerator is $\norm{\thetavec}^2$ and its denominator $\norm{\thetavec}^2 + d\sigma^2$, so
+
+$$
+c^\star \approx \frac{\norm{\xvec}^2 - d\sigma^2}{\norm{\xvec}^2} = 1 - \frac{d\sigma^2}{\norm{\xvec}^2}.
+$$
+
+The James–Stein factor has the same form with $d - 2$ in place of $d$. Every term of $c^\star$ except
+$\thetavec$ can be computed from the data, and $\norm{\xvec}^2 - d\sigma^2$ estimates the unknown $\norm{\thetavec}^2$.
+The estimator borrows strength across coordinates: the length of the whole vector tells each coordinate how much of its
+own value is noise.
+
+## The estimator
+
+The estimator moves $\xvec$ towards the origin by a data-chosen factor.
+
+- **When $\norm{\xvec}^2$ is large** compared with $d\sigma^2$, the data look like signal and the factor is near 1.
+- **When $\norm{\xvec}^2$ is near $d\sigma^2$**, the data look like pure noise and the estimate is pulled hard towards
+  zero.
+- **When $\norm{\xvec}^2 < (d - 2)\sigma^2$**, the factor is negative and the estimate flips past the origin. The
+  **positive-part** estimator $\paren{1 - (d - 2)\sigma^2/\norm{\xvec}^2}_+\xvec$, which stops at zero, has lower risk
+  still <Cite id="lehmann1998" />.
+
+The origin is not special. Shrinking towards any point $\nuvec$ fixed before the data are seen,
+$\nuvec + \paren{1 - (d - 2)\sigma^2/\norm{\xvec - \nuvec}^2}(\xvec - \nuvec)$, also dominates $\xvec$. Shrinking
+towards the grand mean $\bar x\ones$ estimates the target from the data. That costs one dimension: the factor becomes
+$1 - (d - 3)\sigma^2/\sum_j(x_j - \bar x)^2$, and domination needs $d \ge 4$ (see
+<NoteLink to="hierarchical-models">hierarchical models</NoteLink>).
+
+In regression the same estimator is <NoteLink to="ridge-regression">ridge regression</NoteLink> with a penalty chosen
+from the data. With an orthonormal design, ridge returns $\zvec/(1 + \lambda)$ for least-squares coefficients
+$\zvec$. Setting $1/(1 + \lambda) = 1 - (d - 2)\sigma^2/\norm{\zvec}^2$ gives James–Stein. Stein's result says that
+least-squares coefficients, unbiased as they are, can always be improved in total squared error when there are three or
+more of them.
+
+## Why it dominates
+
+The proof needs one identity. **<NoteLink to="integration-by-parts">Stein's lemma</NoteLink>**: if
+$\xvec \sim \MvGauss(\thetavec, \sigma^2\eye)$ and $\gvec : \reals^d \to \reals^d$ is weakly differentiable with
+$\expect\abs{\partial g_j/\partial x_j} < \infty$, then
+
+$$
+\expect\brack{(\xvec - \thetavec)^\top\gvec(\xvec)} = \sigma^2\,\expect\brack{\nabla\cdot\gvec(\xvec)},
+\qquad \nabla\cdot\gvec = \sum_{j=1}^d \frac{\partial g_j}{\partial x_j}.
+$$
+
+It follows from integration by parts against the Gaussian density <Cite id="stein1981" />; the derivation below gives
+it. The lemma turns a covariance with the unknown noise into an expectation of something computable from $\xvec$.
+
+**Step 1: write the estimator as a correction.** Let $\hat\thetavec = \xvec + \gvec(\xvec)$ with
+$\gvec(\xvec) = -c\,\xvec/\norm{\xvec}^2$ and a constant $c > 0$ to be chosen.
+
+**Step 2: expand the loss.**
+
+$$
+\norm{\hat\thetavec - \thetavec}^2 = \norm{\xvec - \thetavec}^2 + 2(\xvec - \thetavec)^\top\gvec(\xvec) +
+\norm{\gvec(\xvec)}^2.
+$$
+
+**Step 3: take expectations.** The first term has expectation $d\sigma^2$. Stein's lemma replaces the middle term by
+$2\sigma^2\expect[\nabla\cdot\gvec]$. So the risk is
+
+$$
+R(\thetavec) = d\sigma^2 + \expect\brack{2\sigma^2\,\nabla\cdot\gvec(\xvec) + \norm{\gvec(\xvec)}^2}.
+$$
+
+**Step 4: compute the divergence.** For each $j$,
+$\partial(x_j/\norm{\xvec}^2)/\partial x_j = 1/\norm{\xvec}^2 - 2x_j^2/\norm{\xvec}^4$. Summing over $j$ gives
+$d/\norm{\xvec}^2 - 2/\norm{\xvec}^2$, so $\nabla\cdot\gvec = -c(d - 2)/\norm{\xvec}^2$. Also
+$\norm{\gvec}^2 = c^2/\norm{\xvec}^2$. Substituting,
+
+$$
+R(\thetavec) = d\sigma^2 - \paren{2c(d - 2)\sigma^2 - c^2}\,\expect\brack{\frac{1}{\norm{\xvec}^2}}.
+$$
+
+**Step 5: choose $c$.** The bracket $2c(d - 2)\sigma^2 - c^2$ is largest at $c = (d - 2)\sigma^2$, where it equals
+$(d - 2)^2\sigma^4$. That is the James–Stein constant, and
+
+$$
+R_{\text{JS}}(\thetavec) = d\sigma^2 - (d - 2)^2\sigma^4\,\expect\brack{\frac{1}{\norm{\xvec}^2}}.
+$$
+
+**Step 6: check the expectation is finite and positive.** $\norm{\xvec}^2/\sigma^2$ has a noncentral
+<NoteLink to="chi-squared-distribution">chi-squared distribution</NoteLink> with $d$ degrees of freedom, and
+$\expect[1/\norm{\xvec}^2]$ is finite exactly when $d \ge 3$. It is then positive, so
+$R_{\text{JS}}(\thetavec) < d\sigma^2$ for every $\thetavec$. In one or two dimensions the expectation is infinite and
+the argument fails. The observations are in fact admissible for $d \le 2$.
+
+The quantity inside the expectation, $d\sigma^2 - (d - 2)^2\sigma^4/\norm{\xvec}^2$, is an unbiased estimate of the
+risk computed from the data alone. It is the first instance of
+<NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink>.
+
+**How much is saved.** At $\thetavec = \zeros$, $\norm{\xvec}^2/\sigma^2$ is chi-squared with $d$ degrees of freedom,
+whose reciprocal has mean $1/(d - 2)$. So $R_{\text{JS}}(\zeros) = d\sigma^2 - (d - 2)\sigma^2 = 2\sigma^2$, whatever
+$d$ is. With $d = 50$ means, the risk at the origin falls from $50\sigma^2$ to $2\sigma^2$. For other $\thetavec$,
+Jensen's inequality gives $\expect[1/\norm{\xvec}^2] \ge 1/\expect\norm{\xvec}^2 = 1/(\norm{\thetavec}^2 + d\sigma^2)$,
+and so the upper bound
+
+$$
+R_{\text{JS}}(\thetavec) \le d\sigma^2 - \frac{(d - 2)^2\sigma^4}{\norm{\thetavec}^2 + d\sigma^2}.
+$$
+
+The saving is large when $\norm{\thetavec}^2$ is small compared with $d\sigma^2$, and it vanishes as
+$\norm{\thetavec} \to \infty$.
+
+<Derivation title="Stein's lemma by integration by parts">
+Take one coordinate, $x \sim \Gauss(\theta, \sigma^2)$ with density $\varphi(x)$. The density satisfies
+$\varphi'(x) = -\frac{x - \theta}{\sigma^2}\varphi(x)$. For a function $g$ with $\expect\abs{g'(x)} < \infty$,
+integrate by parts:
+
+$$
+\expect\brack{(x - \theta)g(x)} = \int (x - \theta)\varphi(x)g(x)\,dx = -\sigma^2\int \varphi'(x)g(x)\,dx =
+\sigma^2\int \varphi(x)g'(x)\,dx = \sigma^2\,\expect\brack{g'(x)}.
+$$
+
+The boundary term $-\sigma^2[\varphi g]_{-\infty}^{\infty}$ vanishes because $\varphi$ decays faster than $g$ grows
+under the integrability condition. In $d$ dimensions apply this to coordinate $j$ of $(\xvec - \thetavec)^\top\gvec$,
+holding the other coordinates fixed (they are independent of $x_j$), and sum over $j$. For
+$\gvec = -c\xvec/\norm{\xvec}^2$ the singularity at the origin is integrable when $d \ge 3$.
+</Derivation>
+
+## The empirical Bayes view
+
+Efron and Morris explained the estimator as an estimated Bayes rule <Cite id="efron1973" />. Suppose the means are
+themselves drawn from a prior, $\theta_j \sim \Gauss(0, \tau^2)$ independently. The posterior mean of each
+$\theta_j$ given $x_j$ is
+
+$$
+\expect[\theta_j \mid x_j] = (1 - B)\,x_j, \qquad B = \frac{\sigma^2}{\sigma^2 + \tau^2}.
+$$
+
+The shrinkage factor $B$ depends on the unknown prior variance $\tau^2$. The data estimate it. Marginally,
+$x_j \sim \Gauss(0, \sigma^2 + \tau^2)$, so $\norm{\xvec}^2/(\sigma^2 + \tau^2)$ is chi-squared with $d$ degrees of
+freedom and $\expect[(d - 2)/\norm{\xvec}^2] = 1/(\sigma^2 + \tau^2)$. Therefore $(d - 2)\sigma^2/\norm{\xvec}^2$ is an
+unbiased estimate of $B$. Plugging it into the posterior mean gives the James–Stein estimator.
+
+This view prices the estimation of $B$. The Bayes rule with known $\tau^2$ has average risk $d\sigma^2(1 - B)$.
+Averaging $R_{\text{JS}}$ over the prior uses the same expectation, $\expect[1/\norm{\xvec}^2] = 1/((d - 2)(\sigma^2 +
+\tau^2))$, and gives
+
+$$
+\expect_{\thetavec} R_{\text{JS}}(\thetavec) = d\sigma^2 - (d - 2)\sigma^2 B = d\sigma^2(1 - B) + 2\sigma^2 B.
+$$
+
+Not knowing $\tau^2$ costs $2\sigma^2 B$, at most $2\sigma^2$, however large $d$ is. The James–Stein estimator is
+<NoteLink to="empirical-bayes-for-hyperparameters">empirical Bayes</NoteLink> with a single hyperparameter, and the
+<NoteLink to="hierarchical-models">hierarchical model</NoteLink> is its fully Bayesian counterpart, which averages over
+$\tau$ instead of plugging in an estimate.
+
+## Worked example
+
+Take $d = 5$ means $\thetavec = (1, 1, 0, -1, 0.5)$ with $\sigma^2 = 1$, so $\norm{\thetavec}^2 = 3.25$. One draw of
+the noise is $(0.6, -1.2, 0.9, 0.3, -0.8)$, giving
+
+$$
+\xvec = (1.6, -0.2, 0.9, -0.7, -0.3), \qquad \norm{\xvec}^2 = 3.99.
+$$
+
+1. **The factor.** $1 - (d - 2)\sigma^2/\norm{\xvec}^2 = 1 - 3/3.99 = 0.248$. The data are barely longer than pure
+   noise would be ($d\sigma^2 = 5$ on average), so the estimator keeps a quarter of each observation.
+2. **The estimate.** $\hat\thetavec_{\text{JS}} = 0.248\,\xvec = (0.397, -0.050, 0.223, -0.174, -0.074)$.
+3. **The losses.** The observations have total squared error $\norm{\xvec - \thetavec}^2 = 0.36 + 1.44 + 0.81 + 0.09 +
+   0.64 = 3.34$. The James–Stein estimate has $0.364 + 1.102 + 0.050 + 0.683 + 0.330 = 2.53$.
+4. **Coordinate by coordinate.** Three coordinates improve and two get worse. The fourth, observed at $-0.7$ with truth
+   $-1$, had error $0.09$ and now has $0.68$. The guarantee is about the total, never about one coordinate.
+5. **The risk at this $\thetavec$.** Averaged over the noise, the observations have risk $d\sigma^2 = 5$. The
+   Jensen bound gives $R_{\text{JS}} \le 5 - 9/(3.25 + 5) = 3.91$. The exact value, from the noncentral chi-squared
+   distribution, is $3.29$.
+
+The figure computes the exact risk and a simulation of it for any $d$ and $\norm{\thetavec}$.
+
+<SteinRisk />
+
+## Assumptions
+
+- **Known noise variance.** The factor uses $\sigma^2$. With an independent estimate $s^2$ on $\nu$ degrees of freedom,
+  replacing $\sigma^2$ by $\nu s^2/(\nu + 2)$ keeps domination <Cite id="james1961" />.
+- **Equal variances and summed squared error.** The risk is the unweighted total over coordinates. With unequal
+  variances or a weighted loss the constant and the conditions change.
+- **Three or more means.** For $d \le 2$ the observations are admissible and no shrinkage dominates them.
+
+## Pitfalls
+
+- **Total risk, not individual risk.** A coordinate whose mean is far from the others is pulled towards them and can be
+  estimated much worse: its own risk can reach about $d/4$ times that of $x_j$. In Efron and Morris's batting averages
+  for $d = 18$ players, Stein's rule had a total squared error 3.5 times smaller than the raw averages, yet moved the
+  exceptional hitter Roberto Clemente by 1.56 standard deviations. Their limited-translation rule, which caps how far
+  any one coordinate may move, cut the largest coordinate risk from 4.60 to 1.52 while keeping 80 percent of the total
+  saving <Cite id="efron1975" />.
+- **The target must be fixed before the data are seen.** Shrinking towards a point chosen after looking at $\xvec$
+  reuses the data and voids the guarantee. Shrinking towards $\xvec$ itself does nothing. A target estimated from the
+  data, such as the grand mean, must be paid for in the constant: $d - 3$ instead of $d - 2$.
+- **The plain estimator can overshoot.** When $\norm{\xvec}^2 < (d - 2)\sigma^2$ the factor is negative and the estimate
+  changes sign. Use the positive part.
+- **Shrinkage is not a confidence statement.** The risk improvement is about the expected loss of the point estimate.
+  Intervals centred on $\hat\thetavec_{\text{JS}}$ with width from $\sigma$ alone do not have their nominal coverage
+  for every coordinate.

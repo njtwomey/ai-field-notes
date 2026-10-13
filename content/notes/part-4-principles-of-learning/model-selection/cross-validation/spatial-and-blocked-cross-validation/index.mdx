@@ -1,0 +1,172 @@
+---
+title: 'Spatial and blocked cross-validation'
+kind: technique
+summary: 'Blocked cross-validation holds out contiguous blocks of space or time, and buffered leave-one-out also drops training points near each test point. Under autocorrelation, random folds measure interpolation error and understate the error of predicting far from the data.'
+tags: [model-selection, evaluation, leakage, spatial, resampling, worked-example]
+aliases: [blocked cross-validation, block cross-validation, spatial block cross-validation, buffered leave-one-out, spatial leave-one-out cross-validation, h-block cross-validation, hv-block cross-validation, nearest-neighbour distance matching]
+requires: [k-fold-cross-validation, grouped-cross-validation]
+related: [time-series-cross-validation, temporal-splits, matching-the-split-to-deployment, gaussian-process, spatial-features, what-cross-validation-estimates, data-leakage]
+references: [roberts2017cv, valavi2019, lerest2014, burman1994, racine2000, mila2022, linnenbrink2024, ploton2020, wadoux2021]
+status: draft
+updated: 2026-10-13
+---
+
+import { SpatialBlocks } from './SpatialBlocks'
+
+<Definition>
+Let each example $(\xvec_i, y_i)$, $i = 1, \dots, n$, carry a location $\svec_i$ in space or time. **Blocked
+cross-validation** partitions the region into contiguous blocks, assigns
+whole blocks to $K$ folds, and runs $K$-fold cross-validation on those folds. **Buffered leave-one-out** predicts each
+point $i$ from a model fitted to the points farther than a radius $r$ from $\svec_i$. Both keep test points away from
+the training points, so that the estimate measures prediction at a distance like the one at which the model will be used
+<Cite id="roberts2017cv" />.
+</Definition>
+
+## Problem
+
+Measurements taken close together in space or time are usually alike. Soil carbon at two sites 10 m apart, the
+temperature on consecutive days and the land cover of neighbouring pixels are correlated. This dependence is called
+**autocorrelation**: the correlation $\rho(d)$ between two residuals is a function of the distance $d$ between their
+locations, and it falls towards 0 as $d$ grows. The distance at which it becomes negligible is the **range**.
+
+Random $K$-fold cross-validation assigns points to folds without regard to location. Every test point then has
+training points at about the typical spacing of the sample. A flexible model can predict the test point from those
+neighbours. It does so through the residual that the neighbours share, which a model fitted far away cannot use. The
+cross-validation error is then an estimate of the **interpolation error**: the error at new points scattered among the
+training points.
+
+Many models are used elsewhere: a species-distribution model projected to a new region, a biomass map extrapolated
+across a continent, a forecaster run on next month. There the nearest training point is far away, the residuals no
+longer correlate, and the error is larger. A random-fold estimate of it is optimistic. Ploton et al. found that a
+<NoteLink to="random-forest">random forest</NoteLink> predicting forest biomass in central Africa explained more than
+half the variance under random cross-validation and almost none under spatial validation <Cite id="ploton2020" />.
+
+The same optimism corrupts selection. Random folds reward the models that exploit neighbours best: large ensembles of
+deep trees, <NoteLink to="nearest-neighbours">nearest neighbours</NoteLink>, and inputs that encode location. Selection
+by random folds can therefore pick a model that transfers worse than its rivals <Cite id="valavi2019" />.
+
+## Mechanism
+
+### What random folds measure
+
+Take a target that is a smooth residual field plus independent noise, $y(\svec) = r(\svec) + \varepsilon$. The field
+$r$ has mean 0, variance $\sigma_r^2$ and correlation $\rho(d)$ at distance $d$. The noise $\varepsilon$ has variance
+$\sigma_\varepsilon^2$ and is independent of everything else. Predict $y$ at a new location $\svec_0$ by the value
+$y_j$ at the nearest training location $\svec_j$, which is at distance $d$ from $\svec_0$. The prediction error is
+$y_0 - y_j = (r_0 - r_j) + (\varepsilon_0 - \varepsilon_j)$. The two brackets are independent and each has mean 0.
+Their variances are $\var(r_0 - r_j) = \sigma_r^2 + \sigma_r^2 - 2\sigma_r^2\rho(d)$ and
+$\var(\varepsilon_0 - \varepsilon_j) = 2\sigma_\varepsilon^2$. So the expected squared error is
+
+$$
+\expect\brack{(y_0 - y_j)^2} = 2\sigma_r^2\paren{1 - \rho(d)} + 2\sigma_\varepsilon^2.
+$$
+
+The error depends on the data only through the distance $d$ from the test point to the training data. Close
+neighbours ($\rho(d) \approx 1$) make the error nearly $2\sigma_\varepsilon^2$. Distant ones ($\rho(d) \approx 0$) make
+it $2\sigma_r^2 + 2\sigma_\varepsilon^2$, worse than the constant prediction 0, whose error is
+$\sigma_r^2 + \sigma_\varepsilon^2$. A cross-validation scheme therefore estimates the deployment error when its test
+points sit at the same distances from their training data as the deployment points do. Random folds reproduce the
+distances of interpolation and nothing else.
+
+Real learners are more complicated than copying a neighbour, but the mechanism carries over. Any model that can
+recover a point's residual from nearby points gains from short test distances. The gain needs no location input:
+covariates that vary smoothly in space make nearby points close in feature space too, so a nearest-neighbour or tree
+model finds the same neighbours through the covariates.
+
+### Blocked cross-validation
+
+1. Divide the region into blocks: squares or hexagons of side $b$ in space, contiguous intervals in time, or natural
+   units such as catchments or administrative regions.
+2. Give each point the label of its block, and assign blocks to $K$ folds, at random or balancing the fold sizes.
+3. Run <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink> with the blocks as groups: every
+   block is wholly in one test fold.
+
+A test point in the interior of a held-out block is at least its distance to the block's edge from every training
+point. Larger blocks move test points farther from the training data and raise the estimate. The usual rule sets $b$
+larger than the range of the residual autocorrelation, estimated from an empirical variogram of the residuals of a
+first model <Cite id="roberts2017cv" /> <Cite id="valavi2019" />. Blocking only the test fold leaves the training data
+of the other folds untouched, so the cost is the $K$ fits of ordinary $K$-fold cross-validation.
+
+### Buffered leave-one-out and h-block
+
+Buffered leave-one-out predicts each point $i$ from a model fitted to the points with $\norm{\svec_j - \svec_i} > r$.
+The buffer of radius $r$ removes the near neighbours from the training set, so every test distance is at least $r$
+<Cite id="lerest2014" />. In a <NoteLink to="time-series">time series</NoteLink> the same construction is **h-block**
+cross-validation: delete $h$ observations on each side of the test observation <Cite id="burman1994" />. **hv-block**
+cross-validation tests a block of $2v + 1$ observations with $h$ removed on each side, which makes the selection of a
+model consistent where h-block is not <Cite id="racine2000" />. Rolling-origin evaluation, the standard for forecasting,
+is covered in <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>.
+
+### Matching the deployment distances
+
+The right buffer or block size is set by the use of the model, not by the range alone. Milà et al. match the
+distribution of the nearest-neighbour distances from test points to training points during cross-validation to the
+distribution of the distances from the prediction locations to the training points <Cite id="mila2022" />. Their
+**nearest-neighbour distance matching** (NNDM) leave-one-out removes training points around each test point only as far
+as that matching requires. When the prediction locations lie among the training points, it removes nothing and is
+ordinary leave-one-out. When they lie far away, it acts like a buffer. A $K$-fold version, kNNDM, builds spatial folds
+by the same matching and costs $K$ fits <Cite id="linnenbrink2024" />. The principle is the one in
+<NoteLink to="matching-the-split-to-deployment">matching the split to deployment</NoteLink>: a test point should be as
+new as a deployment point, along the dimension in which it will be new.
+
+<SpatialBlocks />
+
+In the figure, the two horizontal truths come from the same fitted model on fresh points: points scattered in the
+training square (interpolation) and points in the adjacent, unsampled square (extrapolation). Random 5-fold
+cross-validation tracks the first. Blocked cross-validation rises from the random-fold level towards the second as the
+blocks grow, and with the largest blocks it can overshoot it: those folds train on fewer, more distant points than the
+final model.
+
+## Worked example
+
+Let the residual field have $\sigma_r^2 = 1$ and an exponential correlation $\rho(d) = e^{-d/\ell}$ with range
+parameter $\ell = 0.2$. Let the noise variance be $\sigma_\varepsilon^2 = 0.25$. Take $n = 100$ training sites spread
+uniformly over the unit square. The model predicts each site by its nearest training site.
+
+1. **Random leave-one-out.** For points scattered uniformly at density $n$ per unit area, the mean distance to the
+   nearest neighbour, ignoring edge effects, is $1/(2\sqrt n) = 0.05$. At $d = 0.05$, $\rho = e^{-0.25} = 0.779$. The
+   error is $2(1 - 0.779) + 2(0.25) = 0.94$.
+2. **Deployment 0.3 away.** The model will map a region whose points are about $0.3$ from the nearest training site.
+   At $d = 0.3$, $\rho = e^{-1.5} = 0.223$, and the error is $2(1 - 0.223) + 0.5 = 2.05$.
+3. **The constant model.** Predicting 0 everywhere has error $\sigma_r^2 + \sigma_\varepsilon^2 = 1.25$ at any
+   distance.
+4. **Buffered leave-one-out with $r = 0.3$.** Each held-out site is predicted from sites at least 0.3 away, so its
+   nearest-neighbour distance is about 0.3, and the estimate is about 2.05.
+
+Random leave-one-out rates the nearest-neighbour model better than the constant (0.94 against 1.25). Buffered
+leave-one-out, matched to the deployment distance, rates it worse (2.05 against 1.25), which is the true ordering at
+the deployment sites. The random estimate is wrong about the size of the error and about which model to choose.
+
+## Cost
+
+Blocked $K$-fold cross-validation costs $K$ fits, like ordinary $K$-fold. Buffered and NNDM leave-one-out cost one
+fit per test point, $n$ in all, with a different training set for each, so the linear-smoother shortcut of
+<NoteLink to="leave-one-out-cross-validation">leave-one-out cross-validation</NoteLink> does not apply. kNNDM brings
+the cost back to $K$ fits.
+
+## Trade-offs
+
+- **Pessimism from large blocks.** Large blocks remove whole parts of the covariate space from each training fold.
+  The test fold then asks the model to extrapolate in its inputs as well as in space, which the final model, trained on
+  every block, may never have to do. The estimate can exceed the deployment error.
+- **Fewer, unequal folds.** Large blocks give few groups. Folds then differ in size and in their mix of conditions,
+  which raises the variance of the estimate.
+- **The target decides the scheme.** When the model will map the same region from which a probability sample (a random
+  or stratified random design) was drawn, the deployment points are interpolation points. Design-based estimates from
+  the sample are then unbiased for the map's accuracy, random cross-validation comes close to them, and spatial
+  cross-validation overstates the error <Cite id="wadoux2021" />. Blocking helps when the prediction locations are
+  farther from the data than the sample's own spacing: a new region, a clustered sample with gaps, or the future.
+
+## Pitfalls
+
+- **Dropping coordinates does not remove the leak.** Covariates that are themselves spatially smooth carry location.
+  Turn off "coordinates as features" in the figure: random cross-validation is still optimistic for the new region.
+- **Tuning with random folds.** Hyperparameters and feature sets chosen by random cross-validation favour models that
+  memorise neighbourhoods. Use the blocked folds for selection as well as for the final estimate, nested if the
+  estimate must be honest about the selection (see <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>).
+- **Blocks smaller than the range.** A grid of blocks narrower than the autocorrelation range leaves test points
+  correlated with training points across the block edges. The estimate stays optimistic.
+- **Preprocessing across the split.** Smoothing, gap filling or spatial interpolation of inputs computed on the whole
+  map before splitting carries test-block information into training. Fit them inside the folds, as in
+  <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>.

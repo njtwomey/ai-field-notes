@@ -1,0 +1,209 @@
+---
+title: 'Nearest-neighbour consistency'
+kind: concept
+summary: 'As the sample grows, the 1-nearest-neighbour risk tends to $\expect[2\eta(1 - \eta)]$, between the Bayes risk $R^*$ and $2R^*(1 - R^*)$. With $k \to \infty$ and $k/m \to 0$, $k$-nearest neighbours is universally consistent, but its rate depends on the smoothness of $\eta$.'
+tags: [learning-theory, consistency, nearest-neighbours, worked-example]
+aliases: [Cover–Hart inequality, asymptotic nearest-neighbour risk, consistency of k-nearest neighbours, k-NN consistency]
+requires: [k-nearest-neighbours, consistency-of-learning-algorithms]
+related: [curse-of-dimensionality-for-neighbours, bayes-decision-rule, minimax-rates-for-nonparametric-regression, fast-rates-and-noise-conditions, rates-and-consistency, hoeffdings-inequality, no-free-lunch-theorem]
+references: [cover1967, fix1989, stone1977, devroye1996, gyorfi2002, chaudhuri2014, audibert2007]
+status: draft
+updated: 2026-10-12
+---
+
+import { NearestNeighbourLimit } from './NearestNeighbourLimit'
+
+<Definition>
+For binary labels $y \in \set{0, 1}$ with posterior $\eta(\xvec) = \prob(y = 1 \mid \xvec)$, the
+<NoteLink to="k-nearest-neighbours">$k$-nearest-neighbour rule</NoteLink> predicts the majority label of the $k$
+training points closest to $\xvec$. As the sample size $m$ grows with $k$ fixed, its risk converges to a limit $R_k$
+that depends only on the distribution of $\eta(\xvec)$. For $k = 1$ the limit is
+$R_1 = \expect[2\eta(\xvec)(1 - \eta(\xvec))]$, which satisfies $R^* \le R_1 \le 2R^*(1 - R^*)$ <Cite id="cover1967" />.
+If instead $k \to \infty$ and $k/m \to 0$, the risk converges to the <NoteLink to="bayes-decision-rule">Bayes
+risk</NoteLink> $R^*$ for every distribution <Cite id="stone1977" />.
+</Definition>
+
+## Intuition
+
+The nearest-neighbour rule makes two approximations at a query $\xvec$. It uses the label of a nearby point $\xvec'$ in
+place of a label at $\xvec$, and it uses one label in place of the posterior $\eta(\xvec)$. More data fixes the first:
+the nearest neighbour comes ever closer, and $\eta(\xvec')$ approaches $\eta(\xvec)$. More data does not fix the
+second: the neighbour's label is still one coin flip with probability $\eta(\xvec')$. A rule that copies one coin flip
+errs whenever that flip and the test label disagree, which happens with probability about $2\eta(1 - \eta)$. The Bayes
+rule errs with probability $\min(\eta, 1 - \eta)$.
+
+Averaging $k$ labels attacks the second approximation, because a majority of $k$ flips agrees with the Bayes decision
+with high probability. Letting $k$ grow removes it in the limit. Letting $k/m$ shrink keeps all $k$ neighbours close,
+so the first approximation is still fixed. Both together give
+<NoteLink to="consistency-of-learning-algorithms">universal consistency</NoteLink>, which Stone's theorem states for
+general local averaging rules. This note derives the two limits and the rate at which $k$-NN approaches $R^*$.
+
+<NearestNeighbourLimit />
+
+## The Cover–Hart limit
+
+Let $(\xvec, y)$ be a test pair and $\xvec'_m$ the nearest of $m$ independent training inputs to $\xvec$, with label
+$y'_m$. The 1-NN rule predicts $y'_m$, and its risk is $R(h_m) = \prob(y'_m \ne y)$. The derivation has three steps
+<Cite id="cover1967" />.
+
+1. **The nearest neighbour converges to the query.** Fix $\xvec$ in the support of the input distribution $\mu$ and a
+   radius $\rho > 0$. The ball of radius $\rho$ around $\xvec$ has mass $p = \mu(B(\xvec, \rho)) > 0$. All $m$ training
+   inputs miss it with probability $(1 - p)^m \to 0$. Hence $\norm{\xvec'_m - \xvec} \to 0$ in probability.
+2. **Given the inputs, the two labels are independent Bernoulli variables.** The test label has
+   $\prob(y = 1) = \eta(\xvec)$ and the neighbour's label has $\prob(y'_m = 1) = \eta(\xvec'_m)$. They disagree with
+   probability
+
+   $$
+   \eta(\xvec)\paren{1 - \eta(\xvec'_m)} + \paren{1 - \eta(\xvec)}\eta(\xvec'_m).
+   $$
+
+3. **Pass to the limit.** If $\eta$ is continuous at $\xvec$, step 1 gives $\eta(\xvec'_m) \to \eta(\xvec)$, and the
+   disagreement probability tends to $2\eta(\xvec)(1 - \eta(\xvec))$. The probabilities lie in $[0, 1]$, so dominated
+   convergence passes the limit through the expectation over $\xvec$:
+
+   $$
+   \lim_{m \to \infty} \expect[R(h_m)] = R_1 = \expect\brack{2\eta(\xvec)(1 - \eta(\xvec))}.
+   $$
+
+Continuity of $\eta$ is not needed. Devroye, Györfi and Lugosi prove the same limit for every distribution on
+$\reals^d$, using the fact that a measurable $\eta$ is approximated by continuous functions in $L_1(\mu)$
+<Cite id="devroye1996" />.
+
+**The bounds on $R_1$.** Write $r(\xvec) = \min(\eta(\xvec), 1 - \eta(\xvec))$, the Bayes error at $\xvec$, so
+$R^* = \expect[r]$ and $2\eta(1 - \eta) = 2r(1 - r)$.
+
+- **Lower bound.** $2r(1 - r) \ge r$ because $r \le \frac12$. Hence $R_1 \ge R^*$, with equality only if $r$ takes
+  the values 0 and $\frac12$ alone.
+- **Upper bound.** $R_1 = 2\expect[r] - 2\expect[r^2]$. <NoteLink to="variance-and-covariance">Variance</NoteLink> is
+  non-negative, so $\expect[r^2] \ge (\expect r)^2 = (R^*)^2$, and $R_1 \le 2R^* - 2(R^*)^2 = 2R^*(1 - R^*)$. Equality
+  holds when $r$ is constant.
+
+With $M$ classes the same argument gives $R^* \le R_1 \le R^*\paren{2 - \frac{M}{M - 1}R^*}$ <Cite id="cover1967" />.
+The upper bound has a practical reading: half of the error of a 1-NN classifier trained on unlimited data is an upper
+bound on the error of any classifier for the same problem.
+
+## Fixed k
+
+For odd $k$ the limit argument is the same, with $k$ neighbours that all converge to $\xvec$ and carry independent
+labels. At an input with Bayes error $r = \min(\eta, 1 - \eta)$, the majority of the $k$ labels is the minority label
+with probability $q_k = \prob(\operatorname{Bin}(k, r) > k/2)$. In that case the rule errs with probability $1 - r$;
+otherwise it errs with probability $r$. The asymptotic conditional error is
+
+$$
+r_k = r + (1 - 2r)\,q_k.
+$$
+
+For $k = 1$, $q_1 = r$ and $r_1 = 2r(1 - r)$, the Cover–Hart value. A uniform bound on the excess follows from
+<NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>. The minority count exceeds $k/2$ only if the
+mean of $k$ independent Bernoulli labels with mean $r$ exceeds $\frac12$, so $q_k \le \exp(-2k(\frac12 - r)^2)$. With
+$u = 1 - 2r$,
+
+$$
+r_k - r \le u\,e^{-ku^2/2} \le \frac{1}{\sqrt{ke}},
+$$
+
+where the last step maximises over $u$ at $u = 1/\sqrt k$. Averaging over $\xvec$ gives
+$R_k - R^* \le 1/\sqrt{ke}$ for every distribution. The excess vanishes as $k$ grows, but for any fixed $k$ some
+distribution, with $\eta$ near $\frac12 \pm 1/(2\sqrt k)$, keeps it near this level.
+
+## Universal consistency of k-NN
+
+**Theorem** <Cite id="stone1977" /> <Cite id="devroye1996" />. If $k \to \infty$ and $k/m \to 0$, the $k$-NN rule is
+universally consistent: $\expect[R(h_m)] \to R^*$ for every distribution of $(\xvec, y)$ on $\reals^d \times
+\set{0, 1}$.
+
+The consistency note derives this from Stone's three conditions on local weights. A direct argument shows where each
+condition on $k$ enters. Let $\hat\eta(\xvec)$ be the fraction of ones among the $k$ nearest labels and
+$\tilde\eta(\xvec)$ the average of $\eta$ over the $k$ nearest inputs.
+
+1. **Plug-in.** The rule predicts 1 when $\hat\eta > \frac12$. It differs from the Bayes rule only where $\hat\eta$ and
+   $\eta$ lie on opposite sides of $\frac12$, and there $\abs{2\eta - 1} \le 2\abs{\hat\eta - \eta}$. The
+   <NoteLink to="empirical-risk-minimisation">excess risk</NoteLink> is the expected weight $\abs{2\eta - 1}$ of those
+   inputs, so $R(h_m) - R^* \le 2\expect\abs{\hat\eta(\xvec) - \eta(\xvec)}$ <Cite id="devroye1996" />.
+2. **Split.** By the triangle inequality,
+   $\expect\abs{\hat\eta - \eta} \le \expect\abs{\hat\eta - \tilde\eta} + \expect\abs{\tilde\eta - \eta}$.
+3. **Variance.** Given the inputs, $\hat\eta - \tilde\eta$ is a mean of $k$ independent centred terms, each with
+   variance at most $\frac14$. By Jensen's inequality,
+   $\expect\abs{\hat\eta - \tilde\eta} \le \sqrt{\expect(\hat\eta - \tilde\eta)^2} \le 1/(2\sqrt k)$. This term
+   vanishes when $k \to \infty$.
+4. **Bias.** The $k$ <NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> lie within the distance to the
+   $k$-th nearest, which tends to 0 when $k/m \to 0$, by the argument of step 1 of the Cover–Hart limit with $k$ points
+   in place of one. For a continuous $\eta$ on a bounded domain this makes $\expect\abs{\tilde\eta - \eta} \to 0$. A
+   general $\eta$ is approximated by a continuous one, and Stone's lemma bounds how much weight a single training point
+   can carry <Cite id="devroye1996" />.
+
+## Rates
+
+Universal consistency comes without a rate: for any rule and any sequence decreasing to zero, some distribution makes
+the risk converge more slowly (<NoteLink to="consistency-of-learning-algorithms">no uniform rate</NoteLink>). Rates
+need assumptions on $\eta$ and $\mu$.
+
+**Lipschitz posterior.** Let $\abs{\eta(\xvec) - \eta(\xvec')} \le L\norm{\xvec - \xvec'}$ and let $\xvec$ have a
+density bounded below on $[0, 1]^d$. The $k$ nearest neighbours lie within a distance of order $(k/m)^{1/d}$, so the
+bias in step 4 is of order $L(k/m)^{1/d}$, and the variance term is $1/(2\sqrt k)$. The plug-in bound becomes
+
+$$
+R(h_m) - R^* \lesssim L\paren{\frac km}^{1/d} + \frac{1}{\sqrt k}.
+$$
+
+Balancing the two terms gives $k \propto m^{2/(d + 2)}$ and an excess risk of order $m^{-1/(d + 2)}$
+<Cite id="gyorfi2002" />. The exponent falls with dimension, which is the
+<NoteLink to="curse-of-dimensionality-for-neighbours">curse of dimensionality</NoteLink> for neighbour methods in its
+quantitative form.
+
+**Low noise.** The plug-in bound charges $2\abs{\hat\eta - \eta}$ at every input, although the rule differs from the
+Bayes rule only where $\abs{2\eta - 1} \le 2\abs{\hat\eta - \eta}$, that is, near the boundary $\eta = \frac12$. Under
+the <NoteLink to="fast-rates-and-noise-conditions">Tsybakov noise condition</NoteLink> with exponent $\alpha$, plug-in
+classifiers built on a good estimate of $\eta$ reach faster rates. If $\eta$ has Hölder smoothness $s$ on $\reals^d$ and
+$\xvec$ has a density bounded above and below, a plug-in rule reaches $m^{-s(1 + \alpha)/(2s + d)}$, and this is the
+<NoteLink to="minimax-lower-bounds">minimax rate</NoteLink>. When $\alpha s > d$ it is faster than $1/m$
+<Cite id="audibert2007" />. Chaudhuri and Dasgupta give $k$-NN rates in terms of a smoothness condition stated through
+the probability mass of balls, which adapts to the input distribution and avoids assuming a density
+<Cite id="chaudhuri2014" />.
+
+## Worked example
+
+**Fixed $k$ at three noise levels.** Suppose every input has the same Bayes error $r$, so $R^* = r$. The asymptotic
+risk $R_k = r + (1 - 2r)q_k$ is
+
+| $r = R^*$ | $k = 1$ | $k = 3$ | $k = 11$ | $k = 51$ |
+| --- | --- | --- | --- | --- |
+| 0.1 | 0.180 | 0.122 | 0.1002 | 0.1000 |
+| 0.3 | 0.420 | 0.386 | 0.331 | 0.3005 |
+| 0.4 | 0.480 | 0.470 | 0.449 | 0.415 |
+
+1. **The Cover–Hart bound is attained.** With constant $r$, $R_1 = 2r(1 - r)$: 0.18 at $r = 0.1$.
+2. **At low noise a few neighbours remove most of the excess.** At $r = 0.1$, three neighbours remove three quarters of
+   the excess, and eleven remove almost all of it.
+3. **High noise is expensive.** At $r = 0.4$ the excess at $k = 11$ is still 0.049, and at $k = 51$ still 0.015. The
+   uniform bound $1/\sqrt{ke}$ is 0.18 at $k = 11$ and 0.085 at $k = 51$. It is loose for these three problems and
+   attained only by problems with $r$ close to $\frac12 - 1/(2\sqrt k)$.
+
+**A finite-sample bound.** Take $d = 1$, $\xvec$ uniform on $[0, 1]$ and $\eta$ with Lipschitz constant $L = 1$. The
+$k$ nearest neighbours of an interior point lie within about $k/2m$ of it, so steps 1–4 give
+
+$$
+R(h_m) - R^* \le 2\paren{\frac{Lk}{2m} + \frac{1}{2\sqrt k}} = \frac{Lk}{m} + \frac{1}{\sqrt k}.
+$$
+
+1. **Choose $k$.** The derivative $L/m - \frac12k^{-3/2}$ vanishes at $k = (m/2L)^{2/3}$. At $m = 10{,}000$ that is
+   $k = 292$.
+2. **Evaluate.** The bound is $292/10{,}000 + 1/\sqrt{292} = 0.029 + 0.059 = 0.088$. It is not vacuous.
+3. **Sample size.** At the best $k$ the bound equals $(2^{-2/3} + 2^{1/3})(L/m)^{1/3} = 1.89\,(L/m)^{1/3}$. An excess
+   risk of 0.05 needs $m \approx 54{,}000$, and 0.01 needs $m \approx 6.8$ million. Without an assumption about the
+   noise near the boundary, the bound decreases only as $m^{-1/3}$.
+
+## Pitfalls
+
+- **1-NN is not consistent.** Its risk levels off at $R_1 > R^*$ whenever some inputs have $\eta$ strictly between 0
+  and $\frac12$ or $\frac12$ and 1. A 1-NN classifier that performs well in practice does so because the noise is low.
+- **Consistency is not a rate.** $k = \sqrt m$ is consistent in every dimension, but in ten dimensions the bias term
+  falls like $m^{-1/20}$ on a Lipschitz problem.
+- **The risk depends on the metric.** The theory assumes a fixed metric. Rescaling one feature changes which points are
+  neighbours, and so the risk at every finite $m$.
+- **Ties.** With even $k$ or tied distances the rule needs a tie-breaking convention, and the formulas above change by
+  terms that vanish as $k$ grows <Cite id="devroye1996" />.
+
+{/* figure pending engine (C1 nearestNeighbourConsistency): k-NN classification risk against m for a known η, for
+k = 1, fixed k and k ∝ √m, beside R* and the Cover–Hart limit E[2η(1 − η)]; exhaustive k-NN at m in the thousands is
+too slow for the main thread and needs a worker-registered study */}

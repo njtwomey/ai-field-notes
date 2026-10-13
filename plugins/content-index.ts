@@ -398,9 +398,12 @@ export function buildIndex(
     for (const s of e.see.filter((s) => !slugs.has(s))) errors.push(`${where}: see → unknown note "${s}"`)
     if (e.note && e.see.includes(e.note)) errors.push(`${where}: "${e.note}" is both note and see`)
     // A note whose slug or title names the entry is the entry's note: the mapping is declared, never left implicit.
+    // When several notes match (a concept and the topic overview named by its plural), the entry names one of them.
     const direct = glossNoteMatches(e, notesByName, glossary)
-    for (const s of direct.filter((s) => s !== e.note))
-      errors.push(`${where}: note "${s}" is titled by this entry; set note: ${s}${e.note ? ` (now ${e.note})` : ''}`)
+    if (direct.length && !(e.note && direct.includes(e.note)))
+      errors.push(
+        `${where}: note "${direct[0]}" is titled by this entry; set note: ${direct.join(' or ')}${e.note ? ` (now ${e.note})` : ''}`,
+      )
     for (const c of e.category) if (!categoryPaths.has(c)) errors.push(`${where}: unknown category "${c}"`)
     for (const text of [e.definition, e.short, e.long, e.longPlural]) {
       if (text) errors.push(...mathErrors(text).map((m) => `${where}: ${m}`))

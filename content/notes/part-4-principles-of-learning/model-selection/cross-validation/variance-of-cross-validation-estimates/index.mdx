@@ -1,0 +1,190 @@
+---
+title: 'Variance of cross-validation estimates'
+kind: concept
+summary: 'The fold errors of $K$-fold cross-validation are correlated because their training sets overlap, so the naive standard error is too small, and no unbiased estimator of the variance exists. Nested schemes give intervals with close to nominal coverage.'
+tags: [model-selection, evaluation, uncertainty, theory, worked-example]
+aliases: [standard error of cross-validation, cross-validation confidence interval, naive cross-validation standard error, nested cross-validation interval, variance of k-fold cross-validation]
+requires: [k-fold-cross-validation, what-cross-validation-estimates, standard-error]
+related: [corrected-resampled-t-test, repeated-and-monte-carlo-cross-validation, five-by-two-cross-validation-test, one-standard-error-rule, nested-cross-validation, confidence-intervals]
+references: [bengio2004, bates2024, nadeau2003, hastie2009]
+status: draft
+updated: 2026-10-13
+---
+
+import { NaiveIntervals } from './NaiveIntervals'
+
+<Definition>
+Let $e_i = \ell(y_i, \hat f^{-\kappa(i)}(\xvec_i))$ be the held-out loss of point $i$ in $K$-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink> and $\operatorname{CV} = \frac1n\sum_i e_i$ the estimate.
+Its **variance** $\var(\operatorname{CV})$ is taken over training samples and fold assignments. The **naive standard
+error** treats the $K$ fold means $\bar e_1, \dots, \bar e_K$ as independent: $s/\sqrt K$, where $s$ is their standard
+deviation. Because the folds share training data, the $e_i$ are correlated, the naive standard error is biased low, and
+no estimator computed from one run of cross-validation is unbiased for $\var(\operatorname{CV})$ under every
+distribution <Cite id="bengio2004" />.
+</Definition>
+
+## Intuition
+
+The fold errors look like $K$ independent measurements of one quantity. They are not. Fold 1's model and fold 2's
+model share $(K - 2)/K$ of their training data, and each fold's test points are part of every other fold's training
+set. A training sample that happens to be easy makes all $K$ models good at once; a sample with a few influential
+outliers makes them all bad at once. The fold errors move together from one data set to the next, but within one run
+they agree with each other. Their spread within a run therefore understates how much the average would change on a
+new data set.
+
+The standard error matters wherever cross-validation is used to decide. The
+<NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> uses it to pick a simpler model, a reported
+interval uses it to bound the error, and a comparison of two learners uses it to decide whether a difference is real.
+An underestimate makes all three overconfident.
+
+## Sources of variance
+
+Three random inputs move a cross-validation estimate:
+
+- **the training sample** $\Dcal$, drawn from the population;
+- **the partition** into folds, drawn by the analyst;
+- **the learner's own randomness**, such as initial weights or bootstrap draws.
+
+By the <NoteLink to="law-of-total-expectation">law of total variance</NoteLink>, with the partition and seeds collected
+in $U$,
+
+$$
+\var(\operatorname{CV}) = \var_\Dcal\paren{\expect\brack{\operatorname{CV} \mid \Dcal}} +
+\expect_\Dcal\brack{\var(\operatorname{CV} \mid \Dcal)}.
+$$
+
+The second term is internal: it is the variation from re-running cross-validation on the same data with new folds or
+seeds. <NoteLink to="repeated-and-monte-carlo-cross-validation">Repeated cross-validation</NoteLink> averages it away.
+The first term comes from the data, and no amount of re-partitioning reduces it. Repetition gives a steadier number,
+but its uncertainty as an estimate of the error never falls below the first term.
+
+## The covariance of the fold errors
+
+Bengio and Grandvalet showed that, by symmetry, the covariance matrix of $(e_1, \dots, e_n)$ has only three distinct
+entries when the $K$ folds have equal size $m = n/K$ <Cite id="bengio2004" />:
+
+- $\var(e_i) = \sigma^2$ for every point;
+- $\cov(e_i, e_j) = \omega$ for $i \ne j$ in the same fold, which share one fitted model;
+- $\cov(e_i, e_j) = \gamma$ for $i, j$ in different folds, whose models share $n(K - 2)/K$ training points and each
+  of which trains on the other's test point.
+
+All points have the same mean loss $\mu$. Summing the $n^2$ entries of the covariance matrix and dividing by $n^2$,
+
+$$
+\var(\operatorname{CV}) = \frac{1}{n^2}\paren{n\sigma^2 + n(m - 1)\omega + n(n - m)\gamma}
+= \frac{\sigma^2}{n} + \frac{m - 1}{n}\,\omega + \frac{n - m}{n}\,\gamma.
+$$
+
+The first term is the variance the estimate would have if the $n$ held-out losses were independent. The other two are
+the price of correlation, and both are usually positive.
+
+### The bias of the naive estimate
+
+Work with the fold means $\bar e_k$. Each averages $m$ losses from one fold, so
+$v = \var(\bar e_k) = \sigma^2/m + (m - 1)\omega/m$, and two different fold means have covariance $\gamma$. The estimate
+is their average, so
+
+$$
+\var(\operatorname{CV}) = \var\paren{\frac1K\sum_k \bar e_k} = \frac{1}{K^2}\paren{Kv + K(K - 1)\gamma} = \frac{v}{K} +
+\frac{K - 1}{K}\gamma.
+$$
+
+The naive estimate is $s^2/K$, with $s^2 = \frac{1}{K - 1}\sum_k (\bar e_k - \operatorname{CV})^2$. For exchangeable
+variables with common variance $v$ and common covariance $\gamma$, the sample variance has expectation
+$\expect[s^2] = v - \gamma$: the shared part of the fold means cancels in their deviations from the average. So
+
+$$
+\expect\brack{\frac{s^2}{K}} = \frac{v - \gamma}{K}, \qquad
+\var(\operatorname{CV}) - \expect\brack{\frac{s^2}{K}} = \frac{K - 1}{K}\gamma + \frac{\gamma}{K} = \gamma.
+$$
+
+The naive variance is too small by exactly $\gamma$, the covariance between errors in different folds. The naive
+standard error is honest only when $\gamma = 0$, which needs fold models that do not depend on their training data.
+
+### Why no unbiased estimator exists
+
+The bias would be harmless if $\gamma$ could be estimated from the run. It cannot. Consider any estimator that is a
+quadratic form $\hat\theta = \sum_{i,j} W_{ij}e_ie_j$ in the losses. Group its terms by type: the diagonal terms have
+expectation $\expect[e_i^2] = \sigma^2 + \mu^2$, the same-fold terms $\omega + \mu^2$ and the cross-fold terms
+$\gamma + \mu^2$. With $a$, $b$ and $c$ the sums of the weights $W_{ij}$ of each type,
+
+$$
+\expect[\hat\theta] = a(\sigma^2 + \mu^2) + b(\omega + \mu^2) + c(\gamma + \mu^2).
+$$
+
+For $\expect[\hat\theta] = \var(\operatorname{CV})$ under every distribution, the coefficients of $\sigma^2$,
+$\omega$, $\gamma$ and $\mu^2$ must match:
+
+$$
+a = \frac1n, \qquad b = \frac{m - 1}{n}, \qquad c = \frac{n - m}{n}, \qquad a + b + c = 0.
+$$
+
+The first three sum to $(1 + m - 1 + n - m)/n = 1$, contradicting the fourth. No quadratic estimator is unbiased. An
+estimator that is not quadratic in the losses has an expectation involving their third or higher moments, which
+$\var(\operatorname{CV})$ does not contain, so it cannot be unbiased for all distributions either
+<Cite id="bengio2004" />. The obstruction is the unknown mean $\mu$: the data cannot tell a large common mean from a
+large between-fold covariance.
+
+The theorem does not say the variance cannot be estimated. It says one run of cross-validation does not contain the
+information. A useful estimate needs either assumptions or a different resampling design.
+
+<NaiveIntervals />
+
+## Intervals that work
+
+- **The corrected resampled variance.** For $J$ random train–test splits with $n_1$ training and $n_2$ test points,
+  Nadeau and Bengio multiply the naive variance factor $1/J$ by a correction, using $\paren{1/J + n_2/n_1}$ in place
+  of $1/J$ <Cite id="nadeau2003" />. The added term stands in for the correlation between splits. It is a heuristic
+  calibrated for typical learners, not an unbiased estimate; see the
+  <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink>.
+- **Nested cross-validation for the interval** <Cite id="bates2024" />. Split the data into a training part and a
+  holdout fold. Let $A$ be the cross-validation estimate computed inside the training part, $\bar e^\text{out}$ the mean
+  loss on the holdout of the model fitted to the whole training part, and $E$ that model's conditional error. Given the
+  training part, $\bar e^\text{out} - E$ has mean 0 and is independent of $A$, so
+  $\expect[(A - \bar e^\text{out})^2] = \expect[(A - E)^2] + \expect[(\bar e^\text{out} - E)^2]$. The left side is
+  observable; the last term is the variance of a mean of independent holdout losses, estimated by their sample variance
+  divided by the holdout size. Their difference estimates the <Gloss name="mse">mean squared error</Gloss> of
+  cross-validation. Repeating over many random splits and every choice of holdout fold, and rescaling by $(K - 1)/K$ for
+  the larger sample, gives intervals with close to nominal coverage in cases where naive intervals miss two to three
+  times too often. Each repetition costs about $K$ times the fits of one plain cross-validation, and Bates, Hastie and
+  Tibshirani use 200 repetitions.
+- **Paired designs for comparisons.** To compare two learners, cross-validate both on the same folds and work with the
+  per-fold differences. Their variance is smaller than either learner's when the two learners err on the same points,
+  but the differences are still correlated across folds, so the tests built on them correct the variance; see
+  <NoteLink to="five-by-two-cross-validation-test">the 5×2 cross-validation test</NoteLink>.
+
+{/* figure pending engine (nestedCvInterval, sketched in logs/ms-cv-estimates.md): coverage of the naive interval against Bates, Hastie and Tibshirani's nested-CV interval over replicate data sets, with the conditional and expected errors as targets */}
+
+## Worked example
+
+Take least squares on $p = 20$ standard-normal inputs with $y = x_1 + \dots + x_5 + \varepsilon$, $\sigma^2 = 1$,
+$n = 100$ rows and $K = 10$ folds, so each fold holds $m = 10$ points. Simulate 1000 training sets, and on each record
+$\operatorname{CV}$, its naive standard error $s/\sqrt{10}$ and the conditional error of the fitted model on fresh data.
+
+1. **The actual spread.** Across the 1000 data sets, $\operatorname{CV}$ has standard deviation 0.210, so
+   $\var(\operatorname{CV}) = 0.0443$.
+2. **The naive estimate.** The average of $s^2/K$ over the data sets is 0.0334, and the average naive standard error is
+   0.175. The naive variance captures 75% of the true variance.
+3. **The between-fold covariance.** By the bias formula, $\gamma \approx 0.0443 - 0.0334 = 0.011$. As a correlation
+   between fold means, it is $\gamma/v$ with $v = K\var(\operatorname{CV}) - (K - 1)\gamma \approx 0.344$, about 0.03.
+   A correlation that small between any two folds still costs a quarter of the variance, because the 45 pairs of folds
+   each contribute it.
+4. **Coverage.** The interval $\operatorname{CV} \pm 1.645\,s/\sqrt K$ should cover its target 90% of the time. It
+   covers the expected error $\operatorname{Err} \approx 1.26$ in 81% of the data sets and the conditional error
+   $\operatorname{Err}_\Dcal$ in 78%. Part of the miss comes from the variance shortfall and part from the bias of
+   $+0.03$ from training on 90 rows.
+
+The figure repeats this experiment and lets the learner, the sizes and $K$ vary.
+
+## Pitfalls
+
+- **Treating fold errors as independent in a test.** A <NoteLink to="paired-t-test">paired t-test</NoteLink> on the $K$
+  fold differences between two learners inherits the same underestimate and rejects too often <Cite id="nadeau2003" />.
+- **Repeating to shrink the standard error.** Averaging $r$ repetitions reduces only the partition term. Dividing the
+  spread of all $rK$ fold errors by $\sqrt{rK}$ makes the naive interval narrower while its target stays as uncertain.
+- **Leave-one-out standard errors.** With $K = n$ every pair of models shares $n - 2$ points, $\gamma$ is close to the
+  full covariance, and the naive formula is at its worst. Leave-one-out is also high in variance for unstable learners
+  <Cite id="hastie2009" />.
+- **Forgetting selection.** The standard error at the minimum of a cross-validation curve does not account for the
+  minimum having been chosen; see <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>.

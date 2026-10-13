@@ -1,0 +1,82 @@
+---
+title: 'Automatic differentiation'
+kind: overview
+summary: 'Exact derivatives of programs by the chain rule: forward mode with dual numbers, reverse mode (backpropagation), Jacobian-vector products, tapes, source transformation and gradient checkpointing.'
+tags: [automatic-differentiation, calculus, software]
+aliases: [algorithmic differentiation]
+requires: [multivariable-chain-rule]
+related: [functions-of-several-variables, first-order-methods]
+references: [griewank2008, baydin2018]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Automatic differentiation computes the derivatives of a function given as a computer program. It applies the chain rule
+to the elementary operations the program executes, so the result is exact up to floating-point rounding. It is neither
+symbolic differentiation, which manipulates formulas, nor numerical differentiation, which takes
+<Gloss name="finite-difference">finite differences</Gloss> <Cite id="griewank2008" /> <Cite id="baydin2018" />.
+</Definition>
+
+## What it is for
+
+Training a model by gradient descent needs the gradient of a scalar loss with respect to millions or billions of
+parameters at every step. Reverse-mode automatic differentiation delivers that gradient for a small constant multiple
+of the cost of evaluating the loss, which makes gradient-based training of neural networks practical. The same machinery
+gives Hessian-vector products for second-order optimisers, Jacobians for sensitivity analysis and implicit layers, and
+derivatives of simulators in physics-informed models. Every deep-learning framework is an automatic differentiation
+system with a library of operations attached.
+
+## Main ideas
+
+**A program is a chain of elementary operations.** Each operation has a known local derivative, and the
+<NoteLink to="multivariable-chain-rule">multivariable chain rule</NoteLink> multiplies them into the derivative of the
+whole program. The order of the multiplication is the only design choice, and it decides the cost.
+
+**Forward mode carries derivatives with values.** <NoteLink to="dual-numbers" /> $a + b\varepsilon$ with
+$\varepsilon^2 = 0$ satisfy $f(a + \varepsilon) = f(a) + f'(a)\,\varepsilon$. Running a program on them is
+<NoteLink to="forward-mode-autodiff">forward-mode automatic differentiation</NoteLink>. One forward pass gives one
+Jacobian-vector product, so forward mode suits functions with few inputs.
+
+**Reverse mode carries sensitivities from the output back.** <NoteLink to="backpropagation">Backpropagation</NoteLink>
+evaluates the chain-rule product from the output end. One backward pass gives one vector-Jacobian product, which for a
+scalar loss is the full gradient. Reverse mode suits functions with many inputs and few outputs, which is the shape of
+every loss.
+
+**Two primitives build everything else.** The note on
+<NoteLink to="jacobian-vector-products-and-higher-order-derivatives" /> shows how an $m \times n$ Jacobian costs $n$
+Jacobian-vector products or $m$ vector-Jacobian products, and how composing the two modes gives Hessian-vector products
+at a small multiple of the cost of the function.
+
+**Tools differ in how they see the program.** <NoteLink to="operator-overloading-and-tapes">Operator overloading with a
+tape</NoteLink> records operations as they run, which handles any control flow.
+<NoteLink to="source-transformation-autodiff" /> writes a derivative program before running, which compiles well but
+must understand the language. Frameworks build their <NoteLink to="static-and-dynamic-computation-graphs">computation
+graphs</NoteLink> before the run, during it, or by tracing once and compiling.
+
+**Reverse mode trades memory for time.** The backward pass needs the intermediate values of the forward pass.
+<NoteLink to="gradient-checkpointing" /> stores only some of them and recomputes the rest, cutting memory on a chain of
+$n$ layers from $n$ to about $2\sqrt{n}$ for one extra forward pass.
+
+## How the notes fit together
+
+Start with <NoteLink to="dual-numbers">dual numbers</NoteLink> and <NoteLink to="forward-mode-autodiff">forward-mode
+automatic differentiation</NoteLink>, the simpler mode. Then read
+<NoteLink to="backpropagation">backpropagation</NoteLink>, which every later note requires. The note on
+<NoteLink to="jacobian-vector-products-and-higher-order-derivatives" /> joins the two modes. The three implementation
+notes, on tapes, source transformation and computation graphs, can be read in any order.
+<NoteLink to="gradient-checkpointing" /> addresses the memory cost of reverse mode in large models. The
+<NoteLink to="history-of-automatic-differentiation">history of automatic differentiation</NoteLink> traces both modes
+from Wengert in 1964 and Linnainmaa in 1970 to the modern frameworks, and compares the tools.
+
+## Prerequisites and next steps
+
+The notes assume the <NoteLink to="multivariable-chain-rule">multivariable chain rule</NoteLink>, the
+<NoteLink to="gradient">gradient</NoteLink> and the <NoteLink to="jacobian" />, all from
+<NoteLink to="functions-of-several-variables">functions of several variables</NoteLink>.
+
+Automatic differentiation is the engine behind <NoteLink to="gradient-descent">gradient descent</NoteLink> and its
+stochastic variants in <NoteLink to="stochastic-optimisation">stochastic optimisation</NoteLink>. The
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink> moves the randomness of a sample outside the
+program so that reverse mode can differentiate through it. <NoteLink to="neural-ordinary-differential-equations" />
+differentiate through an <Gloss name="ode" /> solver with the adjoint method, a continuous form of reverse mode.

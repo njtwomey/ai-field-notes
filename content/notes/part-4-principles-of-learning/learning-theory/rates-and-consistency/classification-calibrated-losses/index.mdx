@@ -1,0 +1,288 @@
+---
+title: 'Classification-calibrated losses'
+kind: concept
+summary: 'A margin loss $\phi$ is classification-calibrated if, at every input, scores of the wrong sign have a strictly larger conditional $\phi$-risk than the best score. Then $\psi(R(f) - R^*) \le R_\phi(f) - R_\phi^*$ turns surrogate excess risk into 0–1 excess risk.'
+tags: [learning-theory, losses, consistency, worked-example]
+aliases: [classification calibration, classification-calibrated loss, psi-transform, comparison inequality, surrogate regret bound]
+requires: [surrogate-losses, bayes-decision-rule]
+related: [proper-scoring-rule, consistency-of-learning-algorithms, fast-rates-and-noise-conditions, rates-and-consistency, multiclass-classification, conjugate-functions, logistic-regression, support-vector-machine, adaboost]
+references: [bartlett2006, zhang2004, tewari2007consistency]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\phi : \reals \to [0, \infty)$ be a loss of the margin $yf(\xvec)$, with labels $y \in \set{-1, +1}$ and a
+real-valued score $f$ that classifies by its sign. At an input with $\eta = \prob(y = +1 \mid \xvec)$, the
+**conditional $\phi$-risk** of a score $\alpha$ is $C_\eta(\alpha) = \eta\,\phi(\alpha) + (1 - \eta)\,\phi(-\alpha)$.
+The loss is **classification-calibrated** if, for every $\eta \ne \frac12$, the smallest conditional risk over scores
+whose sign disagrees with $2\eta - 1$ is strictly larger than the smallest conditional risk over all scores
+<Cite id="bartlett2006" />. Calibration is exactly the condition under which driving the surrogate risk to its minimum
+drives the 0–1 risk to the Bayes risk.
+</Definition>
+
+## Intuition
+
+Classifiers are trained by minimising a convex <NoteLink to="surrogate-losses">surrogate loss</NoteLink> such as the
+logistic, hinge or <NoteLink to="adaboost">exponential loss</NoteLink>, and judged by the 0–1 loss. The surrogate is
+only useful if a score that is good for the surrogate is also good for classification. Calibration checks this one input
+at a time. At an input where the label is $+1$ with probability $\eta = 0.8$, the
+<NoteLink to="bayes-decision-rule">Bayes decision</NoteLink> is $+1$. A calibrated surrogate charges a fixed positive
+penalty to every negative score at that input, so a learner that drives its surrogate risk down is forced towards the
+positive side.
+
+A loss that fails the test can be minimised by a score that decides nothing. The perceptron loss
+$\phi(\alpha) = \max(0, -\alpha)$ has conditional risk 0 at the score $\alpha = 0$ for every $\eta$. A score that is
+identically zero minimises its risk, and its sign carries no information about the label.
+
+Calibration is a statement about the minimiser over all measurable functions. The quantitative version, the **comparison
+inequality**, says how much 0–1 <NoteLink to="empirical-risk-minimisation">excess risk</NoteLink> a given surrogate
+excess risk allows. It is the step that turns a bound on a surrogate into a bound on classification error, and it fixes
+how a rate for the surrogate becomes a rate for the classifier.
+
+## The conditional risk and its minimum
+
+Let $\Dcal$ be a distribution on $\Xcal \times \set{-1, +1}$ and $\eta(\xvec) = \prob(y = +1 \mid \xvec)$. For a score
+$f$, the **$\phi$-risk** is $R_\phi(f) = \expect[\phi(yf(\xvec))]$ and the 0–1 risk is
+$R(f) = \prob(\sgn f(\xvec) \ne y)$, with $\sgn 0 = -1$. $R^*$ is the Bayes risk and
+$R_\phi^* = \inf_f R_\phi(f)$, the infimum over all measurable $f$.
+
+Conditioning on $\xvec$ splits the $\phi$-risk into one problem per input:
+
+$$
+R_\phi(f) = \expect_{\xvec}\brack{\eta(\xvec)\,\phi(f(\xvec)) + (1 - \eta(\xvec))\,\phi(-f(\xvec))}
+= \expect_{\xvec}\brack{C_{\eta(\xvec)}(f(\xvec))}.
+$$
+
+Each input's score can be chosen separately, so the best achievable value is the pointwise infimum,
+
+$$
+H(\eta) = \inf_{\alpha \in \reals} C_\eta(\alpha), \qquad R_\phi^* = \expect_{\xvec}[H(\eta(\xvec))].
+$$
+
+The best value among scores of the wrong sign is
+
+$$
+H^-(\eta) = \inf_{\alpha :\, \alpha(2\eta - 1) \le 0} C_\eta(\alpha).
+$$
+
+Always $H^-(\eta) \ge H(\eta)$, because the second infimum runs over fewer scores. **Calibration** is the strict
+inequality $H^-(\eta) > H(\eta)$ for every $\eta \ne \frac12$. $H$ is concave, since it is an infimum of functions
+that are affine in $\eta$. Both $H$ and $H^-$ are symmetric about $\frac12$: replacing $\eta$ by $1 - \eta$ and
+$\alpha$ by $-\alpha$ leaves $C_\eta(\alpha)$ unchanged.
+
+## Calibration of convex losses
+
+**Theorem** <Cite id="bartlett2006" />. A convex $\phi$ is classification-calibrated if and only if it is
+differentiable at 0 and $\phi'(0) < 0$. Then $H^-(\eta) = \phi(0)$ for every $\eta$.
+
+Both directions follow from the one-sided derivatives of the convex function $C_\eta$ at 0. Write $\phi'_+(0)$ and
+$\phi'_-(0)$ for the right and left derivatives of $\phi$ at 0; convexity gives $\phi'_-(0) \le \phi'_+(0)$. By the
+chain rule,
+
+$$
+\partial_+ C_\eta(0) = \eta\,\phi'_+(0) - (1 - \eta)\,\phi'_-(0), \qquad
+\partial_- C_\eta(0) = \eta\,\phi'_-(0) - (1 - \eta)\,\phi'_+(0).
+$$
+
+**Sufficiency.** Let $\phi'(0) < 0$ and $\eta > \frac12$. Then $\partial_+ C_\eta(0) = (2\eta - 1)\phi'(0) < 0$, so
+$C_\eta$ decreases through 0 and some positive score has $C_\eta(\alpha) < C_\eta(0)$. For a wrong-sign score
+$\alpha \le 0$, convexity gives $C_\eta(\alpha) \ge C_\eta(0) + \alpha\,(2\eta - 1)\phi'(0) \ge C_\eta(0)$, since both
+$\alpha$ and the slope are non-positive. Hence $H^-(\eta) = C_\eta(0) = \phi(0) > H(\eta)$. The case $\eta < \frac12$
+is the mirror image.
+
+**Necessity.** Let $\phi$ be calibrated and $\eta > \frac12$. The strict gap $H^-(\eta) > H(\eta)$ means some positive
+score beats every non-positive one, including 0. A convex function that is lower at some $\alpha > 0$ than at 0 has a
+negative right derivative at 0, so $\partial_+ C_\eta(0) < 0$. Letting $\eta \downarrow \frac12$ gives
+$\frac12(\phi'_+(0) - \phi'_-(0)) \le 0$. With convexity this forces $\phi'_+(0) = \phi'_-(0)$, so $\phi$ is
+differentiable at 0. Then $\partial_+ C_\eta(0) = (2\eta - 1)\phi'(0) < 0$ with $2\eta - 1 > 0$, so $\phi'(0) < 0$.
+
+The hinge, logistic, exponential, squared and squared hinge losses all pass: each is convex with negative slope at 0.
+The perceptron loss fails, because it has a kink at 0. Non-convex losses need the definition directly; Bartlett, Jordan
+and McAuliffe treat several, such as the sigmoid loss <Cite id="bartlett2006" />.
+
+## The ψ-transform
+
+The size of the gap $H^- - H$ measures how strongly the surrogate punishes a wrong sign. Indexing by
+$\theta = 2\eta - 1 \in [-1, 1]$, the confidence of the Bayes decision, define
+
+$$
+\tilde\psi(\theta) = H^-\paren{\frac{1 + \theta}{2}} - H\paren{\frac{1 + \theta}{2}}.
+$$
+
+The **ψ-transform** $\psi$ is the largest convex function below $\tilde\psi$, its convex hull or
+<NoteLink to="conjugate-functions">Fenchel biconjugate</NoteLink> <Cite id="bartlett2006" />. For a calibrated convex
+loss, $H^- = \phi(0)$ and $-H$ is convex, so $\tilde\psi$ is already convex and
+
+$$
+\psi(\theta) = \phi(0) - H\paren{\frac{1 + \theta}{2}}.
+$$
+
+$\psi$ is non-negative, symmetric, and zero at 0. A loss is calibrated exactly when $\psi(\theta) > 0$ for every
+$\theta \ne 0$ <Cite id="bartlett2006" />.
+
+## The comparison inequality
+
+**Theorem** <Cite id="bartlett2006" />. For every non-negative loss $\phi$, every measurable $f$ and every
+distribution,
+
+$$
+\psi\paren{R(f) - R^*} \le R_\phi(f) - R_\phi^*.
+$$
+
+The bound cannot be improved in general: for every $\theta \in [0, 1]$ there is a distribution and an $f$ with 0–1
+excess risk $\theta$ and $\phi$-excess risk within any $\epsilon > 0$ of $\psi(\theta)$.
+
+The derivation uses three facts, applied one input at a time and then averaged.
+
+1. **The 0–1 excess risk is a weighted disagreement.** The classifier $\sgn f$ pays $\min(\eta, 1 - \eta)$ at an input
+   where it agrees with the Bayes decision and $\max(\eta, 1 - \eta)$ where it disagrees. The difference is
+   $\abs{2\eta - 1}$, so
+
+   $$
+   R(f) - R^* = \expect\brack{\indicator[\text{wrong}]\,\abs{2\eta(\xvec) - 1}},
+   $$
+
+   where "wrong" is the event that $\sgn f(\xvec)$ differs from the Bayes decision $\sgn(2\eta(\xvec) - 1)$.
+
+2. **Jensen.** $\psi$ is convex with $\psi(0) = 0$, so
+   $\psi(\expect[Z]) \le \expect[\psi(Z)]$ for $Z = \indicator[\text{wrong}]\,\abs{2\eta - 1}$. Because $Z$ is either
+   0 or $\abs{2\eta - 1}$, $\psi(Z) = \indicator[\text{wrong}]\,\psi(\abs{2\eta - 1})$. Hence
+
+   $$
+   \psi\paren{R(f) - R^*} \le \expect\brack{\indicator[\text{wrong}]\,\psi(\abs{2\eta(\xvec) - 1})}.
+   $$
+
+3. **Pointwise.** $\psi \le \tilde\psi$, and by symmetry $\tilde\psi(\abs{2\eta - 1}) = H^-(\eta) - H(\eta)$. On the
+   event "wrong", $f(\xvec)$ is a wrong-sign score, so $C_\eta(f(\xvec)) \ge H^-(\eta)$. Hence
+
+   $$
+   \indicator[\text{wrong}]\,\psi(\abs{2\eta - 1}) \le \indicator[\text{wrong}]\paren{H^-(\eta) - H(\eta)}
+   \le C_\eta(f(\xvec)) - H(\eta).
+   $$
+
+   The second inequality also holds off the event, where the left side is 0 and $C_\eta \ge H$.
+
+Averaging the last line over $\xvec$ gives $\expect[C_\eta(f(\xvec)) - H(\eta(\xvec))] = R_\phi(f) - R_\phi^*$, which
+proves the theorem. For a calibrated loss, $\psi$ is continuous, increasing on $[0, 1]$ and invertible there, so the
+inequality reads $R(f) - R^* \le \psi^{-1}(R_\phi(f) - R_\phi^*)$. Any sequence $f_m$ with $R_\phi(f_m) \to R_\phi^*$
+therefore has $R(f_m) \to R^*$.
+
+## Common losses
+
+For each convex loss, $H(\eta)$ is the conditional risk at the minimiser derived in
+<NoteLink to="surrogate-losses">surrogate losses</NoteLink>, and $\psi(\theta) = \phi(0) - H((1 + \theta)/2)$
+<Cite id="bartlett2006" />.
+
+| Loss | $\phi(\alpha)$ | $H(\eta)$ | $\psi(\theta)$ | Near $\theta = 0$ |
+| --- | --- | --- | --- | --- |
+| Hinge | $\max(0, 1 - \alpha)$ | $2\min(\eta, 1 - \eta)$ | $\abs{\theta}$ | linear |
+| Squared hinge | $\max(0, 1 - \alpha)^2$ | $4\eta(1 - \eta)$ | $\theta^2$ | quadratic |
+| Squared | $(1 - \alpha)^2$ | $4\eta(1 - \eta)$ | $\theta^2$ | quadratic |
+| Exponential | $e^{-\alpha}$ | $2\sqrt{\eta(1 - \eta)}$ | $1 - \sqrt{1 - \theta^2}$ | $\approx \theta^2/2$ |
+| Logistic (nats) | $\ln(1 + e^{-\alpha})$ | binary entropy of $\eta$ | $\frac{1 + \theta}{2}\ln(1 + \theta) + \frac{1 - \theta}{2}\ln(1 - \theta)$ | $\approx \theta^2/2$ |
+
+The logistic $\psi$ is the <NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> of
+$\operatorname{Ber}((1 + \theta)/2)$ from $\operatorname{Ber}(\frac12)$, so Pinsker's inequality gives
+$\psi(\theta) \ge \theta^2/2$. The exponential $\psi$ also satisfies $1 - \sqrt{1 - \theta^2} \ge \theta^2/2$. Hence,
+for these two losses and with $\theta^2$ for the <NoteLink to="regression-losses">squared losses</NoteLink>,
+
+$$
+R(f) - R^* \le \sqrt{2\paren{R_\phi(f) - R_\phi^*}}, \qquad
+R(f) - R^* \le \sqrt{R_{\text{sq}}(f) - R_{\text{sq}}^*}.
+$$
+
+The <Gloss name="hinge-loss">hinge loss</Gloss> gives $R(f) - R^* \le R_{\text{hinge}}(f) - R_{\text{hinge}}^*$ with no
+square root. A loss with quadratic $\psi$ turns a surrogate rate $m^{-1/2}$ in the sample size $m$ into a 0–1 rate
+$m^{-1/4}$; the hinge loss keeps $m^{-1/2}$. Its minimiser, however, is $\sgn(2\eta - 1)$ and discards $\eta$, while the
+smooth losses' minimisers recover $\eta$ (see <NoteLink to="proper-scoring-rule">proper scoring rules</NoteLink>).
+
+## Low noise sharpens the comparison
+
+The square root comes from inputs with $\eta$ near $\frac12$, where the Bayes decision is barely better than a guess and
+a curved $\psi$ charges almost nothing for a wrong sign. When such inputs are rare, the comparison improves. Suppose
+that for some $\beta \in (0, 1]$ and $c > 0$, every $f$ satisfies
+$\prob(\sgn f(\xvec) \ne \sgn(2\eta(\xvec) - 1)) \le c\,(R(f) - R^*)^\beta$. This is the Bernstein condition of
+<NoteLink to="fast-rates-and-noise-conditions">fast rates and noise conditions</NoteLink>; Tsybakov's noise condition
+with exponent $\alpha$ gives it with $\beta = \alpha/(1 + \alpha)$. Then, for some $c > 0$
+<Cite id="bartlett2006" />,
+
+$$
+c\,(R(f) - R^*)^\beta\,\psi\paren{\frac{(R(f) - R^*)^{1 - \beta}}{2c}} \le R_\phi(f) - R_\phi^*.
+$$
+
+With $\psi(\theta) = \theta^2$ this gives $R(f) - R^* \le (4c(R_\phi(f) - R_\phi^*))^{1/(2 - \beta)}$. With no noise
+condition ($\beta = 0$) the exponent is $\frac12$. Under Massart's condition ($\beta = 1$) it is 1, and the
+square root in the bound for the smooth surrogates disappears. A learner never needs to know $\beta$ for this to apply.
+
+## From calibration to consistency
+
+The comparison inequality is the last link in the standard proof that a surrogate-minimising method is
+<NoteLink to="consistency-of-learning-algorithms">consistent</NoteLink> <Cite id="zhang2004" />
+<Cite id="bartlett2006" />:
+
+1. **Decompose** the $\phi$-excess risk of the learned $\hat f$ over a class $\Fcal_m$ into estimation error
+   $R_\phi(\hat f) - \inf_{\Fcal_m} R_\phi$ and approximation error $\inf_{\Fcal_m} R_\phi - R_\phi^*$.
+2. **Bound the estimation error** by a <NoteLink to="uniform-convergence">uniform-convergence</NoteLink> argument. A
+   Lipschitz $\phi$ passes through the <NoteLink to="contraction-lemma">contraction lemma</NoteLink> to the
+   <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> of the scores.
+3. **Grow the class** with $m$ slowly enough that the estimation error still vanishes, while the approximation error
+   tends to zero.
+4. **Compare.** Calibration turns $R_\phi(\hat f) \to R_\phi^*$ into $R(\hat f) \to R^*$.
+
+Zhang proves the consistency of several convex-risk-minimisation methods this way <Cite id="zhang2004" />.
+
+## Worked example
+
+**One input.** At an input with $\eta = 0.8$ the Bayes decision is $+1$, and deciding $-1$ costs
+$\abs{2\eta - 1} = 0.6$ in 0–1 risk. A score $\alpha = -0.2$ decides $-1$. Its conditional surrogate excess
+$C_{0.8}(-0.2) - H(0.8)$, and the guaranteed minimum $\psi(0.6)$, are
+
+| Loss | $C_{0.8}(-0.2)$ | $H(0.8)$ | Excess | $\psi(0.6)$ |
+| --- | --- | --- | --- | --- |
+| Hinge | 1.120 | 0.400 | 0.720 | 0.600 |
+| Squared | 1.280 | 0.640 | 0.640 | 0.360 |
+| Exponential | 1.141 | 0.800 | 0.341 | 0.200 |
+| Logistic (nats) | 0.758 | 0.500 | 0.258 | 0.193 |
+
+Each excess is at least $\psi(0.6)$, as step 3 of the derivation requires. The bound is attained by the score
+$\alpha = 0$, where every convex calibrated loss has $C_\eta(0) = \phi(0)$.
+
+**A whole classifier.** Suppose a <NoteLink to="margin-bounds">margin-type bound</NoteLink> shows that the learned
+score's surrogate excess risk is at most $2/\sqrt m$, and that the class contains the surrogate's minimiser. At
+$m = 10{,}000$ the surrogate excess is at most $0.02$.
+
+1. **Hinge.** $\psi^{-1}(0.02) = 0.02$, so $R(f) - R^* \le 0.02$.
+2. **Logistic.** Solving $\psi(\theta) = 0.02$ gives $\theta = 0.199$, so $R(f) - R^* \le 0.199$. The bound is not
+   vacuous, but it allows a classifier 20 percentage points worse than Bayes.
+3. **Sample size for $R(f) - R^* \le 0.05$.** The hinge needs $2/\sqrt m \le 0.05$, so $m \ge 1{,}600$. The logistic
+   loss needs $2/\sqrt m \le \psi(0.05) = 0.00125$, so $m \ge 2.56$ million.
+
+The factor of 1,600 comes only from the conversion. The bounds compare worst cases: a
+<NoteLink to="logistic-regression">logistic-regression</NoteLink> classifier often has the smaller test error, because
+its surrogate excess risk is far below $2/\sqrt m$ or because low noise applies.
+
+## Multiclass losses
+
+With $K > 2$ classes a score is a vector, and calibration asks that minimising the conditional surrogate risk picks the
+class with the largest posterior. Binary calibration of the underlying $\phi$ is not enough. Tewari and Bartlett give a
+geometric condition that is necessary and sufficient, and show that the
+<NoteLink to="multiclass-support-vector-machines">multiclass hinge losses</NoteLink> of Crammer and Singer and of Weston
+and Watkins are not calibrated, while the loss of Lee, Lin and Wahba is <Cite id="tewari2007consistency" />. The softmax
+cross-entropy is calibrated, since its minimiser is the posterior itself.
+
+## Pitfalls
+
+- **Calibration is about all measurable functions.** The comparison inequality relates excess risks over the Bayes
+  levels $R^*$ and $R_\phi^*$. With a restricted class, the best surrogate score in the class need not give the best
+  classifier in the class, and two calibrated losses can pick different linear classifiers.
+- **Calibration is not probability calibration.** A classification-calibrated loss gets the sign right. Only losses
+  whose minimiser is an invertible function of $\eta$, such as the logistic loss, also recover probabilities; the hinge
+  loss does not (see <NoteLink to="classifier-calibration">classifier calibration</NoteLink>).
+
+- **Unequal costs move the threshold.** With a cost-weighted 0–1 loss the Bayes decision changes sign at a threshold
+  other than $\frac12$, and the surrogate must be reweighted to stay calibrated (see
+  <NoteLink to="cost-sensitive-learning">cost-sensitive learning</NoteLink>).
+
+{/* figure pending engine (C2 psiTransform): ψ for hinge, logistic, exponential, squared and sigmoid losses, and the
+comparison curve of excess 0–1 risk against excess surrogate risk, with ψ⁻¹ of a chosen surrogate excess read off */}

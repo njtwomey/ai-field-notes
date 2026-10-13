@@ -1,0 +1,205 @@
+---
+title: 'Bayesian information criterion'
+kind: concept
+summary: '$\BIC = -2\log\hat L + p\ln n$ approximates $-2$ times the log marginal likelihood of a model by a Laplace expansion, so BIC differences approximate log Bayes factors. Its penalty grows with $n$, so when a candidate is true BIC selects it with probability tending to one.'
+tags: [model-selection, information-criteria, bayesian, worked-example]
+aliases: [BIC, Schwarz criterion, Schwarz information criterion, Schwarz Bayesian criterion, SBC, SIC]
+requires: [estimation, laplace-approximation, bayes-factors-and-model-comparison]
+related: [information-criteria, akaike-information-criterion, consistency-and-efficiency-of-selection-criteria, minimum-description-length, marginal-likelihood-and-bayesian-occams-razor, bayesian-model-averaging, gaussian-mixture-model]
+references: [schwarz1978, kass1995, kass1995reference, nishii1984, claeskens2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { SelectionFrequencies } from './SelectionFrequencies'
+
+<Definition>
+Let a model $\Mcal$ be a family of densities $f(y \mid \thetavec)$ with $p$ free parameters, fitted by maximum
+likelihood to $n$ independent observations $\Dcal$, with maximised log-likelihood $\log\hat L$. The **Bayesian
+information criterion** is
+
+$$
+\BIC = -2\log\hat L + p\ln n.
+$$
+
+For a smooth prior on $\thetavec$ and large $n$, $\BIC = -2\ln p(\Dcal \mid \Mcal) + O(1)$, where $p(\Dcal \mid \Mcal)$
+is the marginal likelihood of the model. Among candidates fitted to the same data, the one with the smallest BIC has
+approximately the largest posterior probability under equal prior probabilities <Cite id="schwarz1978" />.
+</Definition>
+
+## Intuition
+
+<Gloss name="bic" /> asks a different question from <NoteLink to="akaike-information-criterion">AIC</NoteLink>. AIC
+asks which fitted model will predict new data best. BIC asks which model is most probable given the data, in a Bayesian
+analysis that gives each candidate a prior over its parameters.
+
+The <NoteLink to="bayes-factors-and-model-comparison">marginal likelihood</NoteLink> answers that question. It averages
+the likelihood over the prior instead of maximising it. A model with many parameters spreads its prior over a large
+space, and only a small region of that space fits the data well. The average over the prior then includes a factor for
+the fraction of the prior volume that fits: the **Occam factor**. With $n$ observations each parameter is pinned down to
+a width of order $1/\sqrt n$, so the fitting fraction of a $p$-dimensional prior shrinks like $n^{-p/2}$. Its logarithm,
+times $-2$, is the penalty $p\ln n$.
+
+The penalty grows with $n$, while AIC's $2p$ does not. BIC exceeds AIC's penalty once $\ln n > 2$, that is for
+$n \ge 8$, and in large samples it chooses smaller models than AIC.
+
+## The derivation
+
+The marginal likelihood of $\Mcal$ with prior density $\pi(\thetavec)$ is
+
+$$
+p(\Dcal \mid \Mcal) = \int L(\thetavec)\,\pi(\thetavec)\,d\thetavec,
+$$
+
+where $L(\thetavec) = \prod_i f(y_i \mid \thetavec)$ is the likelihood. The log-likelihood is written $\log L$ because
+this chapter writes $\ell$ for a loss.
+
+**Step 1: a peak at the estimate.** For large $n$ the likelihood is concentrated near the maximum-likelihood estimate
+$\hat\thetavec$, and a smooth prior is nearly constant over that region. Expand $\log L$ to second order around
+$\hat\thetavec$, where its gradient is zero:
+
+$$
+\log L(\thetavec) \approx \log\hat L - \tfrac12(\thetavec - \hat\thetavec)^\top\Amat(\thetavec - \hat\thetavec), \qquad
+\Amat = -\nabla^2\log L(\hat\thetavec).
+$$
+
+**Step 2: a <NoteLink to="gaussian-integral">Gaussian integral</NoteLink>.** Replace $\pi(\thetavec)$ by
+$\pi(\hat\thetavec)$ and integrate the Gaussian (the <NoteLink to="laplace-approximation">Laplace
+approximation</NoteLink>):
+
+$$
+p(\Dcal \mid \Mcal) \approx \hat L\,\pi(\hat\thetavec)\,(2\pi)^{p/2}\abs{\Amat}^{-1/2}.
+$$
+
+**Step 3: separate the growth in $n$.** The observations are independent, so $\Amat$ is a sum of $n$ terms. Write
+$\Amat = n\hat\Jmat$, where $\hat\Jmat$ is the observed information per observation; it settles to a fixed matrix as $n$
+grows. Then $\abs{\Amat} = n^p\abs{\hat\Jmat}$, and taking logarithms,
+
+$$
+\ln p(\Dcal \mid \Mcal) \approx \log\hat L - \frac p2\ln n + \underbrace{\ln\pi(\hat\thetavec) + \frac p2\ln 2\pi -
+\frac12\ln\abs{\hat\Jmat}}_{O(1)}.
+$$
+
+**Step 4: drop what does not grow.** $\log\hat L$ grows like $n$ and $\frac p2\ln n$ grows like $\ln n$. The bracketed
+terms tend to constants. Dropping them and multiplying by $-2$ gives BIC <Cite id="schwarz1978" />.
+
+The error of BIC as an estimate of $-2\ln p(\Dcal \mid \Mcal)$ is therefore of order one: it does not vanish as $n$
+grows. It becomes negligible only relative to terms that grow. The dropped constant depends on the prior, which BIC
+ignores. For one prior the constant vanishes: the **unit-information prior**, a Gaussian centred near the estimate with
+covariance $\hat\Jmat^{-1}$, which carries as much information as one observation. Its log-density at its centre is
+$-\frac p2\ln 2\pi + \frac12\ln\abs{\hat\Jmat}$, which cancels the other two terms. Kass and Wasserman showed that for
+nested models with this prior, the BIC difference approximates the log Bayes factor with an error of order
+$n^{-1/2}$ <Cite id="kass1995reference" />.
+
+## Bayes factors and posterior probabilities
+
+For two models fitted to the same data, $\BIC_1 - \BIC_0 \approx -2\ln B_{10}$, where $B_{10}$ is the Bayes factor of
+$\Mcal_1$ against $\Mcal_0$. With prior probabilities equal across candidates $\Mcal_1, \dots, \Mcal_J$, the posterior
+probabilities are approximately
+
+$$
+P(\Mcal_j \mid \Dcal) \approx \frac{\exp(-\BIC_j/2)}{\sum_{k=1}^J \exp(-\BIC_k/2)}.
+$$
+
+These weights have the same form as Akaike weights, with a penalty that grows with $n$. They serve for
+<NoteLink to="bayesian-model-averaging">Bayesian model averaging</NoteLink> when the evidence itself is hard to compute.
+Kass and Raftery read a difference $2\ln B_{10}$ of 0 to 2 as barely worth mentioning, 2 to 6 as positive, 6 to 10 as
+strong and above 10 as very strong evidence <Cite id="kass1995" />. The same thresholds apply to BIC differences.
+
+The two-part code of <NoteLink to="minimum-description-length">minimum description length</NoteLink> reaches the same
+penalty from coding: describing $p$ parameters to precision $1/\sqrt n$ costs $\frac p2\log_2 n$ bits.
+
+## Consistency
+
+Suppose one candidate contains the distribution that generated the data, and call the smallest such candidate the true
+model $\Mcal^\ast$. A criterion is **consistent** when the probability that it selects $\Mcal^\ast$ tends to one as
+$n \to \infty$. BIC is consistent, and AIC is not <Cite id="claeskens2008" />. Compare $\Mcal^\ast$ with one other
+candidate, in two cases.
+
+**A larger model that contains $\Mcal^\ast$.** Let it have $\Delta p$ extra parameters. The likelihood-ratio statistic
+$\Lambda = 2(\log\hat L_\text{large} - \log\hat L_\ast)$ is approximately $\ChiSq_{\Delta p}$ when $\Mcal^\ast$ is true
+(Wilks' theorem). It stays of order one as $n$ grows, because the extra parameters only fit noise. BIC prefers the
+larger model when $\Lambda > \Delta p\ln n$. The threshold grows without bound, so the probability of overfitting tends
+to zero. AIC prefers the larger model when $\Lambda > 2\Delta p$, a fixed threshold. Its probability of overfitting
+tends to $P(\ChiSq_{\Delta p} > 2\Delta p)$, which is not zero.
+
+| | $\Delta p = 1$ | $\Delta p = 2$ | $\Delta p = 5$ |
+| --- | --- | --- | --- |
+| AIC, any large $n$ | 0.157 | 0.135 | 0.075 |
+| BIC, $n = 100$ | 0.032 | 0.010 | $< 10^{-3}$ |
+| BIC, $n = 1000$ | 0.0086 | 0.0010 | $< 10^{-5}$ |
+
+**A smaller model that misses part of the truth.** Its best member differs from the generator by a
+<Gloss name="kl">Kullback–Leibler divergence</Gloss> $\delta > 0$ per observation. The likelihood ratio in favour of
+$\Mcal^\ast$ then grows like $2n\delta$, by the <Gloss name="lln">law of large numbers</Gloss>. That linear growth beats
+any penalty difference of order $\ln n$, so both AIC and BIC reject the smaller model with probability tending to one.
+
+With finitely many candidates, both cases together give $P(\BIC \text{ selects } \Mcal^\ast) \to 1$. The argument only
+needs a penalty $\lambda_n$ per parameter with $\lambda_n \to \infty$ and $\lambda_n/n \to 0$
+<Cite id="nishii1984" />. <NoteLink to="consistency-and-efficiency-of-selection-criteria">Consistency and efficiency of
+selection criteria</NoteLink> sets this against what consistency costs in prediction.
+
+<SelectionFrequencies />
+
+## Worked example
+
+A coin is tossed $n$ times and shows $k$ heads. $\Mcal_0$ fixes the probability of heads at $\theta = 0.5$, with no free
+parameters. $\Mcal_1$ leaves $\theta$ free with a uniform prior, so $p = 1$. Under $\Mcal_1$ the exact marginal
+likelihood is $1/(n + 1)$ times the binomial coefficient, so the exact Bayes factor is
+$B_{01} = (n + 1)\binom nk 2^{-n}$ (see <NoteLink to="bayes-factors-and-model-comparison">Bayes factors and model
+comparison</NoteLink>).
+
+Take $n = 100$ and $k = 60$.
+
+1. **Log-likelihoods.** $\log\hat L_0 = 100\ln 0.5 = -69.31$. Under $\Mcal_1$, $\hat\theta = 0.6$ and
+   $\log\hat L_1 = 60\ln 0.6 + 40\ln 0.4 = -67.30$. The difference is $2.01$.
+2. **BIC.** $\BIC_0 = 138.63$ and $\BIC_1 = 134.60 + \ln 100 = 139.21$. $\Mcal_0$ has the smaller BIC by $0.58$.
+3. **The approximate Bayes factor.** $B_{01} \approx e^{0.58/2} = 1.34$.
+4. **The exact Bayes factor.** $(n + 1)\binom{100}{60}2^{-100} = 1.10$. BIC overstates the support for $\Mcal_0$ by a
+   factor of $1.22$.
+5. **The dropped constant.** For a Bernoulli parameter, $\hat J = 1/(\hat\theta(1 - \hat\theta))$, and the uniform prior
+   has $\pi(\hat\theta) = 1$. The bracket of Step 3 is $\frac12\ln 2\pi + \frac12\ln(0.6 \times 0.4) = 0.205$, and
+   $e^{0.205} = 1.23$ is the factor BIC missed. Keeping it gives $1.34/1.23 = 1.09$.
+
+The same steps for outcomes that sit at the edge of significance at the 5% level give:
+
+| $n$ | $k$ | exact $B_{01}$ | BIC | BIC with the $O(1)$ term |
+| --- | --- | --- | --- | --- |
+| 100 | 60 | 1.10 | 1.34 | 1.09 |
+| 1,000 | 531 | 3.70 | 4.62 | 3.69 |
+| 10,000 | 5,098 | 11.7 | 14.6 | 11.7 |
+| 100,000 | 50,310 | 36.9 | 46.3 | 36.9 |
+
+BIC gets the growth of the Bayes factor right, but it misses a constant factor of about $1.25$ at every $n$. The
+constant is the $O(1)$ term, set by the prior and the curvature. The full Laplace approximation, which keeps it, is
+accurate to three figures from $n = 1000$.
+
+## Assumptions
+
+- **Independent observations and a regular model.** The Laplace step needs a unique interior peak whose curvature grows
+  linearly in $n$. Mixtures with an unknown number of components, <Gloss name="hmm">hidden Markov models</Gloss> and
+  neural networks are singular: their curvature is degenerate, and the penalty $p\ln n$ is too large. Watanabe's WBIC
+  replaces $p$ by a learning coefficient for such models (see
+  <NoteLink to="widely-applicable-information-criterion">widely applicable information criterion</NoteLink>).
+- **A smooth, proper prior that does not depend on $n$.** BIC ignores the prior's shape, which is safe only when the
+  prior is roughly as spread as the unit-information prior.
+- **$p$ fixed while $n$ grows.** With $p$ comparable to $n$ the dropped terms are not small.
+
+## Pitfalls
+
+- **Assuming a true model.** Consistency is a guarantee about the case where a candidate is true. When every candidate
+  is an approximation, BIC still picks one with growing confidence, and the one it picks predicts worse than AIC's
+  choice in moderate samples. For prediction, use AIC or <NoteLink to="cross-validation">cross-validation</NoteLink>
+  (see <NoteLink to="consistency-and-efficiency-of-selection-criteria">consistency and efficiency of selection
+  criteria</NoteLink>).
+- **Ambiguous $n$.** The penalty needs the number of independent observations. For clustered data, censored survival
+  times or a binomial response with many trials per row, the right $n$ is unclear, and different software counts
+  differently.
+- **Reading BIC as the evidence.** BIC differs from $-2\ln p(\Dcal \mid \Mcal)$ by a constant that does not vanish, as
+  the worked example shows. When the evidence can be computed, compute it.
+- **Forgetting that Bayes factors depend on the prior.** The exact Bayes factor depends on the
+  width of the prior over the extra parameters (Lindley's paradox). BIC hides this by fixing an implicit
+  unit-information prior.
+- **Selecting over many models.** Like AIC, BIC corrects for fitting within one model, not for the search across many.
+  The smallest of thousands of BIC values is biased low (see <NoteLink to="overfitting-in-model-selection">overfitting
+  in model selection</NoteLink>).

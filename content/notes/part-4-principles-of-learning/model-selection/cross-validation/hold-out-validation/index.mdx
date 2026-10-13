@@ -1,0 +1,189 @@
+---
+title: 'Hold-out validation'
+kind: technique
+summary: 'Hold-out validation fits a model on one part of the data and averages its loss on the held-out rest. The estimate is unbiased for the model fitted to the smaller part; its standard error falls as $1/\sqrt{n_\text{val}}$, and every held-out point is lost to fitting.'
+tags: [model-selection, evaluation, resampling, worked-example]
+aliases: [holdout validation, hold-out method, holdout method, validation set approach, split-sample validation, single-split validation]
+requires: [model-selection-and-model-assessment, standard-error]
+related: [k-fold-cross-validation, test-set-bounds, train-validation-and-test-splits, repeated-and-monte-carlo-cross-validation, metric-confidence-intervals, learning-curves-and-sample-size, model-selection-at-scale]
+references: [hastie2009, kohavi1995, guyon1998, dobbin2011, molinaro2005, arlot2010]
+status: draft
+updated: 2026-10-13
+---
+
+import { HoldOutSize } from './HoldOutSize'
+
+<Definition>
+Split the indices $1, \dots, n$ at random into a **training set** $T$ of $n_\text{tr}$ points and a **validation set**
+$V$ of $n_\text{val} = n - n_\text{tr}$ points. Fit the model to $T$ alone, giving $\hat f_T$. The **hold-out
+estimate** of prediction error is the average loss on the validation set,
+
+$$
+\widehat{\operatorname{Err}}_\text{ho} = \frac{1}{n_\text{val}}\sum_{i \in V} \ell\paren{y_i, \hat f_T(\xvec_i)}.
+$$
+
+It estimates the error of $\hat f_T$ on new data from the same distribution <Cite id="hastie2009" />.
+</Definition>
+
+## Problem
+
+The training error of a fitted model is optimistic: the model was chosen to fit those points, so it fits them better
+than it fits new ones (see <NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>). An
+honest estimate needs points the fit never saw. Hold-out validation sets some aside before fitting.
+
+The method serves two of the chapter's three questions. It **estimates** the error of one model. It **selects** among
+candidates when each is fitted to $T$ and the one with the smallest validation error is kept. The third question,
+**assessment** of the chosen model, needs data that the selection did not touch: a separate test set, which turns the
+two-way split into the three-way split of <NoteLink to="model-selection-and-model-assessment">model selection and model
+assessment</NoteLink>.
+
+Holding data out has two costs. The model is fitted to $n_\text{tr} < n$ points, so it is usually worse than the model
+fitted to all $n$. The estimate rests on one random split and $n_\text{val}$ points, so it is noisy. The size of the
+validation set trades one cost against the other.
+
+## Mechanism
+
+1. **Split.** Shuffle the indices and cut them into $T$ and $V$. The split must imitate how the model will meet new
+   data: by group when records share an entity, forward in time for forecasting (see
+   <NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink>). For classification,
+   split each class separately (<NoteLink to="stratified-cross-validation">stratification</NoteLink>).
+2. **Fit** every data-dependent step on $T$ only: scaling, imputation, encoding,
+   <NoteLink to="feature-selection">feature selection</NoteLink> and the model itself.
+3. **Score.** Predict each point of $V$ and average the losses.
+4. **Select**, if there are several candidates: fit each to $T$, score each on $V$ and keep the best.
+5. **Refit or keep.** Small models are usually refitted to $T \cup V$ with the chosen settings. Large models are often
+   kept as fitted to $T$, because a refit is expensive and the number of training steps chosen on $V$ may not transfer
+   to a larger training set.
+
+A common default for a three-way split is half the data for training and a quarter each for validation and testing
+<Cite id="hastie2009" />. Such proportions are conventions. The next two sections give the quantities that should set
+them.
+
+## What the estimate estimates
+
+Condition on the training set $T$. The fitted model $\hat f_T$ is then a fixed function. The validation points are
+independent draws from the data distribution and independent of $T$, so the losses $Z_i = \ell(y_i, \hat f_T(\xvec_i))$,
+$i \in V$, are <Gloss name="iid">independent and identically distributed</Gloss> given $T$. Write
+$\operatorname{Err}_T = \expect_{(\xvec, y)}\brack{\ell(y, \hat f_T(\xvec))}$ for the true error of $\hat f_T$ and
+$\tau_T^2 = \var(Z_i \mid T)$ for the variance of one loss. The average of $n_\text{val}$ independent losses then has
+
+$$
+\expect\brack{\widehat{\operatorname{Err}}_\text{ho} \mid T} = \operatorname{Err}_T,
+\qquad
+\var\paren{\widehat{\operatorname{Err}}_\text{ho} \mid T} = \frac{\tau_T^2}{n_\text{val}}.
+$$
+
+The hold-out estimate is unbiased for the error of the model it scores, and its standard deviation is
+$\tau_T/\sqrt{n_\text{val}}$. The sample standard deviation $s$ of the $n_\text{val}$ losses estimates $\tau_T$, so
+$s/\sqrt{n_\text{val}}$ is a valid <NoteLink to="standard-error">standard error</NoteLink>. For the
+<NoteLink to="surrogate-losses">0–1 loss</NoteLink> with <NoteLink to="accuracy-and-balanced-accuracy">error
+rate</NoteLink> $p$, $\tau_T^2 = p(1 - p)$ and the standard error is $\sqrt{\hat p(1 - \hat p)/n_\text{val}}$. Because
+the validation errors are independent binomial trials, the exact intervals of <NoteLink to="test-set-bounds">test-set
+bounds</NoteLink> apply. No other estimator in this chapter has this property: the fold errors of
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink> share training data, and their standard
+error is only approximate.
+
+The model that is used is usually the one refitted to all $n$ points, with true error $\operatorname{Err}_\Dcal$. The
+estimate's error about that target splits into two parts,
+
+$$
+\widehat{\operatorname{Err}}_\text{ho} - \operatorname{Err}_\Dcal =
+\underbrace{\paren{\widehat{\operatorname{Err}}_\text{ho} - \operatorname{Err}_T}}_{\text{validation noise}} +
+\underbrace{\paren{\operatorname{Err}_T - \operatorname{Err}_\Dcal}}_{\text{cost of fitting to fewer points}}.
+$$
+
+The first part has mean zero and variance $\tau_T^2/n_\text{val}$, which falls as the validation set grows. The second
+part is positive on average while the <NoteLink to="learning-curves-and-sample-size">learning curve</NoteLink> is still
+falling at $n$, and it grows as the validation set grows, because the training set shrinks. For a model whose excess
+error falls as $c/m$ in the training size $m$, as least squares with $p$ coefficients does with $c \approx p\sigma^2$
+for noise variance $\sigma^2$, holding out a fraction $v$ costs about
+
+$$
+\frac{c}{(1 - v)n} - \frac{c}{n} = \frac{c}{n}\cdot\frac{v}{1 - v}.
+$$
+
+Holding out a quarter adds a third of the excess error $c/n$; holding out half doubles it. The best fraction minimises
+the sum of the variance and the squared mean of the two parts. It depends on $n$ and on how steep the learning curve
+is. Simulations for linear classifiers found that giving two thirds of the cases to training was close to optimal for
+datasets of 100 or more with a strong signal, and that smaller or noisier datasets should give more to training
+<Cite id="dobbin2011" />.
+
+<HoldOutSize />
+
+## How large the validation set must be
+
+The standard error fixes the validation size needed for a given precision. For an error rate near $p$, the half-width
+of an approximate 95% interval is $1.96\sqrt{p(1 - p)/n_\text{val}}$. A target half-width $h$ needs
+
+$$
+n_\text{val} \ge \frac{1.96^2\,p(1 - p)}{h^2}.
+$$
+
+Halving the half-width needs four times the points. A target stated relative to the error, $h = \beta p$, gives
+$n_\text{val} \ge 1.96^2(1 - p)/(\beta^2 p)$, which grows as $1/p$: accurate classifiers need large validation sets
+to measure. At $p = 0.01$ and $\beta = 0.2$ the bound is $3.84 \times 0.99/(0.04 \times 0.01) \approx 9{,}500$. An
+analysis of handwriting recognition reached the same order: at an error rate near 1%, a test set of 10,000 independent
+characters guarantees with 95% confidence that the true error is at most 1.25 times the observed one
+<Cite id="guyon1998" />. For a comparison of two models on the same validation set, a paired test is more sensitive than
+two separate intervals (see <NoteLink to="mcnemars-test">McNemar's test</NoteLink>).
+
+## Worked example
+
+A classifier is to be built from $n = 1{,}000$ labelled examples.
+
+1. **One split.** Hold out 200 and train on 800. The model makes 30 errors on the 200, so
+   $\widehat{\operatorname{Err}}_\text{ho} = 0.150$. The standard error is
+   $\sqrt{0.15 \times 0.85/200} = \sqrt{0.000638} = 0.025$, and the approximate 95% interval is
+   $0.150 \pm 0.049$, from 0.10 to 0.20.
+2. **The precision needed.** Two models whose errors differ by one point cannot be told apart by such intervals. A
+   half-width of $h = 0.01$ at $p = 0.15$ needs $n_\text{val} \ge 3.84 \times 0.15 \times 0.85/0.0001 = 4{,}898$
+   validation points, more than the whole dataset. With 1,000 examples, a single hold-out cannot resolve
+   one-point differences; <NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>, which validates
+   on all 1,000, is the usual answer.
+3. **Selection on the validation set.** Suppose 20 candidate models all have true error 0.15 and are scored on the same
+   200 points. If their 20 estimates were independent with standard deviation 0.025, the smallest would be about
+   $0.150 - 1.87 \times 0.025 = 0.103$ on average, since 1.87 is the expected maximum of 20 independent standard normal
+   variables. Reporting 0.103 as the chosen model's error overstates its accuracy by almost five points. Estimates on
+   shared validation points are positively correlated, which shrinks the effect, but the direction is the same. The
+   remedy is a test set the selection never saw (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+   selection</NoteLink>).
+
+## Cost
+
+One fit per candidate and one pass over the validation set. Hold-out is the cheapest error estimate, which is why it is
+the default when fitting is expensive: deep networks are tuned on a single fixed validation set, with $K$-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink> reserved for small data (see
+<NoteLink to="model-selection-at-scale">model selection at scale</NoteLink>).
+
+## Trade-offs
+
+- **Pessimistic bias.** The estimate describes a model fitted to $n_\text{tr}$ points. While the learning curve is still
+  falling, it overstates the error of the model refitted to all $n$.
+- **Variance from one split.** A different random split gives a different estimate. Small data make both the
+  validation noise and the split-to-split variation large. In small genomic studies with feature selection, the simple
+  split-sample estimate was seriously biased and had a larger <Gloss name="mse">mean squared error</Gloss> than
+  <Gloss name="loo" />, 10-fold cross-validation and the .632+ bootstrap <Cite id="molinaro2005" />. Averaging over many
+  random splits is <NoteLink to="repeated-and-monte-carlo-cross-validation">Monte Carlo cross-validation</NoteLink>.
+- **Data efficiency.** Each point is used either to fit or to validate. $K$-fold cross-validation uses every point for
+  both, at $K$ times the cost <Cite id="arlot2010" />.
+- **When it is the right choice.** Large datasets, where $n_\text{val}$ in the thousands still leaves most of the data
+  for fitting; expensive models; a fixed external test set; and time-ordered data, where the last period is the natural
+  validation set.
+
+## Pitfalls
+
+- **An unrepresentative split.** A random split shifts the class proportions between the two parts, in opposite
+  directions. A classifier that predicts the majority class of its training set scores 33.3% on Fisher's iris data,
+  three classes of 50, but averaged 21.7% over random two-thirds/one-third hold-out splits, because the class that is
+  over-represented in training is under-represented in validation <Cite id="kohavi1995" />. Stratified splits remove
+  the shift.
+- **Reporting the validation error after selecting on it.** The best of several validation scores is optimistic, as in
+  step 3 of the worked example. Repeated looks at the same validation set during development have the same effect (see
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink>).
+- **Too small a validation set.** A difference of one point of accuracy on 500 validation points is within the noise.
+- **Leakage through preprocessing.** A scaler, encoder or feature selector fitted before the split sees the validation
+  points (see <NoteLink to="data-leakage">data leakage</NoteLink> and
+  <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>).
+- **Records of one entity on both sides.** Several rows per patient, user or session make the validation error measure
+  recognition of the entity; split by entity (see <NoteLink to="grouped-cross-validation">grouped
+  cross-validation</NoteLink>).

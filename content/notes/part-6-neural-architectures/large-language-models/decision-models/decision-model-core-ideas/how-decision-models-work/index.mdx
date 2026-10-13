@@ -1,0 +1,76 @@
+---
+title: 'How decision models work'
+kind: overview
+summary: 'The shared mechanism of decision models: answers read from the logits of one-token answer codes, one read of the input for many questions, the server contract, LoRA training losses, calibrated rewards, temperature calibration and a build recipe.'
+tags: [decision-models, large-language-models, calibration, overview]
+aliases: [decision model core ideas, decision model mechanism]
+requires: [autoregressive-transformer-language-model, softmax-and-log-sum-exp]
+related: [decision-models, released-decision-models, adapting-pretrained-language-models]
+references: [typesafe2026models, bespoke2026nimble]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+A **decision model** is a <Gloss name="language-model">language model</Gloss> used to answer typed questions in one
+forward pass. Each allowed answer is given a single-token code, and the
+model's probabilities for the answers are a softmax over the next-token logits of those codes at the end of the prompt
+<Cite id="typesafe2026models" />. The core ideas are how the answer is read, how the read is shared across questions,
+how the model is trained to make the right code win with honest probabilities, and how the probabilities are calibrated
+afterwards.
+</Definition>
+
+## What it is for
+
+Many uses of a language model are decisions: is this message spam, which of five categories fits this ticket, how
+severe is this report on a scale of 1 to 5. Generating a text answer and parsing it is slow, can fail to parse, and
+gives no probability. A decision model returns one of the allowed answers by construction, with a probability for each,
+at the cost of reading the input once. The notes here explain the mechanism behind the released models, in enough
+detail to build one <Cite id="bespoke2026nimble" />.
+
+## Main ideas
+
+**Reading an answer from logits.** <NoteLink to="decision-models-demystified" /> introduces the idea in plain language,
+tracing one question from prompt to answer and one training example through the loss.
+<NoteLink to="answer-token-scoring" /> gives the formal readout: one code per answer, a softmax over the codes'
+logits, and an answer that is always one of the options.
+
+**One read, many questions.** <NoteLink to="shared-prefix-decision-batching" /> places the text and the full question
+schema first and each question's selector last. The prefix's key-value cache is computed once, and every question's
+short ending runs against it in a batch. <NoteLink to="decision-model-input-output-contract" /> specifies how a server
+compiles typed questions into lettered codes, renders them in the model's chat template, and maps the code logits back
+to the client's option names.
+
+**Training makes the right code win.** <NoteLink to="training-decision-models" /> fine-tunes a LoRA adapter so that the
+correct code's logit is largest at the end of the prompt. The released models differ in the loss: cross-entropy over
+the candidate codes only, or next-token cross-entropy on the letter and stop token.
+
+**Rewards that keep probabilities honest.** <NoteLink to="reinforcement-learning-for-calibrated-decisions" /> explains
+why a reward for correctness alone drives a policy to certainty, and why a reward whose expectation is a proper scoring
+rule keeps it calibrated. It also states what is and is not known about the unpublished method used for Jev.
+
+**Calibrate, then threshold.** <NoteLink to="calibrating-decision-models" /> fits a temperature per checkpoint and
+question type on held-out data, removes bias from the order of options, and sets thresholds for yes-or-no gates from
+the cost of each error.
+
+**A recipe.** <NoteLink to="building-a-decision-model" /> assembles the pieces into six stages: freeze the prompt
+contract, build contrastive data with family-level splits, train a LoRA adapter, optionally add reinforcement learning
+with a proper reward, fit temperatures, and evaluate on a frozen test set.
+
+## How the notes fit together
+
+Start with <NoteLink to="decision-models-demystified" />, then <NoteLink to="answer-token-scoring" />. Inference
+continues with <NoteLink to="shared-prefix-decision-batching" /> and the
+<NoteLink to="decision-model-input-output-contract" />. Training continues with
+<NoteLink to="training-decision-models" />, <NoteLink to="reinforcement-learning-for-calibrated-decisions" /> and
+<NoteLink to="calibrating-decision-models" />. <NoteLink to="building-a-decision-model" /> comes last and uses all of
+them.
+
+## Prerequisites and next steps
+
+The notes assume the <NoteLink to="autoregressive-transformer-language-model" />, the
+<NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> and the <NoteLink to="key-value-cache" />. Training uses
+<NoteLink to="low-rank-adaptation" />, and calibration draws on <NoteLink to="classifier-calibration" /> and
+<NoteLink to="proper-scoring-rule">proper scoring rules</NoteLink>. The topic overview <NoteLink to="decision-models" />
+places these ideas in the whole system, and <NoteLink to="released-decision-models" /> describes the models built with
+them.

@@ -1,0 +1,152 @@
+---
+title: 'Model selection'
+kind: overview
+summary: 'Estimating how well each candidate model will predict, by cross-validation, information criteria or the evidence; choosing among candidates over penalties and hyperparameters by grid, random or Bayesian search; and assessing the choice on data it never saw.'
+tags: [model-selection, generalisation, hyperparameters]
+aliases: [model comparison, complexity selection]
+requires: [empirical-risk-minimisation, bias-variance-decomposition]
+related: [statistical-learning-theory, evaluation-metrics, train-validation-and-test-splits, data-leakage]
+references: [hastie2009, arlot2010, cawley2010, kohavi1995, bergstra2012, godbole2023, bouthillier2021, melis2018]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Model selection** chooses, from data, among candidate models: different learning algorithms, different feature sets,
+or different values of a hyperparameter such as a penalty $\lambda$, a number of neighbours or a
+<Gloss name="learning-rate">learning rate</Gloss>. It answers three questions in turn. **Estimate:** how well will each
+candidate predict new data? **Select:** which candidate is kept? **Assess:** how well will the kept model predict? A
+question answered with data that an earlier question already used gets an optimistic answer, so the three are kept apart
+<Cite id="hastie2009" />.
+</Definition>
+
+## What it is for
+
+Training error falls as a model grows more flexible, while error on new data first falls and then rises
+(<NoteLink to="overfitting-and-underfitting">overfitting and underfitting</NoteLink>). The training error therefore
+picks the most flexible candidate and cannot choose. Every learner has settings that fix its flexibility: a polynomial
+degree, a penalty, a tree depth, a network's width, a number of training steps. Model selection sets them from data and
+reports the error to expect from the result. That reported error decides whether a model is deployed and whether one
+method beats another, so its bias matters as much as the choice itself.
+
+## Main ideas
+
+**Estimate, select, assess.** Estimates of prediction error come in three kinds. Held-out data give
+<NoteLink to="cross-validation">cross-validation</NoteLink> and the bootstrap <Cite id="arlot2010" />. Analytic
+corrections of the training error give $C_p$, <Gloss name="aic" />, <Gloss name="sure" /> and <Gloss name="gcv" />.
+Bayesian scores give the evidence and the posterior predictive criteria. Selection minimises an estimate over a set of
+candidates: a grid, a regularisation path or an adaptive search. Assessment scores the chosen model on data the
+selection never saw: a locked test set, <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink> or a
+reusable holdout. <NoteLink to="selecting-and-assessing-a-model">Selecting and assessing a model</NoteLink> runs all
+three on one P-spline problem. Over 200 data sets, the best of 25 cross-validation scores averaged 0.0969 against an
+average true error of 0.1012 for the chosen fit, and nested cross-validation averaged 0.1002.
+
+**Data reuse.** Each time the same data inform a decision, later estimates on those data become optimistic. The chapter
+treats four instances:
+
+- The training error is optimistic about the fit. For squared error the expected optimism is
+  $\frac2n\sum_i\cov(\hat y_i, y_i)$, which is $2p\sigma^2/n$ for least squares with $p$ coefficients
+  (<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>,
+  <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>).
+- The best cross-validation score is optimistic about the selection. The minimum of $J$ noisy estimates is biased low,
+  by at most $\sigma\sqrt{2\ln J}$ when each errs with sub-Gaussian scale $\sigma$
+  (<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>) <Cite id="cawley2010" />.
+- A test set queried many times is optimistic about everything chosen with it. Adaptive queries fit its noise
+  (<NoteLink to="reusable-holdout">reusable holdout</NoteLink>, <NoteLink to="test-set-reuse">test-set
+  reuse</NoteLink>).
+- Preprocessing fitted on all the data leaks into every fold. Scaling, imputation, encoding and
+  <NoteLink to="feature-selection">feature selection</NoteLink> are refitted inside each training fold
+  (<NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>, <NoteLink to="data-leakage">data
+  leakage</NoteLink>).
+
+## How the notes fit together
+
+Read the foundations first, then cross-validation and selection bias. The other sub-chapters can be read in any order
+after those three.
+
+**<NoteLink to="foundations-of-model-selection">Foundations of model selection</NoteLink>** explains why the training
+error cannot choose and what replaces it. Start with <NoteLink to="overfitting-and-underfitting">overfitting and
+underfitting</NoteLink> and <NoteLink to="model-selection-and-model-assessment">model selection and model
+assessment</NoteLink>, which states the rule on separate data. <NoteLink to="optimism-of-the-training-error">Optimism of
+the training error</NoteLink> sizes the bias, and <NoteLink to="validation-curves">validation curves</NoteLink> is the
+everyday diagnostic. <NoteLink to="model-selection-at-scale">Model selection at scale</NoteLink> covers models too large
+to train more than a few times.
+
+**<NoteLink to="cross-validation">Cross-validation</NoteLink>** estimates prediction error by fitting on part of the
+data and scoring the rest, in rotation. Start with <NoteLink to="hold-out-validation">hold-out validation</NoteLink> and
+<NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>, then
+<NoteLink to="leave-one-out-cross-validation">leave-one-out cross-validation</NoteLink> and its closed form for linear
+smoothers. Stratified, grouped and blocked folds make the split match deployment.
+<NoteLink to="what-cross-validation-estimates">What cross-validation estimates</NoteLink> shows that the target is the
+expected error of the procedure, not the error of the model at hand.
+
+**<NoteLink to="selection-bias-and-nested-cross-validation">Selection bias and nested cross-validation</NoteLink>**
+deals with the optimism of the winning score. <NoteLink to="overfitting-in-model-selection">Overfitting in model
+selection</NoteLink> derives its size, <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>
+assesses the whole search on outer folds it never saw, and the <NoteLink to="one-standard-error-rule">one-standard-error
+rule</NoteLink> makes the choice less sensitive to fold noise.
+
+**<NoteLink to="information-criteria">Information criteria</NoteLink>** add a complexity penalty to the training fit, so
+that one fit per candidate estimates the error on new data. Start with the
+<NoteLink to="akaike-information-criterion">Akaike information criterion</NoteLink>, whose derivation is the template,
+then <NoteLink to="mallows-cp-and-covariance-penalties">Mallows' $C_p$ and covariance penalties</NoteLink> and the
+<NoteLink to="bayesian-information-criterion">Bayesian information criterion</NoteLink>. AIC is efficient, BIC is
+consistent, and no criterion is both.
+
+**<NoteLink to="bayesian-model-selection">Bayesian model selection</NoteLink>** compares models with priors by their
+evidence or by posterior predictive accuracy. Start with
+<NoteLink to="marginal-likelihood-and-bayesian-occams-razor">the marginal likelihood and Bayesian Occam's
+razor</NoteLink>. <NoteLink to="empirical-bayes-for-hyperparameters">Empirical Bayes</NoteLink> sets hyperparameters by
+the evidence, and <NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">PSIS leave-one-out</NoteLink>
+estimates predictive accuracy from posterior draws.
+
+**<NoteLink to="regularisation">Regularisation</NoteLink>** replaces a discrete choice among models by a continuous
+family indexed by a strength $\lambda$. Start with <NoteLink to="penalised-and-constrained-regularisation">penalised and
+constrained regularisation</NoteLink> and the <NoteLink to="james-stein-estimator">James–Stein estimator</NoteLink>,
+then <NoteLink to="regularisation-paths">regularisation paths</NoteLink>.
+<NoteLink to="choosing-the-regularisation-strength">Choosing the regularisation strength</NoteLink> compares
+cross-validation, GCV, the evidence and the L-curve on one problem.
+
+**<NoteLink to="hyperparameter-search">Hyperparameter optimisation</NoteLink>** chooses among many configurations when
+each costs a training run. Start with <NoteLink to="hyperparameter-search-spaces">hyperparameter search
+spaces</NoteLink> and <NoteLink to="random-search">random search</NoteLink>, which beats a grid when few hyperparameters
+matter <Cite id="bergstra2012" />. <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> chooses each
+trial from a surrogate of the validation loss, through an <NoteLink to="acquisition-functions">acquisition
+function</NoteLink> such as <NoteLink to="expected-improvement">expected improvement</NoteLink> or a
+<NoteLink to="tree-structured-parzen-estimator">tree-structured Parzen estimator</NoteLink>.
+<NoteLink to="multi-fidelity-hyperparameter-optimisation">Multi-fidelity hyperparameter optimisation</NoteLink> judges
+configurations on few epochs or a data subset and trains only the survivors; start with
+<NoteLink to="successive-halving">successive halving</NoteLink> and <NoteLink to="hyperband">Hyperband</NoteLink>.
+
+**<NoteLink to="comparing-learning-algorithms">Comparing learning algorithms</NoteLink>** tests whether one model or
+algorithm beats another. Start with <NoteLink to="mcnemars-test">McNemar's test</NoteLink> for two classifiers on one
+test set and the <NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink> for cross-validated
+scores, whose folds are correlated. <NoteLink to="comparing-classifiers-over-multiple-datasets">Comparing classifiers
+over multiple data sets</NoteLink> uses ranks, and <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in
+comparisons</NoteLink> shows how an under-tuned baseline biases the result.
+
+## Practical defaults
+
+On small and medium data, practitioners estimate by 5- or 10-fold cross-validation, stratified for classification and
+grouped when records cluster by patient, user or site <Cite id="kohavi1995" />. They assess the tuned procedure by
+nested cross-validation, or by a test set locked away before any analysis. Large models are selected on one validation
+set and assessed once on a held-out test set, because each training run is too expensive to repeat $K$ times
+(<NoteLink to="model-selection-at-scale">model selection at scale</NoteLink>). Searches start with random or
+quasi-random designs, move to <Gloss name="tpe" /> or Bayesian optimisation for the final study, and stop poor trials
+early with <Gloss name="asha">asynchronous successive halving</Gloss> or Hyperband <Cite id="godbole2023" />. A reported
+comparison gives results over several seeds and splits, and tunes every method with the same budget
+<Cite id="bouthillier2021" /> <Cite id="melis2018" />.
+
+## Prerequisites and next steps
+
+The chapter assumes <NoteLink to="empirical-risk-minimisation">empirical risk minimisation</NoteLink> and the
+<NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>, which explains the U-shaped test
+error. Guarantees for choosing complexity, such as <NoteLink to="structural-risk-minimisation">structural risk
+minimisation</NoteLink>, <NoteLink to="minimum-description-length">minimum description length</NoteLink> and
+<NoteLink to="test-set-bounds">test-set bounds</NoteLink>, are in <NoteLink to="statistical-learning-theory">statistical
+learning theory</NoteLink>. The data engineering of splits and leakage is in Part III, from
+<NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink> to
+<NoteLink to="data-leakage">data leakage</NoteLink>, and time-ordered data need
+<NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>. The score being minimised is chosen
+in <NoteLink to="evaluation-metrics">evaluation metrics</NoteLink>. Training-time controls on complexity in neural
+networks, such as <NoteLink to="early-stopping">early stopping</NoteLink>, are covered in Part VI.

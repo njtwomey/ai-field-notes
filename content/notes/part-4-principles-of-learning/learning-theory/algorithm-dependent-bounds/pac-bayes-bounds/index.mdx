@@ -1,0 +1,237 @@
+---
+title: 'PAC-Bayes bounds'
+kind: concept
+summary: 'A PAC-Bayes bound controls the risk of a randomised predictor drawn from a posterior $Q$ by its empirical risk plus a term in $\mathrm{KL}(Q\,\|\,P)/m$, where the prior $P$ is fixed before seeing the data. It holds for every $Q$ at once.'
+tags: [learning-theory, generalisation, bayesian, worked-example]
+aliases: [PAC-Bayesian bound, PAC-Bayes, PAC-Bayesian theorem, McAllester bound, Seeger bound, Catoni bound, Gibbs classifier, Gibbs risk, Gibbs posterior]
+requires: [occam-bound, kullback-leibler-divergence, hoeffdings-inequality]
+related: [non-vacuous-generalisation-bounds, information-theoretic-generalisation-bounds, test-set-bounds, minimum-description-length, bayesian-inference, variational-inference, flat-minima-and-sharpness, sample-compression-bounds, algorithm-dependent-bounds]
+references: [mcallester1999, seeger2002, maurer2004, catoni2007, alquier2024, donsker1975, langford2005, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { KlInversion } from './KlInversion'
+
+<Definition>
+Let $\Hcal$ be a set of hypotheses, $\ell(h, z) \in [0, 1]$ a loss, and $P$ a distribution on $\Hcal$, the **prior**,
+chosen before the sample $S$ of $m$ independent examples is drawn. For any distribution $Q$ on $\Hcal$, the
+**posterior**, the **Gibbs risk** $R(Q) = \expect_{h \sim Q} R(h)$ is the risk of the randomised predictor that draws a
+fresh $h \sim Q$ for each prediction, and $\hat R_S(Q) = \expect_{h \sim Q}\hat R_S(h)$ is its empirical counterpart.
+For $m \ge 8$ and $\delta \in (0, 1)$, with probability at least $1 - \delta$ over $S$, every $Q$ satisfies
+
+$$
+\operatorname{kl}\paren{\hat R_S(Q) \,\|\, R(Q)} \le \frac{\KL(Q \,\|\, P) + \ln(2\sqrt m/\delta)}{m},
+$$
+
+where $\operatorname{kl}(q \,\|\, p) = q\ln\frac qp + (1 - q)\ln\frac{1 - q}{1 - p}$ is the Kullback–Leibler divergence
+between Bernoulli laws. Consequently
+
+$$
+R(Q) \le \hat R_S(Q) + \sqrt{\frac{\KL(Q \,\|\, P) + \ln(2\sqrt m/\delta)}{2m}}
+$$
+
+<Cite id="seeger2002" /> <Cite id="maurer2004" /> <Cite id="mcallester1999" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="occam-bound">Occam bound</NoteLink> gives each hypothesis $h$ in a countable class a share
+$\delta P(h)$ of the failure probability, so a hypothesis pays $\ln(1/P(h))$ in its bound. A learner that returns a
+single hypothesis with small prior weight pays a lot, even when many nearby hypotheses fit the data equally well.
+
+A PAC-Bayes bound lets the learner return a whole distribution $Q$ over hypotheses, and charges it
+$\KL(Q \,\|\, P)$ instead. If $Q$ concentrates on a single $h$ in a countable class, then
+$\KL(Q \,\|\, P) = \ln(1/P(h))$ and the Occam bound returns. If $Q$ spreads over a large region that the prior also
+covers, the divergence is small even when every individual hypothesis in the region has tiny prior weight. The bound
+rewards a posterior that is broad where the data allow it.
+
+For a network with real-valued weights, a natural posterior is a Gaussian centred on the trained weights. Its width
+can be large in directions where perturbing the weights does not change the training error, and must be small in
+directions where it does. A solution that tolerates large perturbations admits a wide posterior with a small divergence
+from a broad prior, and so a small bound. This is the link between PAC-Bayes and
+<NoteLink to="flat-minima-and-sharpness">flat minima</NoteLink>.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, PAC-Bayes replaces the
+<NoteLink to="union-bound">union bound</NoteLink> of the uniform step by a change of measure, and the capacity term
+becomes a divergence that depends on the output of the learner. The prior plays the role that the code plays in the
+Occam bound. It must be fixed before the data, but it need not be anyone's belief, and the bound holds whatever
+distribution generated the data <Cite id="langford2005" />.
+
+## Priors, posteriors and Gibbs risk
+
+The words come from <NoteLink to="bayesian-statistics">Bayesian statistics</NoteLink>, and the objects differ.
+
+- **The prior** is any distribution over hypotheses fixed before seeing $S$. It may use other data, such as a separate
+  sample or the random initialisation of a network, as long as it does not use $S$.
+- **The posterior** is any distribution, chosen after seeing $S$. It need not be the Bayesian posterior. The bound holds
+  simultaneously for every $Q$, so the learner can optimise $Q$ to make the bound small.
+- **The Gibbs predictor** draws $h \sim Q$ afresh for each input. The bound controls its risk $R(Q)$. The majority vote
+  of $Q$, which predicts the label that most of $Q$'s mass predicts, has risk at most $2R(Q)$: whenever the vote errs,
+  at least half of $Q$ errs.
+
+For a fixed $\lambda > 0$, the **Gibbs posterior**
+$Q_\lambda(h) \propto P(h)\exp(-\lambda\hat R_S(h))$ minimises $\lambda\hat R_S(Q) + \KL(Q \,\|\, P)$ over all $Q$
+<Cite id="alquier2024" />. When the loss is the negative log-likelihood and $\lambda = m$,
+$\exp(-m\hat R_S(h))$ is the likelihood of the sample under $h$, and the Gibbs posterior is the Bayesian posterior
+(<NoteLink to="bayesian-inference">Bayesian inference</NoteLink>).
+
+## The bound and its derivation
+
+A linear form of the bound, due to Catoni, has the following derivation <Cite id="catoni2007" />
+<Cite id="alquier2024" />. For any fixed $\lambda > 0$, with probability at least $1 - \delta$, every $Q$ satisfies
+
+$$
+R(Q) \le \hat R_S(Q) + \frac{\lambda}{8m} + \frac{\KL(Q \,\|\, P) + \ln(1/\delta)}{\lambda}.
+$$
+
+
+
+**Step 1: one hypothesis, an exponential moment.** Fix $h$. The losses $\ell(h, z_i)$ are independent and lie in
+$[0, 1]$, so each term of $\lambda(R(h) - \hat R_S(h)) = \sum_i \frac\lambda m(R(h) - \ell(h, z_i))$ is a centred
+variable with range $\lambda/m$. <NoteLink to="hoeffdings-inequality">Hoeffding's lemma</NoteLink>
+(<NoteLink to="sub-gaussian-random-variables">sub-Gaussian random variables</NoteLink>) bounds the
+<Gloss name="mgf">moment generating function</Gloss> of each term by $\exp(\lambda^2/(8m^2))$, and independence
+multiplies them:
+
+$$
+\expect_S \exp\paren{\lambda(R(h) - \hat R_S(h))} \le \exp\paren{\frac{\lambda^2}{8m}}.
+$$
+
+**Step 2: average over the prior.** The prior does not depend on $S$, so the order of the two expectations can be
+swapped (Tonelli's theorem for non-negative functions):
+
+$$
+\expect_S\, \expect_{h \sim P}\exp\paren{\lambda(R(h) - \hat R_S(h))} \le \exp\paren{\frac{\lambda^2}{8m}}.
+$$
+
+**Step 3: Markov's inequality.** The inner expectation $X_S = \expect_{h \sim P}\exp(\lambda(R(h) - \hat R_S(h)))$ is a
+non-negative <NoteLink to="random-variable">random variable</NoteLink>. By
+<NoteLink to="markov-and-chebyshev-inequalities">Markov's inequality</NoteLink>, with probability at least $1 - \delta$,
+
+$$
+\ln X_S \le \frac{\lambda^2}{8m} + \ln\frac1\delta.
+$$
+
+**Step 4: change of measure.** The Donsker–Varadhan inequality states that for any function $f$ on $\Hcal$ and any
+distribution $Q$,
+
+$$
+\expect_{h \sim Q} f(h) \le \KL(Q \,\|\, P) + \ln\expect_{h \sim P} e^{f(h)}
+$$
+
+<Cite id="donsker1975" />. Apply it with $f(h) = \lambda(R(h) - \hat R_S(h))$. The left side is
+$\lambda(R(Q) - \hat R_S(Q))$ and the logarithm on the right is $\ln X_S$. On the event of Step 3, for every $Q$,
+
+$$
+\lambda\paren{R(Q) - \hat R_S(Q)} \le \KL(Q \,\|\, P) + \frac{\lambda^2}{8m} + \ln\frac1\delta.
+$$
+
+**Step 5: divide by $\lambda$.** This gives the linear bound.
+
+The event in Step 3 does not involve $Q$. That is why the bound holds for all posteriors at once, and why $Q$ may be
+chosen after looking at the data. No union bound over hypotheses appears.
+
+<Derivation title="The Donsker–Varadhan inequality">
+
+Take a finite $\Hcal$ for simplicity and $Q$ with $Q(h) > 0$ only where $P(h) > 0$. Define the
+<NoteLink to="expectation-propagation">tilted distribution</NoteLink> $P_f(h) = P(h)e^{f(h)}/Z$ with
+$Z = \expect_{h \sim P}e^{f(h)}$. Then
+
+$$
+0 \le \KL(Q \,\|\, P_f) = \sum_h Q(h)\ln\frac{Q(h)Z}{P(h)e^{f(h)}} = \KL(Q \,\|\, P) + \ln Z - \expect_{h \sim Q}f(h).
+$$
+
+Rearranging gives the inequality. Equality holds when $Q = P_f$. With $f = -\lambda\hat R_S$, the minimiser of
+$\lambda\hat R_S(Q) + \KL(Q \,\|\, P)$ is therefore the Gibbs posterior $Q_\lambda \propto P e^{-\lambda\hat R_S}$. The
+general case replaces sums by integrals and $Q(h)/P(h)$ by the density $dQ/dP$.
+
+</Derivation>
+
+**Choosing $\lambda$.** The right side is smallest at $\lambda = \sqrt{8m(\KL(Q \,\|\, P) + \ln(1/\delta))}$, where it
+equals $\hat R_S(Q) + \sqrt{(\KL(Q \,\|\, P) + \ln(1/\delta))/(2m)}$. But $\lambda$ must be fixed before the data, and
+the best value depends on $Q$, which depends on the data. The standard fix is a union bound over a grid of $J$ values of
+$\lambda$, each with confidence $\delta/J$, which adds $\ln J$ to the numerator. McAllester's original bound pays in
+this way: $R(Q) \le \hat R_S(Q) + \sqrt{(\KL(Q \,\|\, P) + \ln(1/\delta) + \frac52\ln m + 8)/(2m - 1)}$
+<Cite id="mcallester1999" /> <Cite id="alquier2024" />.
+
+## The kl and Catoni forms
+
+The bound in the definition replaces Hoeffding's lemma by a sharper exponential moment. Maurer proved that for $m \ge 8$
+independent variables in $[0, 1]$ with mean $\mu$ and average $\hat\mu$,
+$\expect\exp(m\operatorname{kl}(\hat\mu \,\|\, \mu)) \le 2\sqrt m$ <Cite id="maurer2004" />. Running Steps 2 to 4 with
+$f(h) = m\operatorname{kl}(\hat R_S(h) \,\|\, R(h))$ gives
+$m\,\expect_{h \sim Q}\operatorname{kl}(\hat R_S(h) \,\|\, R(h)) \le \KL(Q \,\|\, P) + \ln(2\sqrt m/\delta)$. The
+binary divergence is jointly convex, so by Jensen's inequality the expectation over $Q$ can move inside, which gives the
+**Seeger–Maurer kl bound** of the definition <Cite id="seeger2002" />. It needs no tuning parameter.
+
+The kl bound is an implicit statement about $R(Q)$. The bound is the largest $p$ with
+$\operatorname{kl}(\hat R_S(Q) \,\|\, p) \le c$, where $c = (\KL(Q \,\|\, P) + \ln(2\sqrt m/\delta))/m$. Two explicit
+relaxations show its behaviour.
+
+- **Pinsker's inequality** $\operatorname{kl}(q \,\|\, p) \ge 2(q - p)^2$ gives $R(Q) \le \hat R_S(Q) + \sqrt{c/2}$,
+  the **McAllester form** in the definition, with better constants than McAllester's original
+  <Cite id="alquier2024" />.
+- **Near zero empirical risk,** $\operatorname{kl}(0 \,\|\, p) = -\ln(1 - p) \ge p$, so $\hat R_S(Q) = 0$ gives
+  $R(Q) \le c$. The bound decays like $1/m$ instead of $1/\sqrt m$, the PAC-Bayes analogue of the
+  <NoteLink to="realisable-and-agnostic-learning">realisable rate</NoteLink>.
+
+Catoni's form gives an explicit bound that keeps the $1/m$ behaviour <Cite id="catoni2007" />. For a constant $C > 0$
+fixed in advance, with probability at least $1 - \delta$, every $Q$ satisfies
+
+$$
+R(Q) \le \frac{1 - \exp\paren{-C\hat R_S(Q) - (\KL(Q \,\|\, P) + \ln(1/\delta))/m}}{1 - e^{-C}}.
+$$
+
+<KlInversion />
+
+## Worked example
+
+A linear classifier $h_{\wvec}(x) = \sgn\inner{\wvec}{x}$ in $d = 100$ dimensions is trained on $m = 10{,}000$ examples.
+The prior is $P = \Gauss(\zeros, \eye)$, fixed in advance. The posterior is $Q = \Gauss(\hat\wvec, \sigma^2\eye)$,
+centred on the trained weights $\hat\wvec$ with $\norm{\hat\wvec} = 10$. Suppose a Monte Carlo estimate on the training
+set gives Gibbs training error $\hat R_S(Q) = 0.05$ for $\sigma = 1$. Take $\delta = 0.05$.
+
+1. **The divergence.** For two Gaussians with identity-scaled covariances,
+   $\KL(\Gauss(\hat\wvec, \sigma^2\eye) \,\|\, \Gauss(\zeros, \eye)) = \frac12\paren{d\sigma^2 + \norm{\hat\wvec}^2 - d - d\ln\sigma^2}$
+   (<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink>). For $\sigma = 1$ this is
+   $\frac12\norm{\hat\wvec}^2 = 50$ nats, whatever $d$ is.
+2. **The complexity term.** $\ln(2\sqrt m/\delta) = \ln(2 \cdot 100/0.05) = \ln 4{,}000 = 8.29$, so
+   $c = (50 + 8.29)/10{,}000 = 0.0058$.
+3. **Four bounds on the Gibbs risk.**
+   - McAllester form: $0.05 + \sqrt{0.0058/2} = 0.05 + 0.054 = 0.104$.
+   - McAllester's original constants: $0.115$.
+   - Seeger–Maurer kl form: the largest $p$ with $\operatorname{kl}(0.05 \,\|\, p) \le 0.0058$ is $p = 0.077$.
+   - Catoni's form with $C = 0.5$: $0.076$.
+
+   The kl and Catoni forms are tighter because the empirical risk is small,
+   where $\operatorname{kl}(\hat R_S(Q) \,\|\, p)$ rises steeply in $p$.
+4. **The width of the posterior.** A narrower posterior lowers the Gibbs training error towards the error of
+   $\hat\wvec$ itself, but raises the divergence: $\sigma = 0.5$ gives $\KL = 81.8$, $\sigma = 0.25$ gives 141.8 and
+   $\sigma = 0.1$ gives 230.8. The best $\sigma$ balances the two, and finding it is the optimisation of
+   <NoteLink to="non-vacuous-generalisation-bounds">non-vacuous generalisation bounds</NoteLink>.
+5. **Sample size.** For the McAllester width $\sqrt{c/2}$ to fall to 0.02, $c$ must fall to 0.0008, which needs
+   $m \approx 74{,}000$ (solving $m = (50 + \ln(2\sqrt m/0.05))/0.0008$ by iteration). For the kl bound to sit 0.02
+   above an empirical risk of 0.05 needs only $m \approx 17{,}000$.
+6. **Vacuous or not.** All four bounds are well below 0.5, so they are informative. A
+   <NoteLink to="vapnik-chervonenkis-dimension">VC bound</NoteLink> for half-spaces in 100 dimensions depends on $d$;
+   this bound depends on $\norm{\hat\wvec}$ and $\sigma$, and the same numbers hold in $d = 10^6$.
+
+{/* figure pending engine (B2 pacBayesLinear; A1 pacBayesBound, klInverse): Gibbs training and test error, KL and the
+three bound forms against the posterior width σ for a linear classifier on a small dataset, with the minimiser of the
+bound marked */}
+
+## Pitfalls
+
+- **The prior must not depend on $S$.** Centring the prior on weights trained on $S$ voids the bound. A prior may use a
+  separate part of the data, which is then not part of $S$.
+- **The bound is for the randomised predictor.** It controls $R(Q)$, not the risk of the mean weights $\hat\wvec$.
+  Statements about a deterministic predictor need a separate step, such as the factor 2 for the majority vote or a
+  margin argument.
+- **The Gibbs training error must itself be estimated.** It is an expectation over $Q$, usually estimated by sampling.
+  The sampling error needs its own bound and its own share of $\delta$.
+- **A free parameter must be fixed in advance or paid for.** Optimising $\lambda$ or $C$ after seeing the data needs a
+  union bound over a grid.
+- **Scale invariance is not automatic.** Rescaling the weights of $h_{\wvec}$ leaves the classifier unchanged but
+  changes $\KL(Q \,\|\, P)$ for a fixed prior. The prior's scale must be chosen with care, often by a union bound over
+  a grid of scales.

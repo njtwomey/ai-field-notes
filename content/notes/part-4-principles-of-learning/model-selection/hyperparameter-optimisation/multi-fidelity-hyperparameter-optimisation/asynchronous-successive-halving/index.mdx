@@ -1,0 +1,166 @@
+---
+title: 'Asynchronous successive halving'
+kind: technique
+summary: 'Asynchronous successive halving (ASHA) promotes a configuration to the next rung as soon as it ranks in the top $1/\eta$ of the results its rung has so far, and otherwise starts a new configuration, so no worker waits for a rung to fill. Its first full-budget result comes within $2R$.'
+tags: [model-selection, hyperparameters, distributed, early-stopping, worked-example]
+aliases: [ASHA, asynchronous SHA, ASHAScheduler, asynchronous Hyperband]
+requires: [successive-halving]
+related: [hyperband, bayesian-optimisation-and-hyperband, population-based-training, batch-bayesian-optimisation, random-search]
+references: [li2020asha, li2018hyperband, falkner2018bohb, jamieson2016, akiba2019]
+status: draft
+updated: 2026-10-13
+---
+
+import { AshaTimeline } from './AshaTimeline'
+
+<Definition>
+**Asynchronous successive halving** (<Gloss name="asha" />) runs
+<NoteLink to="successive-halving">successive halving</NoteLink> on parallel workers without waiting for rungs to fill
+<Cite id="li2020asha" />. Whenever a worker is free, it looks for a configuration that ranks in the top
+$\lfloor m_k/\eta \rfloor$ of the $m_k$ results finished so far at some rung $k$ and has not been promoted. If it finds
+one, starting from the highest rung, it trains that configuration to the next rung's budget. Otherwise it draws a new
+configuration and trains it at the bottom rung. The bottom rung keeps growing until the overall budget runs out, so the
+number of configurations need not be fixed in advance.
+</Definition>
+
+## Problem
+
+Synchronous successive halving evaluates every configuration of a rung, ranks them, and only then starts the next rung.
+On parallel workers that causes three kinds of waste <Cite id="li2020asha" />:
+
+- **Idle workers at rung boundaries.** The last few jobs of a rung occupy a few workers while the rest wait. Upper rungs
+  have fewer configurations than workers, so most workers idle there.
+- **Stragglers and failures.** One slow or crashed run holds up the whole rung. Training times differ between
+  configurations: in one of Li et al.'s benchmarks, a full training run took 30 minutes on average with a standard
+  deviation of 27 minutes <Cite id="li2020asha" />.
+- **Late results.** No configuration reaches the full budget $R$ until every lower rung is complete. On a large search
+  that takes many multiples of the time to train one model, and there is no fully trained model to look at before then.
+
+Running independent copies of successive halving, one per worker, removes the waiting but returns nothing until a whole
+bracket finishes on one worker. Li et al. aimed instead at returning a good fully trained configuration in little more
+than the time to train one <Cite id="li2020asha" />.
+
+## Mechanism
+
+### The promotion rule
+
+Fix a minimum budget $r$, a maximum $R$, a reduction factor $\eta$ and an early-stopping rate $s$, so rung $k$ trains to
+budget $r_k = r\eta^{s + k}$ for $k = 0, \dots, K$ with $r_K \le R$. Each rung keeps the list of configurations
+evaluated at it and their losses. When a worker becomes free:
+
+1. For $k = K - 1, K - 2, \dots, 0$: let $m_k$ be the number of results at rung $k$. If some configuration among the
+   best $\lfloor m_k/\eta \rfloor$ of them has not yet been promoted, promote it: train it to $r_{k+1}$ and record its
+   loss at rung $k + 1$.
+2. If no rung has a promotable configuration, draw a new configuration and train it to $r_0$.
+
+Promotions are checked from the top down, so the work goes to the configurations closest to $R$ first. A configuration
+needs only $\eta$ results at its rung to be promoted, not the whole rung.
+
+### Why the rule approaches the synchronous one
+
+Synchronous successive halving keeps the best $\lfloor n_k/\eta \rfloor$ of a full rung of $n_k$. ASHA applies the same
+fraction to the $m_k$ results it has. Let $q$ be the $1/\eta$ quantile of the losses that the rung would contain if it
+were complete. The empirical $1/\eta$ quantile of the first $m_k$ results estimates $q$, and its error shrinks as
+$m_k^{-1/2}$. A configuration is **mispromoted** when ASHA promotes it early but it would not be in the top
+$\lfloor n_k/\eta \rfloor$ of the full rung. That happens only to configurations whose loss lies between $q$ and the
+current estimate, so the fraction of mispromotions falls as the rung grows. Li et al. argue that the number of
+mispromotions in a rung of $n$ configurations is roughly $\sqrt{n}$, by the convergence of the empirical distribution
+function, so the fraction mispromoted is about $1/\sqrt{n}$ <Cite id="li2020asha" />.
+
+<Derivation title="A heuristic count of mispromotions">
+Treat the losses at rung $k$ as independent draws from a continuous distribution $F$, and let $F_m$ be the empirical
+distribution function of the first $m$ results. The <Gloss name="dkw">Dvoretzky–Kiefer–Wolfowitz inequality</Gloss>
+gives $\prob\paren{\sup_x \abs{F_m(x) - F(x)} > \varepsilon} \le 2e^{-2m\varepsilon^2}$, so $\abs{F_m - F}$ is of order
+$m^{-1/2}$ uniformly. ASHA promotes after the $m$-th result a configuration whose empirical quantile $F_m(L)$ is at most
+$1/\eta$. Its true quantile $F(L)$ is then at most $1/\eta + c\,m^{-1/2}$ for a constant $c$ with high probability, so
+it is mispromoted only if $F(L)$ falls in a band of width about $c\,m^{-1/2}$ above $1/\eta$. Each new result lands in
+that band with probability about $c\,m^{-1/2}$. Summing over the results of a rung of size $n$,
+
+$$
+\sum_{m=1}^{n} c\,m^{-1/2} \le c\paren{1 + \int_1^n x^{-1/2}\,dx} < 2c\sqrt{n}.
+$$
+
+The count of mispromotions grows as $\sqrt{n}$ and their fraction as $1/\sqrt{n}$. At higher rungs the configurations
+are no longer independent draws, because they were selected from the rung below, and the argument is only a guide
+<Cite id="li2020asha" />.
+</Derivation>
+
+### The first fully trained configuration
+
+A configuration reaches $R$ only after passing every rung, so the earliest it can finish, starting from scratch at each
+rung, is the sum of the rung budgets. With $s = 0$ and $R = r\eta^K$,
+
+$$
+\sum_{k=0}^{K} r\eta^k = R\sum_{j=0}^{K}\eta^{-j} < \frac{R}{1 - 1/\eta} = \frac{\eta}{\eta - 1}R \le 2R,
+$$
+
+where the middle step writes $r\eta^k = R\eta^{-(K - k)}$ and sums the geometric series, and the last uses $\eta \ge 2$.
+ASHA reaches this bound when there are enough workers that the $\eta$ results needed for each promotion arrive in the
+time one evaluation at that rung takes. With resumed training the first configuration reaches $R$ after exactly $R$
+<Cite id="li2020asha" />. Synchronous successive halving with $W$ workers cannot return anything at $R$ before
+$\sum_{k < K}\lceil n_k/W \rceil r_k + R$, which grows with the number of configurations.
+
+### ASHA within Hyperband
+
+ASHA runs one bracket, with one early-stopping rate $s$. An asynchronous version of
+<NoteLink to="hyperband">Hyperband</NoteLink> loops over brackets with different $s$, each run as ASHA
+<Cite id="li2020asha" />. Li et al. found that the most aggressive bracket alone usually did best on their benchmarks,
+which is why ASHA is often used on its own.
+
+<AshaTimeline />
+
+## Worked example
+
+Take $n = 81$ configurations, $r = 1$, $R = 9$ and $\eta = 3$, so the rungs are 81 configurations at budget 1, 27 at
+3 and 9 at 9. Eight workers run them; an evaluation takes as long as its budget. The curves are the seeded family of the
+figure ($\kappa = 0.5$, no noise, seed 4).
+
+1. **Synchronous.** Rung 0 has 81 jobs of length 1 on 8 workers: $\lceil 81/8 \rceil = 11$ rounds, 11 time units. Rung
+   1 has 27 jobs of length 3: $\lceil 27/8 \rceil = 4$ rounds, 12 time units. Rung 2 has 9 jobs of length 9: 2 rounds,
+   18 time units. The first configuration trained to $R$ finishes at $11 + 12 + 9 = 32$, the whole search at
+   $11 + 12 + 18 = 41$. It spends $81 + 81 + 81 = 243$ budget units, and the workers are busy 74% of the time.
+2. **ASHA.** The first eight bottom-rung results arrive at time 1, and the best $\lfloor 8/3 \rfloor = 2$ are promoted
+   at once. The first configuration trained to $R$ finishes at time 13, the bound $1 + 3 + 9$ of the mechanism, against
+   32. The search also ends at time 41, with the workers busy 86% of the time.
+3. **The price.** ASHA promoted 28 configurations from rung 0 instead of 27, and 13 from rung 1 instead of 9. Of these,
+   5 are mispromotions: 1 at rung 0 and 4 at rung 1, where the rungs are small. The extra evaluations cost
+   $1 \times 3 + 4 \times 9 = 39$ budget units, so ASHA spends 282 against 243.
+4. **The result.** Both return the configuration with the best final loss, $0.126$.
+
+On a single worker the contrast is starker. Synchronous successive halving finishes its first configuration at $R$ after
+$81 + 81 + 9 = 171$ time units. ASHA finishes one after 26, and the rest of the search fills in around it.
+
+## Cost
+
+ASHA spends slightly more budget than synchronous successive halving on the same configurations, because mispromoted
+configurations are trained further. In exchange it keeps workers busy, tolerates slow and failed jobs, and returns a
+fully trained configuration within about $2R$ of starting when there are enough workers. Li et al. report linear
+speed-ups with the number of workers, runs on 500 workers, and, on one benchmark with 25 workers, a good configuration
+in about the time to train a single model <Cite id="li2020asha" />.
+
+## Trade-offs
+
+- **Asynchronous against synchronous.** With few workers, equal training times and a fixed set of configurations, the
+  synchronous schedule wastes little and makes no mispromotions. ASHA's gains grow with the number of workers and with
+  the spread of training times.
+- **Against <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink>.** ASHA samples configurations at
+  random. Model-based sampling, as in <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink>, needs results
+  to fit its model and is harder to run asynchronously at scale; on one benchmark Li et al. found ASHA faster than
+  BOHB's synchronous scheduler to a good configuration, and BOHB slightly better at the end <Cite id="li2020asha" />.
+- **Against population-based training.** <NoteLink to="population-based-training">Population-based training</NoteLink>
+  also stops weak runs asynchronously, but it changes the hyperparameters of the survivors during training instead of
+  only deciding which runs continue.
+- **Tools.** Ray Tune's `ASHAScheduler` and Optuna's `SuccessiveHalvingPruner` implement ASHA, the latter as a pruner
+  that stops trials of any sampler at the rungs <Cite id="akiba2019" />.
+
+## Pitfalls
+
+- **Small rungs promote on little evidence.** The first promotions at each rung use only $\eta$ results. With noisy
+  low-budget losses, those early promotions are close to random.
+- **The bottom rung never stops growing.** Without a cap on configurations or total budget, ASHA keeps sampling new
+  configurations. Set the budget, or the number of trials, explicitly.
+- **Bias toward fast configurations.** A configuration that trains quickly finishes its rung sooner and is compared
+  earlier. When cost and quality are correlated, for example small models that train fast and finish worse, the early
+  promotions favour the cheap configurations.
+- **All the pitfalls of successive halving.** Crossing curves, budget-dependent schedules and the optimistic validation
+  loss of the winner apply unchanged.

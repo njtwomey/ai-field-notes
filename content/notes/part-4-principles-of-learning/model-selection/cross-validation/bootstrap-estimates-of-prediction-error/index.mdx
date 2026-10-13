@@ -1,0 +1,216 @@
+---
+title: 'Bootstrap estimates of prediction error'
+kind: technique
+summary: 'Bootstrap estimators fit on resamples and test each point on the fits that did not draw it. The leave-one-out bootstrap is pessimistic; the .632 estimator mixes it with the training error, and .632+ corrects that mix when the model overfits heavily.'
+tags: [model-selection, evaluation, resampling, worked-example]
+aliases: [leave-one-out bootstrap, .632 bootstrap, .632 estimator, .632+ bootstrap, .632+ estimator, no-information error rate, relative overfitting rate, bootstrap prediction error]
+requires: [bootstrap, k-fold-cross-validation]
+related: [bagging, random-forest, repeated-and-monte-carlo-cross-validation, what-cross-validation-estimates, optimism-of-the-training-error]
+references: [efron1983, efron1997, hastie2009, kohavi1995, breiman1996, breiman2001, bates2024]
+status: draft
+updated: 2026-10-13
+---
+
+import { BootstrapEstimators } from './BootstrapEstimators'
+import { OutOfBagAgainstCv } from './OutOfBagAgainstCv'
+
+<Definition>
+Draw $B$ <NoteLink to="bootstrap">bootstrap</NoteLink> samples $\Dcal^{*1}, \dots, \Dcal^{*B}$, each of $n$ examples
+drawn with replacement from the training sample $\Dcal$, and fit a model $\hat f^{*b}$ to each. Let $C^{-i}$ be the set
+of samples that do not contain example $i$. The **leave-one-out bootstrap** estimate of prediction error is
+
+$$
+\widehat{\operatorname{Err}}^{(1)} = \frac1n\sum_{i=1}^n \frac{1}{\abs{C^{-i}}}\sum_{b \in C^{-i}} \ell\paren{y_i, \hat f^{*b}(\xvec_i)}.
+$$
+
+The **.632 estimator** is $\widehat{\operatorname{Err}}^{(.632)} = 0.368\,\overline{\operatorname{err}} + 0.632\,
+\widehat{\operatorname{Err}}^{(1)}$, where $\overline{\operatorname{err}}$ is the training error of the model fitted to
+all of $\Dcal$ <Cite id="efron1983" />. The **.632+ estimator** raises the weight on
+$\widehat{\operatorname{Err}}^{(1)}$ as the model overfits more <Cite id="efron1997" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="cross-validation">Cross-validation</NoteLink> estimates prediction error by holding out each point once.
+Its estimate is nearly unbiased but variable: with $K$ folds it averages over one random partition, and leave-one-out
+averages over models that are almost identical. The bootstrap averages over many overlapping training sets of size $n$,
+which smooths the estimate. Efron introduced bootstrap estimators of prediction error as lower-variance alternatives to
+cross-validation <Cite id="efron1983" />.
+
+The direct bootstrap estimate fails. Fit $\hat f^{*b}$ to each resample and score it on the original sample:
+
+$$
+\widehat{\operatorname{Err}}_\text{boot} = \frac1B\sum_{b=1}^B \frac1n\sum_{i=1}^n \ell\paren{y_i, \hat f^{*b}(\xvec_i)}.
+$$
+
+The resample $\Dcal^{*b}$ plays the training set and $\Dcal$ plays the test set, but the two overlap. Most of the points
+scored were in the fit, and $\widehat{\operatorname{Err}}_\text{boot}$ is optimistic for the same reason the training
+error is (see <NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>). The estimators
+below keep the bootstrap's averaging and remove the overlap. All three answer the question "how well will this learning
+procedure predict new data?", the *estimate* question of <NoteLink to="model-selection">model selection</NoteLink>.
+
+## Mechanism
+
+### How much of the sample a resample contains
+
+A bootstrap sample makes $n$ independent draws, each picking example $i$ with probability $1/n$. Example $i$ is missed
+by one draw with probability $1 - 1/n$, so it is missed by all $n$ with probability
+
+$$
+\Pr\paren{i \notin \Dcal^{*b}} = \paren{1 - \frac1n}^n \;\longrightarrow\; e^{-1} \approx 0.368
+\quad (n \to \infty).
+$$
+
+The limit follows from $\log(1 - 1/n)^n = n\log(1 - 1/n) = -1 - \frac{1}{2n} - \dots \to -1$. At $n = 100$ the
+probability is already $0.366$. A resample therefore contains about $63.2\%$ of the distinct examples, some of them
+several times, and leaves out the other $36.8\%$. Each example is left out of about $0.368B$ of the $B$ resamples.
+
+### The leave-one-out bootstrap
+
+$\widehat{\operatorname{Err}}^{(1)}$ scores each example only on the models that never saw it, the members of
+$C^{-i}$. It is cross-validation with random, overlapping training sets. Each model is trained on about $0.632n$
+distinct examples. If the <NoteLink to="learning-curves-and-sample-size">learning curve</NoteLink> is still falling at
+$n$, a model trained on fewer distinct examples predicts worse, and $\widehat{\operatorname{Err}}^{(1)}$ overestimates
+the error of the model fitted to all $n$. Its bias is roughly that of 2-fold cross-validation, whose models see $n/2$
+examples <Cite id="hastie2009" />.
+
+### The .632 estimator
+
+The training error $\overline{\operatorname{err}}$ is biased low and $\widehat{\operatorname{Err}}^{(1)}$ is biased
+high. The .632 estimator takes a fixed mixture of the two,
+
+$$
+\widehat{\operatorname{Err}}^{(.632)} = 0.368\,\overline{\operatorname{err}} + 0.632\,\widehat{\operatorname{Err}}^{(1)}.
+$$
+
+The weights come from Efron's analysis of the bias of the leave-one-out bootstrap <Cite id="efron1983" />. Their
+effect is to pull $\widehat{\operatorname{Err}}^{(1)}$ down towards the training error, by the share of examples that a
+resample leaves out <Cite id="hastie2009" />.
+
+The fixed weights assume that the training error is a sensible anchor. For a model that fits the training data
+perfectly, $\overline{\operatorname{err}} = 0$ whatever its true error, and the .632 estimator is $0.632$ times the
+leave-one-out bootstrap. The worked example below shows how badly that can fail.
+
+### The .632+ estimator
+
+Efron and Tibshirani scale the weight by how much the model overfits <Cite id="efron1997" />. Two quantities measure
+that.
+
+**The no-information error rate** $\gamma$ is the error the model would have if inputs and outputs were independent. It
+is estimated by scoring the full-data model on every pairing of an output with an input, matched or not:
+
+$$
+\hat\gamma = \frac{1}{n^2}\sum_{i=1}^n\sum_{j=1}^n \ell\paren{y_i, \hat f(\xvec_j)}.
+$$
+
+For a two-class problem under <NoteLink to="surrogate-losses">0–1 loss</NoteLink>, let $p_1$ be the fraction of examples
+in class 1 and $q_1$ the fraction of inputs that the model assigns to class 1. A random pairing is wrong when it pairs a
+class-1 output with a class-0 prediction or the reverse, so $\hat\gamma = p_1(1 - q_1) + (1 - p_1)q_1$.
+
+**The relative overfitting rate** compares the excess of the leave-one-out bootstrap over the training error with
+the largest excess possible:
+
+$$
+\hat R = \frac{\widehat{\operatorname{Err}}^{(1)} - \overline{\operatorname{err}}}{\hat\gamma -
+\overline{\operatorname{err}}}.
+$$
+
+$\hat R = 0$ when the model does as well on held-out points as on training points, and $\hat R = 1$ when its held-out
+error is as bad as no information. Values outside $[0, 1]$ are clipped to it, and $\widehat{\operatorname{Err}}^{(1)}$
+is capped at $\hat\gamma$ <Cite id="efron1997" />.
+
+The .632+ estimator moves the weight from 0.632 towards 1 as $\hat R$ grows:
+
+$$
+\hat w = \frac{0.632}{1 - 0.368\hat R}, \qquad
+\widehat{\operatorname{Err}}^{(.632+)} = (1 - \hat w)\,\overline{\operatorname{err}} + \hat w\,
+\widehat{\operatorname{Err}}^{(1)}.
+$$
+
+At $\hat R = 0$, $\hat w = 0.632$ and the estimator is the .632 estimator. At $\hat R = 1$, $\hat w = 0.632/0.632 = 1$
+and the estimator is the leave-one-out bootstrap, which ignores the training error entirely. Between the two, the
+weight on the training error falls as the evidence of overfitting grows.
+
+### Out-of-bag error
+
+A <NoteLink to="bagging">bagged</NoteLink> ensemble, such as a <NoteLink to="random-forest">random forest</NoteLink>,
+already holds the $B$ bootstrap fits. Averaging, for each example $i$, the predictions of the models in $C^{-i}$ gives
+an out-of-bag prediction for $i$. Its average loss is the **out-of-bag error** <Cite id="breiman1996" />
+<Cite id="breiman2001" />. It differs from $\widehat{\operatorname{Err}}^{(1)}$ in one step: the leave-one-out bootstrap
+averages the losses of the single models, and the out-of-bag error takes the loss of their averaged prediction. It
+therefore estimates the error of an ensemble of about $0.368B$ models. Once $B$ is large, that is close to the error of
+the full ensemble, and the estimate costs no fits beyond the ensemble itself.
+
+<OutOfBagAgainstCv />
+
+## Worked example
+
+Two classes of equal size, labels independent of the inputs, and a 1-nearest-neighbour classifier. Every estimator
+should report the true error rate, 0.5.
+
+1. **Training error.** Each training point is its own nearest neighbour, so $\overline{\operatorname{err}} = 0$.
+2. **Direct bootstrap.** A point in the resample (probability 0.632) is its own neighbour and is classified correctly.
+   A point outside it (probability 0.368) is classified by an unrelated neighbour and is wrong half the time. So
+   $\widehat{\operatorname{Err}}_\text{boot} \approx 0.368 \times 0.5 = 0.184$.
+3. **Leave-one-out bootstrap.** Only resamples without point $i$ score it, so every prediction is a coin toss, and
+   $\widehat{\operatorname{Err}}^{(1)} \approx 0.5$.
+4. **.632 estimator.** $0.368 \times 0 + 0.632 \times 0.5 = 0.316$, too low by 0.184.
+5. **.632+ estimator.** Balanced classes and balanced predictions give $\hat\gamma = 0.5 \times 0.5 + 0.5 \times 0.5 =
+   0.5$. Then $\hat R = (0.5 - 0)/(0.5 - 0) = 1$, $\hat w = 1$, and $\widehat{\operatorname{Err}}^{(.632+)} = 0.5$.
+
+These are expectations. The figure below draws one such data set, $n = 50$ points in two dimensions with $B = 200$
+resamples (its defaults, seed 1). Its training error is 0 and $\widehat{\operatorname{Err}}^{(1)} = 0.486$. The .632
+estimate is $0.632 \times 0.486 = 0.307$. Since $\hat\gamma = 0.5$, the relative overfitting rate is
+$\hat R = 0.486/0.5 = 0.971$, the weight is $\hat w = 0.632/(1 - 0.368 \times 0.971) = 0.984$, and the .632+ estimate
+is $0.984 \times 0.486 = 0.478$. The true error of the fitted classifier, measured on 4000 fresh points, is 0.514, and
+10-fold cross-validation gives 0.440.
+
+A model that overfits less shows the correction working in between. In the same figure, set nine neighbours and a
+class separation of 1.5. The training error is $\overline{\operatorname{err}} = 0.22$, the leave-one-out bootstrap is
+$\widehat{\operatorname{Err}}^{(1)} = 0.361$, and $\hat\gamma = 0.5$.
+
+1. **.632 estimate.** $0.368 \times 0.22 + 0.632 \times 0.361 = 0.081 + 0.228 = 0.309$.
+2. **Relative overfitting rate.** $\hat R = (0.361 - 0.22)/(0.5 - 0.22) = 0.141/0.28 = 0.504$.
+3. **Weight.** $\hat w = 0.632/(1 - 0.368 \times 0.504) = 0.632/0.815 = 0.776$.
+4. **.632+ estimate.** $(1 - 0.776) \times 0.22 + 0.776 \times 0.361 = 0.049 + 0.280 = 0.329$.
+
+The true error is 0.254. On this data set every bootstrap estimate is pessimistic: the leave-one-out bootstrap by
+0.107, the .632+ estimate by 0.075 and the .632 estimate by 0.055. 10-fold cross-validation gives 0.260.
+
+<BootstrapEstimators />
+
+## Cost
+
+Each bootstrap estimator fits $B$ models. Every example needs enough resamples that omit it: with $B = 50$, about 18
+resamples omit a given example, and the chance that none does is $0.632^{50} \approx 10^{-10}$. The no-information rate
+needs the $n^2$ predictions of one model, which for 0–1 loss reduce to the class fractions above. The out-of-bag error
+of a bagged ensemble is free.
+
+## Trade-offs
+
+- **Bias against variance.** In Efron and Tibshirani's 24 simulation experiments, mostly classification under 0–1 loss,
+  the .632+ estimator had lower <Gloss name="mse">mean squared error</Gloss> than cross-validation
+  <Cite id="efron1997" />. Kohavi's experiments on real data sets found that the .632 bootstrap has low variance but
+  very large bias on some problems, and recommended stratified 10-fold cross-validation for choosing between classifiers
+  <Cite id="kohavi1995" />.
+- **The same estimand as cross-validation.** Like cross-validation, the bootstrap estimators average over training sets.
+  They estimate the expected error of the procedure more than the error of the model fitted to the data at hand
+  <Cite id="bates2024" />; see <NoteLink to="what-cross-validation-estimates">what cross-validation
+  estimates</NoteLink>.
+- **Duplicated rows.** A resample contains repeated examples, which some learners treat differently from distinct
+  ones: a 1-nearest-neighbour classifier and a tree grown to purity both fit a duplicated example twice as firmly.
+
+## Pitfalls
+
+- **Scoring the resample's models on the full sample.** That is $\widehat{\operatorname{Err}}_\text{boot}$, optimistic
+  by construction.
+- **The .632 estimator with an interpolating model.** When the training error is near 0, the .632 estimate is about
+  $0.632\,\widehat{\operatorname{Err}}^{(1)}$, far too low. Use .632+ or cross-validation.
+- **Resampling dependent rows.** Rows from the same patient, site or period must be resampled together, as whole
+  groups or blocks. Otherwise copies of one group land on both sides and the out-of-bag points are not new (see
+  <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink>).
+- **Preprocessing outside the resampling.** Every step that learns from data is refitted on each resample, as in
+  <NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>.
+- **Out-of-bag error after tuning on it.** Choosing a forest's hyperparameters by the out-of-bag error and reporting
+  the same error is selection on the estimate; see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>.

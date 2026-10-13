@@ -1,0 +1,150 @@
+---
+title: 'Deviance information criterion'
+kind: concept
+summary: 'DIC scores a Bayesian model by the deviance at the posterior mean plus twice $p_D$, the posterior mean deviance minus the deviance at the posterior mean. It is easy to compute from MCMC draws, but it depends on the parameterisation and $p_D$ can be negative.'
+tags: [model-selection, bayesian, information-criteria, worked-example]
+aliases: [DIC, pD]
+requires: [bayesian-inference, akaike-information-criterion]
+related: [widely-applicable-information-criterion, pareto-smoothed-importance-sampling-leave-one-out, effective-degrees-of-freedom, hierarchical-models, deviance-and-generalised-linear-model-diagnostics, markov-chain-monte-carlo]
+references: [spiegelhalter2002, spiegelhalter2014, gelman2013, celeux2006, plummer2008, gelman2014predictive, watanabe2010]
+status: draft
+updated: 2026-10-13
+---
+
+import { EffectiveParameters } from './EffectiveParameters'
+
+<Definition>
+Let $D(\thetavec) = -2\log p(\Dcal \mid \thetavec)$ be the **deviance** of a model with parameters $\thetavec$, and let
+$\bar\thetavec = \expect[\thetavec \mid \Dcal]$ be the posterior mean. The **effective number of parameters** and the
+**deviance information criterion** are
+
+$$
+p_D = \overline{D} - D(\bar\thetavec), \qquad \operatorname{DIC} = D(\bar\thetavec) + 2p_D = \overline{D} + p_D,
+$$
+
+where $\overline{D} = \expect[D(\thetavec) \mid \Dcal]$ is the posterior mean of the deviance
+<Cite id="spiegelhalter2002" />. Smaller DIC is better. From posterior draws $\thetavec^{(1)}, \dots, \thetavec^{(S)}$,
+$\overline{D}$ is the average of $D(\thetavec^{(s)})$ and $\bar\thetavec$ is the average of the draws.
+</Definition>
+
+## Intuition
+
+DIC is AIC with Bayesian ingredients. AIC takes the deviance of the maximum-likelihood fit and adds twice the number of
+parameters to correct its optimism (<NoteLink to="akaike-information-criterion">Akaike information
+criterion</NoteLink>). DIC replaces the fit by the posterior mean and the count by $p_D$, a measure of how many
+parameters the data actually determine.
+
+$p_D$ measures how far the deviance rises, on average, when the parameters wander over the posterior instead of sitting
+at its centre. A parameter that the data pin down has a narrow posterior, but moving it across that posterior still
+changes the deviance by about one unit, because the posterior width matches the likelihood's curvature. A parameter that
+the prior pins down has a posterior much narrower than the likelihood's curvature allows, so moving it barely changes
+the deviance. $p_D$ therefore counts the parameters the data determine and discounts the ones the prior determines.
+
+Spiegelhalter and colleagues introduced DIC for <NoteLink to="hierarchical-models">hierarchical models</NoteLink> fitted
+by <Gloss name="mcmc" />, where the number of parameters is ill-defined: a random effect per group is a parameter, but
+shrinkage makes it worth less than one <Cite id="spiegelhalter2002" />. DIC became the default criterion of the
+<NoteLink to="probabilistic-programming">BUGS</NoteLink> software. It answers the first question of
+<NoteLink to="model-selection">model selection</NoteLink>, how well a candidate predicts, by an analytic correction
+instead of held-out data.
+
+## Details
+
+### Why $p_D$ counts parameters
+
+Expand the deviance to second order about the posterior mean. Let $\Imat$ be the observed information, the Hessian of
+$-\log p(\Dcal \mid \thetavec)$ at $\bar\thetavec$, and assume $\bar\thetavec$ is close enough to the maximum-likelihood
+estimate that the gradient term is negligible. Then $D(\thetavec) \approx D(\bar\thetavec) + (\thetavec -
+\bar\thetavec)^\top \Imat (\thetavec - \bar\thetavec)$. Take the posterior expectation. A scalar equals its trace, and
+the trace is cyclic, so
+
+$$
+p_D = \expect\brack{(\thetavec - \bar\thetavec)^\top \Imat (\thetavec - \bar\thetavec) \mid \Dcal} =
+\trace\paren{\Imat\, \Sigmamat}, \qquad \Sigmamat = \cov(\thetavec \mid \Dcal).
+$$
+
+For a Gaussian prior with precision $\Lambdamat$ and a near-Gaussian posterior, $\Sigmamat \approx (\Imat +
+\Lambdamat)^{-1}$, so $p_D \approx \trace\paren{\Imat(\Imat + \Lambdamat)^{-1}}$. With a flat prior this is
+$\trace\eye_p = p$, the parameter count of AIC. With an informative prior each eigen-direction contributes
+$\lambda_j/(\lambda_j + \text{prior precision})$, a number between 0 and 1. In
+<NoteLink to="bayesian-linear-regression">Bayesian linear regression</NoteLink> $p_D$ is exactly MacKay's $\gamma$, the
+trace of the hat matrix, the <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>.
+
+### Why $2p_D$ is the penalty
+
+The posterior mean deviance $\overline{D}$ is itself an optimistic measure of fit, and $D(\bar\thetavec)$ more so.
+Spiegelhalter and colleagues argued, by the same expansion as for AIC, that the expected deviance of the plug-in
+prediction $p(\tilde y \mid \bar\thetavec)$ on new data exceeds $D(\bar\thetavec)$ by about $2p_D$
+<Cite id="spiegelhalter2002" />. Plummer showed that DIC approximates a penalised loss function whose penalty comes from
+a <NoteLink to="cross-validation">cross-validation</NoteLink> argument, and that the approximation is valid only when
+the effective number of parameters is much smaller than the number of independent observations. When it is not, as in
+disease mapping with one random effect per area, DIC under-penalises the more complex models <Cite id="plummer2008" />.
+
+### DIC predicts with a point, not with the posterior
+
+DIC scores the plug-in density $p(\tilde y \mid \bar\thetavec)$. <Gloss name="waic" /> and leave-one-out score the
+posterior predictive $p(\tilde y \mid \Dcal)$, the average of the likelihood over the posterior. The two coincide only
+when the posterior is concentrated. Watanabe noted that DIC is not asymptotically equivalent to Bayesian
+cross-validation in singular models <Cite id="watanabe2010" />. Gelman, Hwang and Vehtari recommend WAIC or
+leave-one-out over DIC for this reason <Cite id="gelman2014predictive" />.
+
+### An alternative $p_D$
+
+Gelman and colleagues give a second estimate, $p_V = \frac12\var\brack{D(\thetavec) \mid \Dcal}$, half the posterior
+variance of the deviance <Cite id="gelman2013" />. For a Gaussian posterior and flat prior the deviance is
+$D(\bar\thetavec)$ plus a $\ChiSq_p$ variable, whose variance is $2p$, so $p_V = p$. $p_V$ needs no point estimate and
+is always positive. It is also more variable, because a variance is estimated from the draws. With an informative prior
+the posterior mean is not the best fit, the deviance gains a term linear in $\thetavec - \bar\thetavec$, and $p_V$
+exceeds $p_D$; the figure below shows the gap.
+
+## Worked example
+
+**Shrinkage lowers $p_D$.** Take $n = 10$ observations $y_i \sim \Gauss(\mu, 1)$ and the prior $\mu \sim \Gauss(0,
+\tau^2)$. The deviance is $\sum_i (y_i - \mu)^2$ plus a constant, so $\Imat = n$, and the posterior variance is
+$v = 1/(n + 1/\tau^2)$. The deviance is exactly quadratic in $\mu$, so $p_D = nv = n/(n + 1/\tau^2)$:
+
+| prior sd $\tau$ | 0.1 | 0.3 | 1 | 10 |
+| --- | --- | --- | --- | --- |
+| $p_D$ | 0.09 | 0.47 | 0.91 | 1.00 |
+
+A prior with $\tau = 0.1$ has precision 100, worth a hundred observations of $\mu$ against the data's ten, so the data
+determine less than a tenth of the parameter.
+
+**The parameterisation changes $p_D$.** Observe $k$ successes in $n = 10$ Bernoulli trials with a uniform prior on the
+success probability $\theta$. The posterior is $\operatorname{Beta}(k + 1, n - k + 1)$ and the deviance is
+$D(\theta) = -2[k\log\theta + (n - k)\log(1 - \theta)]$. Its posterior mean follows from
+$\expect[\log\theta] = \psi(k + 1) - \psi(n + 2)$, where $\psi$ is the digamma function. The plug-in point depends on
+the scale on which the posterior mean is taken: the mean of $\theta$, or the mean of the log-odds
+$\eta = \log(\theta/(1 - \theta))$ mapped back to $\theta$.
+
+| $k$ | $\overline{D}$ | $\bar\theta$ | $p_D$ for $\theta$ | $\theta$ from $\bar\eta$ | $p_D$ for $\eta$ | $p_V$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| 5 | 14.73 | 0.500 | 0.87 | 0.500 | 0.87 | 0.75 |
+| 1 | 7.48 | 0.167 | 0.61 | 0.138 | 0.84 | 0.95 |
+| 0 | 1.82 | 0.083 | 0.08 | 0.051 | 0.78 | 1.65 |
+
+With $k = 5$ the posterior is symmetric and both parameterisations agree. With $k = 1$ the two values of $p_D$ differ by
+$0.23$. With $k = 0$ the posterior is piled against $\theta = 0$, and $p_D$ is $0.08$ on one scale and $0.78$ on the
+other. The model, the data and the posterior are identical in every row; only the coordinates differ. $p_V$ does not
+depend on coordinates, but it gives a third answer.
+
+<EffectiveParameters />
+
+## Pitfalls
+
+- **Not invariant to reparameterisation.** $D(\bar\thetavec)$ depends on which function of $\thetavec$ is averaged, as
+  the binomial example shows. Using the posterior median or mode instead of the mean changes $p_D$ again. Fix the
+  parameterisation before comparing models and say which it is.
+- **Negative $p_D$.** When the posterior mean is a poor summary, $D(\bar\thetavec)$ can exceed $\overline{D}$ and
+  $p_D < 0$. This happens with bimodal posteriors and mixture models, where the mean of the parameters can lie between
+  modes in a region of low likelihood. For mixtures and random-effect models the missing variables can be treated as
+  parameters or integrated out, which gives several different DICs; Celeux and colleagues compared them and found that
+  they behave differently <Cite id="celeux2006" />.
+- **Under-penalising complex models.** The penalty $2p_D$ is an asymptotic approximation, and it is too small when
+  $p_D$ is large relative to $n$, as in hierarchical models with many groups and few observations each
+  <Cite id="plummer2008" />.
+- **The focus in hierarchical models.** The deviance can condition on the group parameters (predicting new
+  observations in existing groups) or integrate them out (predicting new groups). The two give different $p_D$ and
+  answer different questions <Cite id="spiegelhalter2014" />.
+- **Using it today.** WAIC and <NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">PSIS
+  leave-one-out</NoteLink> use the same posterior draws, score the full posterior predictive and work in singular
+  models. DIC remains in older software and older papers; read it as a rough AIC for models with priors.

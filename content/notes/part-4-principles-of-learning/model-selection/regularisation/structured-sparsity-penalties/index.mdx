@@ -1,0 +1,244 @@
+---
+title: 'Structured sparsity penalties'
+kind: concept
+summary: 'Structured sparsity penalties encode which coefficients should vanish or agree together: the group lasso removes whole groups, the fused lasso and total variation make neighbouring values equal, and the nuclear norm makes a matrix low-rank.'
+tags: [model-selection, regularisation, sparsity, worked-example]
+aliases:
+  [
+    structured sparsity,
+    group lasso,
+    sparse group lasso,
+    fused lasso,
+    total variation denoising,
+    total variation regularisation,
+    generalised lasso,
+    trend filtering,
+    block soft thresholding,
+    singular value thresholding,
+    nuclear norm regularisation,
+  ]
+requires: [sparsity-inducing-penalties]
+related:
+  [
+    lasso,
+    graphical-lasso,
+    tikhonov-regularisation,
+    proximal-gradient-methods,
+    matrix-norms,
+    compressed-sensing,
+    matrix-factorisation-for-recommendation,
+    effective-degrees-of-freedom,
+  ]
+references:
+  [yuan2006, simon2013, tibshirani2005, rudin1992, condat2013, friedman2007, tibshirani2011, cai2010, mazumder2010, recht2010, bach2012, chandrasekaran2012]
+status: draft
+updated: 2026-10-13
+---
+
+import { GroupLassoPaths } from './GroupLassoPaths'
+import { TotalVariationDenoising } from './TotalVariationDenoising'
+
+<Definition>
+A **structured sparsity penalty** is a convex regulariser whose minimisers have zeros, or equalities, in patterns fixed
+in advance rather than coefficient by coefficient. The main examples are:
+
+- the **group lasso** $\sum_g \sqrt{p_g}\norm{\wvec_g}_2$, which sets whole groups $\wvec_g$ of $p_g$ coefficients to
+  zero together <Cite id="yuan2006" />;
+- the **fused lasso** and **total variation** $\sum_i \abs{w_{i+1} - w_i}$, which make neighbouring coefficients equal
+  <Cite id="tibshirani2005" /> <Cite id="rudin1992" />;
+- the **nuclear norm** $\norm{\Wmat}_* = \sum_k \sigma_k(\Wmat)$, the sum of a matrix's singular values, which sets
+  singular values to zero and so makes the matrix low-rank.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="lasso">lasso</NoteLink> decides about each coefficient alone. Often the coefficients come with
+structure that says which decisions belong together.
+
+- **Groups.** A categorical feature with five levels is encoded by four dummy columns. Keeping two of them and dropping
+  two makes no sense: the feature is in or out. The same holds for the basis functions of one input in an additive
+  model, or for one gene's measurements across several assays.
+- **Order.** Coefficients indexed by time, position along a chromosome or pixel location tend to change in a few
+  places and stay constant elsewhere. The useful zeros are in the differences between neighbours, not in the values.
+- **Matrices.** In multi-task regression, matrix completion or a recommender's rating matrix, the parameter is a matrix
+  that is believed to be driven by a few factors. The useful zeros are in its singular values.
+
+Each structure gets its own norm, built so that its ball has corners exactly at the structured solutions. The geometry
+of <NoteLink to="penalised-and-constrained-regularisation">penalised and constrained regularisation</NoteLink> then
+does the rest. A loss gradient lands on a corner for an open set of data, so the structure appears exactly, not
+approximately.
+
+## Group lasso
+
+Partition the coefficients into groups $g = 1, \dots, G$, with $\wvec_g$ the $p_g$ coefficients of group $g$ and
+$\Xmat_g$ their columns. The group lasso solves
+
+$$
+\hat\wvec = \argmin_{\wvec}\ \tfrac12\norm{\yvec - \Xmat\wvec}^2 + \lambda\sum_{g=1}^G \sqrt{p_g}\,\norm{\wvec_g}_2.
+$$
+
+The Euclidean norm $\norm{\wvec_g}_2$ is not squared. Squared, it would be ridge on the group and never reach zero.
+Unsquared, it has a corner at $\wvec_g = \zeros$: its <NoteLink to="subgradients">subdifferential</NoteLink> there is
+the whole unit ball $\set{\uvec : \norm\uvec_2 \le 1}$, and away from zero it is the single unit vector
+$\wvec_g/\norm{\wvec_g}_2$.
+
+**Block soft thresholding.** Suppose the columns of each group are orthonormal, $\Xmat_g^\top\Xmat_g = \eye$, and let
+$\zvec_g = \Xmat_g^\top\rvec_g$, where $\rvec_g$ is the partial residual with group $g$ left out. Holding the other
+groups fixed, the problem for $\wvec_g$ is $\frac12\norm{\zvec_g - \wvec_g}^2 + \lambda\sqrt{p_g}\norm{\wvec_g}_2$ plus
+a constant. Zero must lie in the subdifferential $\wvec_g - \zvec_g + \lambda\sqrt{p_g}\,\partial\norm{\wvec_g}_2$.
+
+- If $\wvec_g = \zeros$, the condition is $\zvec_g \in \lambda\sqrt{p_g}\set{\uvec : \norm\uvec_2 \le 1}$, that is
+  $\norm{\zvec_g}_2 \le \lambda\sqrt{p_g}$.
+- If $\wvec_g \ne \zeros$, then $\wvec_g(1 + \lambda\sqrt{p_g}/\norm{\wvec_g}_2) = \zvec_g$. So $\wvec_g$ points along
+  $\zvec_g$, and taking norms gives $\norm{\wvec_g}_2 = \norm{\zvec_g}_2 - \lambda\sqrt{p_g}$.
+
+Together,
+
+$$
+\hat\wvec_g = \paren{1 - \frac{\lambda\sqrt{p_g}}{\norm{\zvec_g}_2}}_+\zvec_g.
+$$
+
+The group is kept or dropped on the strength of its whole vector $\zvec_g$, and a kept group is shrunk towards zero
+along its own direction. This is the group's <NoteLink to="proximal-gradient-methods">proximal operator</NoteLink>, and
+<NoteLink to="coordinate-descent">block coordinate descent</NoteLink> cycles it over the groups. With groups of size one
+it is soft thresholding, and the group lasso is the lasso.
+
+**Why $\sqrt{p_g}$.** If a group carries no signal, $\zvec_g$ is noise with $p_g$ coordinates, and $\norm{\zvec_g}_2^2$
+grows like $p_g\sigma^2$. An unweighted threshold would let large groups in more often by chance. The weight
+$\sqrt{p_g}$ scales the threshold with the typical size of a null group <Cite id="yuan2006" />.
+
+**Variants.** The **sparse group lasso** adds $\alpha\lambda\norm{\wvec}_1$ to a share $(1 - \alpha)$ of the group
+penalty, so that kept groups can also have zeros inside them <Cite id="simon2013" />. Its proximal operator soft
+thresholds each coordinate and then block thresholds each group. **Overlapping** and **hierarchical** groups encode
+rules such as "an interaction enters only with its main effects" <Cite id="bach2012" />.
+
+## Fused lasso and total variation
+
+For coefficients with an order, penalise the differences between neighbours. **One-dimensional total variation
+denoising** fits a signal $\yvec \in \reals^n$ by
+
+$$
+\hat\thetavec = \argmin_{\thetavec}\ \tfrac12\norm{\yvec - \thetavec}^2 + \lambda\sum_{i=1}^{n-1}\abs{\theta_{i+1} - \theta_i}.
+$$
+
+The penalty is the $L^1$ norm of $\Dmat\thetavec$, where $\Dmat$ is the first-difference operator. Its zeros are in
+the differences, so the solution is **piecewise constant**: a few jumps, flat in between. Rudin, Osher and Fatemi
+introduced it for images, where the jumps are edges <Cite id="rudin1992" />.
+
+**The optimality conditions.** Introduce a dual variable $u_i$ for each difference. The subgradient condition reads
+$\theta_j - y_j + u_{j-1} - u_j = 0$ for each $j$, with $u_0 = u_n = 0$, and $u_i = \lambda\sgn(\theta_{i+1} -
+\theta_i)$ at a jump, $\abs{u_i} \le \lambda$ where neighbours are equal. Rearranged,
+
+$$
+u_j = \sum_{i \le j}(\theta_i - y_i).
+$$
+
+So $u_j$ is the running sum of the residuals. It must stay within $[-\lambda, \lambda]$ and touch $\pm\lambda$ at each
+jump. This is the **taut string** picture: the cumulative sum of $\hat\thetavec$ is a string pulled tight inside a tube
+of half-width $\lambda$ around the cumulative sum of $\yvec$. Condat's direct algorithm follows this string in one pass,
+exactly, in time linear in $n$ on real signals <Cite id="condat2013" />.
+
+**The fused lasso** adds an $L^1$ penalty on the values,
+$\lambda_1\norm{\thetavec}_1 + \lambda_2\norm{\Dmat\thetavec}_1$, to get a signal that is piecewise constant and zero on
+most pieces <Cite id="tibshirani2005" />. For the signal approximator ($\Xmat = \eye$) the solution is the soft
+thresholding at $\lambda_1$ of the total variation solution at $\lambda_2$ <Cite id="friedman2007" />.
+
+**The generalised lasso** penalises $\norm{\Dmat\thetavec}_1$ for any matrix $\Dmat$ <Cite id="tibshirani2011" />.
+Second differences give **trend filtering**, whose solutions are piecewise linear with a few kinks. Differences along
+the edges of a graph give fusion over a network.
+
+Total variation is the $L^1$ counterpart of Tikhonov's roughness penalty $\norm{\Lmat_1\thetavec}^2$ (see
+<NoteLink to="tikhonov-regularisation">Tikhonov regularisation</NoteLink>). The squared penalty charges a jump of size
+$h$ an amount $h^2$ if taken at once and only $h^2/k$ if spread over $k$ steps, so it spreads every jump into a ramp.
+The absolute penalty charges $h$ either way, so it leaves the jump where the data put it.
+
+## Nuclear norm
+
+For a matrix parameter $\Wmat \in \reals^{p \times q}$ with singular values $\sigma_1 \ge \sigma_2 \ge \dots \ge 0$,
+the rank counts the non-zero $\sigma_k$, an $L^0$ count. The <NoteLink to="matrix-norms">nuclear norm</NoteLink>
+$\norm{\Wmat}_* = \sum_k\sigma_k$ is the corresponding $L^1$ norm, and on the spectral-norm unit ball it is the convex
+envelope of the rank <Cite id="recht2010" />.
+
+**Singular value thresholding.** The proximal operator of $\lambda\norm{\cdot}_*$ at a matrix $\Zmat$ with
+<Gloss name="svd" /> $\Zmat = \Umat\diag(\sigma_k)\Vmat^\top$ soft thresholds the singular values and keeps the singular
+vectors <Cite id="cai2010" />:
+
+$$
+\argmin_{\Wmat}\ \tfrac12\norm{\Zmat - \Wmat}_F^2 + \lambda\norm{\Wmat}_* = \Umat\diag\paren{(\sigma_k - \lambda)_+}\Vmat^\top.
+$$
+
+Directions of the matrix with weak evidence are removed, and the rest are shrunk by $\lambda$. **Matrix completion**
+fills in a partly observed matrix by minimising the squared error on the observed entries plus $\lambda\norm{\Wmat}_*$;
+Soft-Impute alternates filling the missing entries with the current fit and applying singular value thresholding
+<Cite id="mazumder2010" />. See also <NoteLink to="matrix-factorisation-for-recommendation">matrix factorisation for
+recommendation</NoteLink>.
+
+## One idea: atomic norms
+
+The three penalties and the lasso are instances of one construction. Choose a set of simple **atoms**: signed
+coordinate vectors for the lasso, unit vectors supported on one group for the group lasso, unit-norm rank-one matrices
+$\uvec\vvec^\top$ for the nuclear norm. The atomic norm of $\wvec$ is the smallest total weight with which $\wvec$ can
+be written as a non-negative combination of atoms, and its unit ball is the convex hull of the atoms
+<Cite id="chandrasekaran2012" />. The atoms are the corners, and penalising the atomic norm favours solutions built from
+few atoms.
+
+## Worked example
+
+**Group lasso.** Take three groups with orthonormal columns and $\lambda = 1$: group 1 with $\zvec_1 = (3, 4)$, group 2
+with $\zvec_2 = (0.6, 0.8)$, and a single coefficient $z_3 = 2$.
+
+1. Group 1 has $\norm{\zvec_1}_2 = 5$ and threshold $\lambda\sqrt2 = 1.41$. Its factor is $1 - 1.41/5 = 0.717$, so
+   $\hat\wvec_1 = (2.15, 2.87)$.
+2. Group 2 has $\norm{\zvec_2}_2 = 1 < 1.41$, so $\hat\wvec_2 = (0, 0)$. Both coefficients leave together, on the
+   evidence of the group as a whole.
+3. Group 3 is a single coefficient with threshold 1: soft thresholding gives $\hat w_3 = 1$.
+
+**Total variation.** Take $\yvec = (1, 1.2, 0.9, 3.1, 2.8, 3.0)$ and $\lambda = 0.5$. Guess two flat pieces with one
+upward jump between positions 3 and 4.
+
+1. On a flat piece the residuals must sum to $\pm\lambda$ at its end. So the left level is its mean plus $\lambda/3$:
+   $1.033 + 0.167 = 1.2$. The right level is its mean minus $\lambda/3$: $2.967 - 0.167 = 2.8$.
+2. Check the running sums. On the left, $\theta_i - y_i = (0.2, 0, 0.3)$, so $u = (0.2, 0.2, 0.5)$: inside
+   $[-0.5, 0.5]$, and equal to $+\lambda$ at the upward jump. On the right, $\theta_i - y_i = (-0.3, 0, -0.2)$, so
+   $u$ continues $(0.2, 0.2, 0)$ and ends at 0. All conditions hold.
+3. The solution is $\hat\thetavec = (1.2, 1.2, 1.2, 2.8, 2.8, 2.8)$. The jump in the data means, 1.93, is shrunk to
+   1.6. Each level moves towards the other by $\lambda$ divided by its length, so the jump shrinks by
+   $\lambda(\frac13 + \frac13) = 0.33$. Total variation biases jumps as the lasso biases coefficients.
+4. The quadratic penalty $2\norm{\Dmat\thetavec}^2$ with the same data gives $(1.28, 1.43, 1.68, 2.32, 2.58, 2.72)$: no
+   flat pieces and the jump spread over the whole signal.
+
+**Fused lasso.** Adding $\lambda_1 = 1.5$ soft thresholds the total variation solution: $(0, 0, 0, 1.3, 1.3, 1.3)$.
+The low piece is set to zero and the high piece shrunk by 1.5.
+
+**Nuclear norm.** A $3 \times 3$ matrix with singular values $(5, 2, 0.5)$, thresholded at $\lambda = 1$, keeps its
+singular vectors and gets singular values $(4, 1, 0)$: rank 3 becomes rank 2.
+
+<GroupLassoPaths />
+
+<TotalVariationDenoising />
+
+## Assumptions
+
+- **The structure is known before the data are seen.** Groups, orderings and the choice of a low-rank parameter are
+  part of the model. Choosing the groups after looking at which coefficients came out large reuses the data and makes
+  every later estimate of error optimistic.
+- **Comparable scales within a group.** The group norm adds squared coefficients, so columns within a group should be
+  standardised. Yuan and Lin's closed form assumes orthonormal columns within each group; general solvers handle
+  correlated columns by solving each block exactly.
+
+## Pitfalls
+
+- **Shrinkage of what is kept.** Kept groups, jumps and singular values are all shrunk by $\lambda$, like lasso
+  coefficients. Refitting without the penalty on the selected structure removes the bias, at the cost of the selection
+  bias described in <NoteLink to="sparsity-inducing-penalties">sparsity-inducing penalties</NoteLink>.
+- **Staircasing.** Total variation fits a ramp with a staircase of small steps. Smooth trends call for trend filtering
+  or a quadratic penalty.
+- **Degrees of freedom for choosing λ.** The <NoteLink to="effective-degrees-of-freedom">effective degrees of
+  freedom</NoteLink> of the generalised lasso fit $\yvec \approx \thetavec$ are estimated without bias by the dimension
+  of its null space at the solution: for one-dimensional total variation, the number of flat pieces
+  <Cite id="tibshirani2011" />. Counting parameters by the length of $\thetavec$ overstates the complexity, and plugging
+  the count of pieces into $C_p$ or <NoteLink to="steins-unbiased-risk-estimate">SURE</NoteLink> chooses $\lambda$
+  without <NoteLink to="cross-validation">cross-validation</NoteLink>.
+- **Overlapping groups change the meaning.** Summing norms over overlapping groups sets unions of groups to zero, so
+  the selected support is the complement of such a union. When the support should itself be a union of groups, a
+  different penalty, the latent group lasso, is needed <Cite id="bach2012" />.

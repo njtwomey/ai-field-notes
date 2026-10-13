@@ -1,0 +1,218 @@
+---
+title: 'Minimax lower bounds'
+kind: technique
+summary: 'A minimax lower bound shows that no estimator beats a rate over a class of problems, by reducing estimation to testing between hypotheses whose samples are hard to tell apart. Le Cam''s method uses two hypotheses, Fano''s many, and Assouad''s a hypercube.'
+tags: [learning-theory, lower-bounds, rates, worked-example]
+aliases: [minimax risk, minimax rate, Le Cam's method, two-point method, Le Cam's two-point method, Fano's method, Assouad's lemma, reduction to testing]
+requires: [kullback-leibler-divergence, f-divergences-and-jensen-shannon]
+related: [sample-complexity-lower-bounds, minimax-rates-for-nonparametric-regression, fast-rates-and-noise-conditions, lower-bounds-for-online-learning, mutual-information, hypothesis-testing, neyman-pearson-lemma, rates-and-consistency, no-free-lunch-theorem]
+references: [lecam1973, yu1997, tsybakov2009, wainwright2019, cover2006]
+status: draft
+updated: 2026-10-12
+---
+
+import { LeCamTwoPoint } from './LeCamTwoPoint'
+
+<Definition>
+The **minimax risk** of estimating a quantity $\theta(P)$ from $m$ independent draws of an unknown distribution $P$ in a
+family $\Pcal$ is the worst-case risk of the best estimator,
+$\inf_{\hat\theta}\sup_{P \in \Pcal}\expect_P[\Phi(\rho(\hat\theta, \theta(P)))]$, for a metric $\rho$ and an
+increasing $\Phi$. A **minimax lower bound** shows that this quantity is at least some rate in $m$. The standard proofs
+pick a finite set of distributions in $\Pcal$ whose parameters are far apart but whose samples are statistically close,
+and show that any estimator good on all of them would be a test that separates them, which is impossible
+<Cite id="yu1997" /> <Cite id="tsybakov2009" />.
+</Definition>
+
+## Problem
+
+An upper bound says what one method achieves. It cannot say whether a better method exists. A lower bound over a family
+$\Pcal$ answers that: if every estimator has worst-case risk at least $r_m$ on $\Pcal$, then a method with risk of
+order $r_m$ is **rate-optimal**, and effort spent on a better algorithm is wasted. If the gap between the best upper
+bound and the best lower bound is large, either the analysis or the method can be improved.
+
+The lower bound must be over a family, not a single distribution. For any single $P$, the estimator that ignores the
+data and outputs $\theta(P)$ has risk zero. Minimax asks for one estimator that works for every member of the family,
+and charges it for the member on which it does worst.
+
+Lower bounds of this kind give the <NoteLink to="sample-complexity-lower-bounds">sample-complexity lower
+bounds</NoteLink> of <NoteLink to="probably-approximately-correct-learning">probably approximately correct (PAC)
+learning</NoteLink>, the $m^{-2s/(2s + d)}$ limit of
+<NoteLink to="minimax-rates-for-nonparametric-regression">nonparametric regression</NoteLink>, and the $\sqrt T$
+<NoteLink to="lower-bounds-for-online-learning">regret lower bounds</NoteLink> of <NoteLink to="online-learning">online
+learning</NoteLink>.
+
+## Mechanism
+
+### Reduction to testing
+
+Choose parameters $\theta_1, \dots, \theta_M$, each $\theta_j = \theta(P_j)$ for some $P_j \in \Pcal$, that are
+$2\delta$-separated: $\rho(\theta_j, \theta_k) \ge 2\delta$ for $j \ne k$. Write $P_j^m$ for the distribution of a
+sample of size $m$ from $P_j$.
+
+1. **An estimator gives a test.** Given $\hat\theta$, let $\psi = \argmin_j \rho(\hat\theta, \theta_j)$, the index of
+   the nearest candidate. If $\rho(\hat\theta, \theta_j) < \delta$, every other candidate is more than $\delta$ away by
+   the triangle inequality, so $\psi = j$. Hence $\prob_j(\rho(\hat\theta, \theta_j) \ge \delta) \ge
+   \prob_j(\psi \ne j)$.
+2. **Markov's inequality.** $\expect_j[\Phi(\rho(\hat\theta, \theta_j))] \ge \Phi(\delta)\,\prob_j(\rho(\hat\theta,
+   \theta_j) \ge \delta)$.
+3. **Restrict the supremum.** The worst case over $\Pcal$ is at least the worst case over the $M$ chosen distributions.
+
+Together:
+
+$$
+\inf_{\hat\theta}\sup_{P \in \Pcal}\expect_P\brack{\Phi(\rho(\hat\theta, \theta(P)))}
+\ge \Phi(\delta)\,\inf_{\psi}\max_{j \le M}\prob_j(\psi \ne j).
+$$
+
+The right side is the minimax error of a test between $M$ hypotheses. The methods below bound it from below. Each
+trades separation against closeness: a larger $\delta$ raises $\Phi(\delta)$ but makes the hypotheses easier to tell
+apart.
+
+### Le Cam's two-point method
+
+With $M = 2$, the testing error is bounded by the overlap of the two sample distributions <Cite id="lecam1973" />.
+For any test, let $A$ be the event that it answers 2. The total variation distance is
+$\operatorname{TV}(P, Q) = \sup_A \abs{P(A) - Q(A)}$ (see <NoteLink to="f-divergences-and-jensen-shannon">
+f-divergences</NoteLink>). Then
+
+$$
+\begin{aligned}
+\max_j \prob_j(\psi \ne j) &\ge \frac12\paren{P_1^m(A) + P_2^m(A^c)} = \frac12\paren{1 - \paren{P_2^m(A) - P_1^m(A)}} \\
+&\ge \frac12\paren{1 - \operatorname{TV}(P_1^m, P_2^m)}.
+\end{aligned}
+$$
+
+The bound is exact for the average error: the likelihood-ratio test, which answers 2 where the density of $P_2^m$
+exceeds that of $P_1^m$, attains it (the <NoteLink to="neyman-pearson-lemma">Neyman–Pearson lemma</NoteLink>).
+
+Total variation of a product of $m$ distributions has no closed form, so it is bounded through the
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink>, which adds over independent draws:
+$\KL(P_1^m \,\|\, P_2^m) = m\KL(P_1 \,\|\, P_2)$. Two inequalities convert it <Cite id="tsybakov2009" />:
+
+- **Pinsker:** $\operatorname{TV} \le \sqrt{\KL/2}$, useful when the divergence is small.
+- **Bretagnolle–Huber:** $1 - \operatorname{TV} \ge \frac12 e^{-\KL}$, which stays positive for every divergence.
+
+The resulting recipe: choose two hypotheses whose parameters differ by $2\delta$ and whose sample divergence
+$m\KL(P_1 \,\|\, P_2)$ is a constant, then read off the rate from $\delta$ as a function of $m$.
+
+<LeCamTwoPoint />
+
+### Fano's method
+
+Two hypotheses give at most a constant factor, which is the right answer for one-dimensional problems but loses the
+dependence on dimension. Fano's method uses $M$ hypotheses. Let $V$ be uniform on $\set{1, \dots, M}$ and let the
+sample $X$ be drawn from $P_V^m$. **Fano's inequality** bounds the error of any test $\psi(X)$ in terms of the
+<NoteLink to="mutual-information">mutual information</NoteLink> $I(V; X)$ <Cite id="cover2006" />:
+
+$$
+\prob(\psi \ne V) \ge 1 - \frac{I(V; X) + \ln 2}{\ln M}.
+$$
+
+The maximum error over $j$ is at least this average error. The mutual information is at most the largest pairwise
+divergence, because $I(V; X) = \frac1M\sum_j\KL(P_j^m \,\|\, \bar P^m)$ with $\bar P^m$ the mixture, and the
+divergence is convex in its second argument:
+
+$$
+I(V; X) \le \frac{1}{M^2}\sum_{j, k}\KL(P_j^m \,\|\, P_k^m) \le m\max_{j, k}\KL(P_j \,\|\, P_k).
+$$
+
+The recipe: find a **packing**, $M$ parameters that are $2\delta$-separated, with $\ln M$ large, and choose $\delta$
+so that $m\max\KL \le \frac14\ln M$. Then the testing error is at least about $\frac12$ and the minimax risk is at least
+$\Phi(\delta)/2$ <Cite id="wainwright2019" />. Packings come from
+<NoteLink to="covering-numbers-and-metric-entropy">metric entropy</NoteLink>: the log-packing number of the parameter
+set plays the role of capacity.
+
+<Derivation title="Fano's inequality">
+Let $E = \indicator[\psi \ne V]$ and $p_e = \prob(E = 1)$. Expanding the conditional entropy $\entropy(E, V \mid X)$ in
+two orders gives $\entropy(V \mid X) = \entropy(E \mid X) + \entropy(V \mid E, X)$, since $E$ is a function of $V$
+and $X$. Now $\entropy(E \mid X) \le \entropy(E) \le \ln 2$. Given $E = 0$, $V = \psi(X)$ is determined; given
+$E = 1$, $V$ is one of the other $M - 1$ values, so $\entropy(V \mid E, X) \le p_e\ln(M - 1)$. Hence
+$\entropy(V \mid X) \le \ln 2 + p_e\ln M$. With $V$ uniform, $\entropy(V \mid X) = \ln M - I(V; X)$, and rearranging
+gives $p_e \ge 1 - (I(V; X) + \ln 2)/\ln M$.
+</Derivation>
+
+### Assouad's lemma
+
+When the loss splits into a sum over coordinates, a hypercube of hypotheses gives a cleaner bound
+<Cite id="yu1997" />. Index the hypotheses by $\omega \in \set{0, 1}^d$, and let $\rho_H(\omega, \omega')$ be the
+Hamming distance, the number of coordinates that differ. Then for any estimate $\hat\omega$
+<Cite id="tsybakov2009" />,
+
+$$
+\max_\omega \expect_\omega[\rho_H(\hat\omega, \omega)] \ge \frac d2\min_{\rho_H(\omega, \omega') = 1}
+\paren{1 - \operatorname{TV}(P_\omega^m, P_{\omega'}^m)}.
+$$
+
+Each coordinate is a two-point problem between neighbours of the cube, and the $d$ problems add.
+
+1. **Maximum at least average.** The maximum over $\omega$ is at least the average over all $2^d$ vertices,
+   $2^{-d}\sum_\omega\sum_{j=1}^d\prob_\omega(\hat\omega_j \ne \omega_j)$.
+2. **Pair the vertices.** For each coordinate $j$, group the vertices into $2^{d-1}$ pairs that differ only in
+   coordinate $j$. For a pair $(\omega, \omega')$, the test $\hat\omega_j$ errs under one or the other, and by the
+   two-point bound $\prob_\omega(\hat\omega_j \ne \omega_j) + \prob_{\omega'}(\hat\omega_j \ne \omega'_j) \ge 1 -
+   \operatorname{TV}(P_\omega^m, P_{\omega'}^m)$.
+3. **Add up.** Each coordinate contributes at least $2^{-d}\,2^{d-1}\min(1 - \operatorname{TV}) = \frac12\min(1 -
+   \operatorname{TV})$, and there are $d$ coordinates.
+
+## Worked example
+
+**A coin (Le Cam).** Estimate the bias $p$ of a coin from $m$ flips. Take $p \in \set{\frac12 - \delta, \frac12 +
+\delta}$ with $\delta = 0.05$. The per-flip divergence is $\KL = 2\delta\ln\frac{1 + 2\delta}{1 - 2\delta} = 0.1\ln(1.1/0.9)
+= 0.0201$ nats.
+
+1. **At $m = 100$.** The sample divergence is $2.01$. The exact total variation between the two
+   <NoteLink to="binomial-distribution">binomial distributions</NoteLink> is $0.683$, so every estimator has
+   $\prob(\abs{\hat p - p} \ge 0.05) \ge (1 - 0.683)/2 = 0.159$ for one of the two coins.
+2. **Through the divergence.** Bretagnolle–Huber gives $\frac14e^{-2.01} = 0.034$, a weaker but valid bound. Pinsker
+   gives $\operatorname{TV} \le \sqrt{2.01/2} = 1.00$, which is vacuous here: Pinsker is useful only when $m\KL$ is
+   below about 1.
+3. **Sample size.** An error probability of at most 0.05 needs $(1 - \operatorname{TV})/2 \le 0.05$, which first holds
+   at $m = 269$. The Bretagnolle–Huber route gives $m \ge \ln 5/0.0201 = 80$. The sample mean with
+   <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> guarantees it at $m = \ln(40)/(2\delta^2) =
+   738$. The best estimator needs between 269 and 738 flips.
+
+**A Gaussian mean in $d$ dimensions (Assouad).** Observe $m$ draws of $\Gauss(\thetavec, \sigma^2\eye_d)$ and estimate
+$\thetavec$ in squared error.
+
+1. **The cube.** Let $\thetavec_\omega = \delta(2\omega - \ones)$, so each coordinate is $\pm\delta$. If
+   $\hat\theta_j$ has the wrong sign, $(\hat\theta_j - \theta_j)^2 \ge \delta^2$, so
+   $\norm{\hat\thetavec - \thetavec_\omega}^2 \ge \delta^2\rho_H(\hat\omega, \omega)$ with $\hat\omega$ the signs of
+   $\hat\thetavec$.
+2. **Neighbours are close.** Neighbouring vertices differ by $2\delta$ in one coordinate, so
+   $\KL = m(2\delta)^2/(2\sigma^2) = 2m\delta^2/\sigma^2$. With $\delta = \sigma/(2\sqrt m)$, $\KL = \frac12$ and
+   Pinsker gives $\operatorname{TV} \le \frac12$.
+3. **Assouad.**
+   $\expect\norm{\hat\thetavec - \thetavec}^2 \ge \delta^2 \cdot \frac d2 \cdot \frac12 = \frac{d\sigma^2}{16m}$ for the
+   worst vertex.
+
+The sample mean has risk exactly $d\sigma^2/m$, so it is rate-optimal and the bound is off by a factor of 16. With
+$d = 10$, $\sigma = 1$ and a target risk of 0.01, every estimator needs $m \ge 10/(16 \times 0.01) = 63$ draws, and
+the sample mean needs 1,000.
+
+Fano's method with a Varshamov–Gilbert packing of $2^{d/8}$ cube vertices, pairwise at Hamming distance at least
+$d/8$ <Cite id="tsybakov2009" />, gives the same $d\sigma^2/m$ rate with the constant $\ln 2/1024$ for $d \ge 32$.
+Both methods find the dimension; Assouad's lemma loses less in the constant when the loss splits over coordinates.
+
+## Trade-offs
+
+- **Le Cam** is the simplest. It gives the right rate for one-dimensional parameters and for functionals such as a
+  mean or a density at a point, and nothing better than a constant in the dimension.
+- **Fano** handles general metrics and gives dimension and entropy factors. It needs a packing and loses large
+  constants, and it bounds the error only when $\ln M$ is large.
+- **Assouad** gives sharper constants when the loss is a sum over coordinates or cells, as in regression with a
+  hypercube of local bumps.
+- **The choice of hypotheses sets the strength of the bound.** All three are mechanical once the hypotheses are chosen.
+  Finding hypotheses that are far apart in the loss and close in divergence is the creative step, and a poor choice
+  gives a valid but weak bound.
+
+## Pitfalls
+
+- **A lower bound is over a family.** "No estimator beats $m^{-1/2}$" always means "on some member of $\Pcal$". A
+  smaller family, such as one with a <NoteLink to="fast-rates-and-noise-conditions">noise condition</NoteLink>, can have
+  a faster minimax rate.
+- **Constants are rarely tight.** Lower bounds settle the rate. The constants 1/16 and $\ln 2/1024$ above are
+  artefacts of the method, and comparing them with an upper bound's constant says little.
+- **Total variation, not KL, controls testing.** Bounds through the divergence lose information. When the exact
+  total variation is computable, as for the coin, it gives the sharpest two-point bound.
+- **Worst case is not typical case.** The hard hypotheses are chosen adversarially. A method can beat the minimax rate
+  on the distributions met in practice.

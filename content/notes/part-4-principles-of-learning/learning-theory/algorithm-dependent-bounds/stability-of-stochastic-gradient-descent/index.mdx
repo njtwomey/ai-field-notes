@@ -1,0 +1,197 @@
+---
+title: 'Stability of stochastic gradient descent'
+kind: concept
+summary: 'Stochastic gradient descent on a smooth Lipschitz convex loss is uniformly stable with $\beta \le 2L^2\sum_t\eta_t/m$: fewer steps and smaller step sizes give a smaller generalisation gap, whatever the model size.'
+tags: [learning-theory, stability, optimisation, worked-example]
+aliases: [train faster generalise better, SGD stability, stability of SGD, Hardt–Recht–Singer bound]
+requires: [algorithmic-stability, stochastic-gradient-descent-theory, convex-sets-and-functions]
+related: [stability-of-regularised-empirical-risk-minimisation, early-stopping, implicit-regularisation, approximation-estimation-optimisation-trade-off, online-to-batch-conversion, gradient-descent, algorithm-dependent-bounds]
+references: [hardt2016sgd, kuzborskij2018, feldman2019stability, bousquet2002, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { CoupledSgdRuns } from './CoupledSgdRuns'
+
+<Definition>
+**<Gloss name="sgd">Stochastic gradient descent</Gloss>** on a sample $S = (z_1, \dots, z_m)$ starts from a fixed
+$\wvec_0$ and takes $T$ steps $\wvec_{t} = \wvec_{t-1} - \eta_t \nabla\ell(\wvec_{t-1}, z_{i_t})$, where each index
+$i_t$ is drawn uniformly from $\set{1, \dots, m}$ and $\eta_t > 0$ is the step size. Suppose that for every example $z$
+the loss $\ell(\cdot, z)$ is convex, $L$-Lipschitz ($\norm{\nabla\ell(\wvec, z)} \le L$) and $H$-smooth
+($\norm{\nabla\ell(\wvec, z) - \nabla\ell(\vvec, z)} \le H\norm{\wvec - \vvec}$), and that $\eta_t \le 2/H$. Then the
+output $\wvec_T$ is uniformly stable in expectation over the indices, with
+
+$$
+\beta \le \frac{2L^2}{m}\sum_{t=1}^T \eta_t,
+$$
+
+so its <NoteLink to="generalisation-gap">expected generalisation gap</NoteLink> is at most $\beta$
+<Cite id="hardt2016sgd" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="stability-of-regularised-empirical-risk-minimisation">Regularised empirical risk minimisation</NoteLink>
+is stable because its exact minimiser cannot move far. Stochastic gradient descent in practice never reaches a
+minimiser. It is stopped after a budget of steps. Its output depends on the data only through the gradients it has
+taken, and a single example can only have influenced the gradients on the steps that visited it.
+
+Picture two runs, one on $S$ and one on $S^{(i)}$, which visit the examples in the same order. They take identical
+steps until the first visit to the replaced example. At that step the two gradients differ and the runs separate by at
+most $2\eta_t L$. On later steps that visit shared examples, a convex smooth loss with a small enough step size cannot
+push the runs further apart. So the separation grows only on visits to the replaced example, about once every $m$
+steps, and by at most $2\eta_t L$ each time. After $T$ steps the expected separation is at most
+$\frac{2L}{m}\sum_t\eta_t$.
+
+The bound depends on the total distance the algorithm could travel, $\sum_t\eta_t$, and on nothing about the model's
+size. Training for fewer steps, or with smaller steps, gives a smaller bound on the gap. Hardt, Recht and Singer
+summarised this as "train faster, generalize better" <Cite id="hardt2016sgd" />. It is one theoretical reading of
+<NoteLink to="early-stopping">early stopping</NoteLink>: the number of steps acts as a regulariser.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, this stability bound
+exploits the structure of an optimiser rather than of a <NoteLink to="empirical-risk-minimisation">hypothesis
+class</NoteLink>. The resulting $\beta$ feeds the bound of <NoteLink to="algorithmic-stability">algorithmic
+stability</NoteLink>.
+
+<CoupledSgdRuns />
+
+## Coupling two runs
+
+Let $S$ and $S^{(i)}$ differ in the $i$-th example. Run stochastic gradient descent on both with the same index
+sequence $i_1, \dots, i_T$ and the same start $\wvec_0$. Write $\wvec_t$ and $\wvec_t'$ for the two runs and
+$\Delta_t = \norm{\wvec_t - \wvec_t'}$ for their separation, with $\Delta_0 = 0$. A step is the map
+$G_t(\wvec) = \wvec - \eta_t\nabla\ell(\wvec, z)$ for the example $z$ visited. Three facts about such maps control
+$\Delta_t$ <Cite id="hardt2016sgd" />.
+
+- **Bounded.** $\norm{G_t(\wvec) - \wvec} = \eta_t\norm{\nabla\ell(\wvec, z)} \le \eta_t L$ for an $L$-Lipschitz loss.
+- **Non-expansive.** If the loss is convex and $H$-smooth and $\eta_t \le 2/H$, then
+  $\norm{G_t(\wvec) - G_t(\vvec)} \le \norm{\wvec - \vvec}$.
+- **Expansive at most by $1 + \eta_t H$.** Without convexity, smoothness alone gives
+  $\norm{G_t(\wvec) - G_t(\vvec)} \le (1 + \eta_t H)\norm{\wvec - \vvec}$.
+
+Coupling the two runs through the same indices is legitimate because stability is defined for the expected loss over
+the algorithm's randomness, and any joint construction with the correct marginals gives the same expectation.
+
+## The convex bound
+
+**Step 1: one step, two cases.** At step $t$ the visited index $i_t$ is uniform on $\set{1, \dots, m}$.
+
+- With probability $1 - 1/m$ the step visits a shared example. Both runs apply the same map $G_t$, which is
+  non-expansive, so $\Delta_t \le \Delta_{t-1}$.
+- With probability $1/m$ the step visits position $i$, where the runs hold different examples and apply different maps.
+  Each map moves its point by at most $\eta_t L$, so by the triangle inequality $\Delta_t \le \Delta_{t-1} + 2\eta_t L$.
+
+**Step 2: take expectations.** Averaging over the two cases,
+
+$$
+\expect\Delta_t \le \paren{1 - \frac1m}\expect\Delta_{t-1} + \frac1m\paren{\expect\Delta_{t-1} + 2\eta_t L}
+= \expect\Delta_{t-1} + \frac{2\eta_t L}{m}.
+$$
+
+**Step 3: unroll.** Starting from $\Delta_0 = 0$, $\expect\Delta_T \le \frac{2L}{m}\sum_{t=1}^T\eta_t$.
+
+**Step 4: from parameters to losses.** For any test example $z$, the Lipschitz condition gives
+$\expect\abs{\ell(\wvec_T, z) - \ell(\wvec_T', z)} \le L\,\expect\Delta_T \le \frac{2L^2}{m}\sum_t\eta_t$. This holds
+for every pair of samples differing in one example and every $z$, which is the stated stability.
+
+<Derivation title="Why a gradient step is non-expansive">
+
+For a convex $H$-smooth function $f$, the gradient is co-coercive:
+$\inner{\nabla f(\uvec) - \nabla f(\vvec)}{\uvec - \vvec} \ge \frac1H\norm{\nabla f(\uvec) - \nabla f(\vvec)}^2$. Write
+$\gvec = \nabla f(\uvec) - \nabla f(\vvec)$ and $G(\uvec) = \uvec - \eta\nabla f(\uvec)$. Expanding the square,
+
+$$
+\norm{G(\uvec) - G(\vvec)}^2 = \norm{\uvec - \vvec}^2 - 2\eta\inner{\gvec}{\uvec - \vvec} + \eta^2\norm{\gvec}^2
+\le \norm{\uvec - \vvec}^2 - \paren{\frac{2\eta}{H} - \eta^2}\norm{\gvec}^2.
+$$
+
+For $\eta \le 2/H$ the bracket is non-negative, so $\norm{G(\uvec) - G(\vvec)} \le \norm{\uvec - \vvec}$. For a
+non-convex $H$-smooth function, the triangle inequality and $\norm{\gvec} \le H\norm{\uvec - \vvec}$ give the
+expansion factor $1 + \eta H$ instead. If $f$ is also $\lambda$-strongly convex, a similar expansion shows the step
+contracts distances by a factor strictly below 1 for small enough $\eta$.
+
+</Derivation>
+
+### Reading the bound
+
+- **Constant step size, $E$ epochs.** With $\eta_t = \eta$ and $T = Em$ steps,
+  $\beta \le 2L^2\eta T/m = 2L^2\eta E$. The bound grows linearly with the number of epochs and does not shrink with
+  $m$ at a fixed number of epochs.
+- **Decaying step size.** With $\eta_t = c/\sqrt t$, $\sum_{t \le T}\eta_t \le 2c\sqrt T$, so
+  $\beta \le 4cL^2\sqrt T/m = 4cL^2\sqrt{E/m}$. More data now helps.
+- **The risk, not only the gap.** Stopping early lowers $\beta$ but leaves the empirical risk higher. Hardt, Recht and
+  Singer balanced the <NoteLink to="approximation-estimation-optimisation-trade-off">optimisation error</NoteLink> of
+  averaged stochastic gradient descent against its stability. With a step size tuned to the number of steps $T$, the
+  averaged iterate $\bar\wvec_T$ satisfies
+  $\expect R(\bar\wvec_T) \le \expect\hat R_S(\wvec_S^*) + \frac{DL}{\sqrt m}\sqrt{\frac{m + 2T}{T}}$, where $\wvec_S^*$
+  minimises the empirical risk and $D$ bounds the distance from the start to it. Several passes over the data cost
+  nothing in rate when the step size shrinks with $T$ <Cite id="hardt2016sgd" />.
+
+## Strongly convex and non-convex losses
+
+**Strongly convex losses.** If each $\ell(\cdot, z)$ is $\lambda$-strongly convex and $H$-smooth, projected stochastic
+gradient descent with a constant step $\eta \le 1/H$ is uniformly stable with $\beta \le 2L^2/(\lambda m)$, for any
+number of steps $T$ <Cite id="hardt2016sgd" />. Each shared step contracts the separation, so the runs stop drifting
+apart. The constant matches the one for the exact
+<NoteLink to="stability-of-regularised-empirical-risk-minimisation">regularised minimiser</NoteLink>.
+
+**Non-convex losses.** Without convexity a shared step can expand the separation by $1 + \eta_t H$, so the runs can
+drift apart even when they visit the same examples. Two ideas still give a bound for a loss in $[0, 1]$.
+
+1. **A burn-in period.** The replaced example is first visited after a random number of steps. For any $t_0$, the
+   probability that it is visited in the first $t_0$ steps is at most $t_0/m$, and on the complementary event the runs
+   coincide up to step $t_0$. So the expected loss difference is at most $t_0/m$ plus $L$ times the expected separation
+   given that the runs coincide at $t_0$.
+2. **Decaying steps.** With non-increasing steps $\eta_t \le c/t$, the expansion factors $1 + cH/t$ multiply to a
+   polynomial in $T$ rather than an exponential.
+
+Optimising over $t_0$ gives
+
+$$
+\beta \le \frac{1 + 1/(Hc)}{m - 1}\paren{2cL^2}^{1/(Hc + 1)} T^{Hc/(Hc + 1)},
+$$
+
+which behaves like $T^{1 - 1/(Hc + 1)}/m$ <Cite id="hardt2016sgd" />. The bound still favours few steps, but it grows
+almost linearly in $T$ when $Hc$ is large. Deep networks are usually trained with step sizes that do not decay like
+$c/t$, so the bound does not apply to them as stated.
+
+## Worked example
+
+Take <NoteLink to="logistic-regression">logistic regression</NoteLink> with inputs of norm at most 1. The
+<NoteLink to="surrogate-losses">logistic loss</NoteLink> $\ell(\wvec, (x, y)) = \ln(1 + e^{-y\inner{\wvec}{x}})$ with
+$y \in \set{-1, +1}$ has gradient norm at most $\norm{x} \le 1$, so $L = 1$, and its Hessian is at most
+$\frac14 xx\transpose$, so $H = \frac14$. Any step size up to $2/H = 8$ is allowed. Take $m = 50{,}000$ examples.
+
+1. **Constant step size.** With $\eta = 0.1$ and $E$ epochs, $\beta \le 2 \cdot 1 \cdot 0.1 \cdot E = 0.2E$ nats. One
+   epoch gives 0.2; ten epochs give 2. The logistic loss at $\wvec = \zeros$ is $\ln 2 = 0.69$ nats, so the bound after
+   ten epochs says nothing about the gap.
+2. **Decaying step size.** With $\eta_t = 0.5/\sqrt t$ and ten epochs, $T = 500{,}000$ and
+   $\sum_t\eta_t \le 2 \cdot 0.5\sqrt{500{,}000} = 707$. The bound is $\beta \le 2 \cdot 707/50{,}000 = 0.028$ nats.
+   One epoch gives $0.009$.
+3. **Sample size.** For $\beta \le 0.01$ with the decaying step and ten epochs,
+   $4cL^2\sqrt{E/m} = 2\sqrt{10/m} \le 0.01$ needs $m \ge 400{,}000$. One epoch needs $m \ge 40{,}000$.
+4. **Vacuous or not.** The decaying-step bound is non-vacuous and does not depend on the input dimension. It bounds
+   the expected gap in the logistic loss, and with it the expected gap in the 0-1 loss only through the surrogate:
+   the 0-1 risk is at most $1/\ln 2$ times the logistic risk.
+
+The figure shows the coupling itself on a two-parameter least-squares problem. With a small step size the separation
+grows epoch by epoch, as the bound predicts. It then levels off near the distance between the two least-squares
+solutions, because the data term of this problem is strongly convex and the convex bound ignores that.
+
+{/* figure pending engine (B1 stabilityStudy with { kind: 'sgd', loss: 'logistic', epochs, stepSize, sameOrder: true }):
+measured parameter separation and loss change against epochs beside 2L²Σηₜ/m, and the measured gap */}
+
+## Pitfalls
+
+- **The bound is on the expected gap.** Uniform stability in expectation over the indices bounds
+  $\expect[R(\wvec_T) - \hat R_S(\wvec_T)]$. High-probability bounds for several passes of stochastic gradient descent
+  need the sharper analysis of Feldman and Vondrák <Cite id="feldman2019stability" />.
+- **Worst-case constants.** $L$ and $H$ are suprema over all examples and parameters. Kuzborskij and Lampert replaced
+  them by data-dependent quantities: in the convex case the bound depends on the risk at the initialisation, and in the
+  non-convex case on the curvature near it <Cite id="kuzborskij2018" />.
+- **The step-size condition.** Non-expansiveness needs $\eta_t \le 2/H$. Larger steps can expand the
+  separation even for convex losses.
+- **Stability bounds only the gap.** A run that stops after one step is very stable and fits nothing. The bound
+  explains why the gap is small, and the optimisation error must be bounded separately.
+- **Non-smooth losses.** The derivation uses smoothness for non-expansiveness. The <Gloss name="hinge-loss">hinge
+  loss</Gloss> is not smooth, and its stability needs a different argument.

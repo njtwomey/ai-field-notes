@@ -1,0 +1,197 @@
+---
+title: 'Symmetrisation'
+kind: technique
+summary: 'Symmetrisation bounds the largest deviation of empirical means from their expectations over a class by the largest deviation between two independent samples, and then by a sum with random signs. It reduces an infinite class to its finite projection on the sample.'
+tags: [learning-theory, uniform-convergence, capacity, worked-example]
+aliases: [ghost sample, ghost-sample lemma, symmetrization, symmetrisation lemma, Rademacher symmetrisation]
+requires: [uniform-convergence, hoeffdings-inequality, union-bound, markov-and-chebyshev-inequalities]
+related: [rademacher-complexity, growth-function-and-sauer-shelah-lemma, massarts-finite-class-lemma, vapnik-chervonenkis-dimension, glivenko-cantelli-theorem-and-dkw-inequality, mcdiarmids-inequality, kolmogorov-smirnov-test]
+references: [vapnik1971, gine1984, bousquet2004, devroye1996, wainwright2019, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { GhostSample } from './GhostSample'
+
+<Definition>
+**Symmetrisation** bounds the uniform deviation $\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)}$ of a class $\Hcal$ by a
+quantity that depends only on finite samples. Its first step, the **ghost-sample lemma**, replaces the true risk
+$R(h)$ by the empirical risk $\hat R_{S'}(h)$ on an independent second sample $S'$ of the same size. Its second step
+multiplies each term of the difference by an independent random sign $\sigma_i = \pm 1$, which leaves the distribution
+unchanged because swapping a point of $S$ with the matching point of $S'$ does. Conditional on the $2m$ points, the
+class acts only through its finitely many labellings of them <Cite id="vapnik1971" /> <Cite id="gine1984" />.
+</Definition>
+
+## Problem
+
+The <NoteLink to="uniform-convergence" /> of an infinite class is the obstacle to bounding the risk of
+<Gloss name="erm" />. For a finite class $\Hcal$, the <NoteLink to="union-bound" /> and
+<NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> give
+
+$$
+\pr\paren{\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)} > \epsilon} \le 2\abs{\Hcal}\,e^{-2m\epsilon^2},
+$$
+
+where $S$ is a sample of $m$ independent examples, $R(h)$ is the true risk and $\hat R_S(h)$ the empirical risk of $h$
+on $S$. For an infinite class, $\abs{\Hcal} = \infty$ and the bound is empty.
+
+Two things block a direct count. The true risk $R(h)$ is an expectation over the whole distribution, so two hypotheses
+that agree on the sample can still have different true risks: the class does not reduce to its behaviour on $S$. And
+the events $\set{\abs{R(h) - \hat R_S(h)} > \epsilon}$ for different $h$ have no finite structure to take a union over.
+
+Symmetrisation removes the true risk from the event. After it, every quantity is an average over $2m$ sample points,
+and hypotheses that label those points the same way are interchangeable. The number of distinct hypotheses is then at
+most the <NoteLink to="growth-function-and-sauer-shelah-lemma">growth function</NoteLink> $\Pi_\Hcal(2m)$. In the
+<NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, symmetrisation is the move that
+makes a bound uniform over an infinite class.
+
+## Mechanism
+
+Write $\ell(h, z) \in [0, 1]$ for the loss of $h$ on an example $z = (x, y)$, so $\hat R_S(h) = \frac1m\sum_i
+\ell(h, z_i)$ and $R(h) = \expect\,\ell(h, z)$. Let $S' = (z'_1, \dots, z'_m)$ be a second sample from the same
+distribution, independent of $S$. It is never collected; it exists only in the proof, which is why it is called a
+**ghost sample**.
+
+### Step 1: the ghost sample replaces the true risk
+
+**Ghost-sample lemma.** For every $\epsilon > 0$ with $m\epsilon^2 \ge 2$,
+
+$$
+\pr_S\paren{\sup_{h}\abs{R(h) - \hat R_S(h)} > \epsilon} \le
+2\,\pr_{S, S'}\paren{\sup_{h}\abs{\hat R_{S'}(h) - \hat R_S(h)} > \frac\epsilon2}.
+$$
+
+The proof finds, on the bad event for $S$, a hypothesis that $S'$ is likely to expose.
+
+1. **Pick the offender.** If $\sup_h\abs{R(h) - \hat R_S(h)} > \epsilon$, choose a hypothesis $h_S$ with
+   $\abs{R(h_S) - \hat R_S(h_S)} > \epsilon$. It depends on $S$ only.
+2. **The ghost sample estimates its risk.** Conditional on $S$, $h_S$ is fixed and $\hat R_{S'}(h_S)$ is a mean of
+   $m$ independent losses in $[0, 1]$, with variance at most $1/(4m)$. Chebyshev's inequality from
+   <NoteLink to="markov-and-chebyshev-inequalities" /> gives
+
+   $$
+   \pr_{S'}\paren{\abs{\hat R_{S'}(h_S) - R(h_S)} \ge \frac\epsilon2 \,\middle|\, S} \le
+   \frac{1/(4m)}{\epsilon^2/4} = \frac{1}{m\epsilon^2} \le \frac12,
+   $$
+
+   the last step by the condition $m\epsilon^2 \ge 2$.
+3. **The two samples disagree.** When $\abs{\hat R_{S'}(h_S) - R(h_S)} < \epsilon/2$, the triangle inequality gives
+   $\abs{\hat R_{S'}(h_S) - \hat R_S(h_S)} > \epsilon - \epsilon/2 = \epsilon/2$, so the supremum on the right also
+   exceeds $\epsilon/2$.
+4. **Combine.** The right-hand event happens with conditional probability at least $\frac12$ whenever the left-hand
+   event happens. Taking the expectation over $S$, the probability of the right-hand event is at least half the
+   probability of the left-hand one.
+
+
+
+### Step 2: random signs
+
+Fix signs $\sigma_1, \dots, \sigma_m \in \set{-1, +1}$. For every $i$ with $\sigma_i = -1$, swap $z_i$ and $z'_i$. The
+pair $(S, S')$ has the same joint distribution after the swap, because $z_i$ and $z'_i$ are independent and identically
+distributed. The swap changes $\ell(h, z'_i) - \ell(h, z_i)$ into $\sigma_i\paren{\ell(h, z'_i) - \ell(h, z_i)}$ for
+every $h$ at once. So for independent uniform signs,
+
+$$
+\pr\paren{\sup_{h}\abs{\frac1m\sum_{i=1}^m\paren{\ell(h, z'_i) - \ell(h, z_i)}} > \frac\epsilon2} =
+\pr\paren{\sup_{h}\abs{\frac1m\sum_{i=1}^m\sigma_i\paren{\ell(h, z'_i) - \ell(h, z_i)}} > \frac\epsilon2}.
+$$
+
+### Step 3: condition on the double sample
+
+Fix the $2m$ points of $S$ and $S'$; the only randomness left is in the signs.
+
+1. **Finitely many behaviours.** For binary classifiers with the 0–1 loss, the vector of losses on the $2m$ points is
+   determined by the labelling $h$ gives them. There are at most $\Pi_\Hcal(2m)$ such labellings.
+2. **Concentrate for one behaviour.** For one labelling, write $a_i = \ell(h, z'_i) - \ell(h, z_i) \in [-1, 1]$. The
+   sum $\sum_i\sigma_i a_i$ has independent terms in $[-\abs{a_i}, \abs{a_i}]$, so Hoeffding's inequality gives
+   $\pr_{\sigmavec}(\abs{\sum_i\sigma_i a_i} > s) \le 2\exp(-2s^2/\sum_i 4a_i^2) \le 2\exp(-s^2/(2m))$. At
+   $s = m\epsilon/2$ this is $2e^{-m\epsilon^2/8}$.
+3. **Union over behaviours.** The union bound over at most $\Pi_\Hcal(2m)$ labellings gives
+   $2\,\Pi_\Hcal(2m)\,e^{-m\epsilon^2/8}$, whatever the $2m$ points. Averaging over the points keeps the same bound.
+
+**Result.** Steps 1 to 3 give the Vapnik–Chervonenkis inequality: for $m\epsilon^2 \ge 2$,
+
+$$
+\pr\paren{\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)} > \epsilon} \le 4\,\Pi_\Hcal(2m)\,e^{-m\epsilon^2/8}.
+$$
+
+Setting the right-hand side to $\delta$ gives, with probability at least $1 - \delta$,
+
+$$
+\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)} \le \sqrt{\frac{8\paren{\ln\Pi_\Hcal(2m) + \ln(4/\delta)}}{m}}.
+$$
+
+This $\epsilon$ always satisfies $m\epsilon^2 \ge 8\ln 4 > 2$, so the lemma's condition costs nothing. Other texts
+reach the same form with different constants <Cite id="bousquet2004" /> <Cite id="devroye1996" />.
+
+### The expectation form
+
+Symmetrisation also works on expectations, and that version defines the <NoteLink to="rademacher-complexity" />. For a
+class $\Fcal$ of functions $f$ with sample mean $\hat\expect_S f = \frac1m\sum_i f(z_i)$,
+
+$$
+\expect_S\brack{\sup_{f \in \Fcal}\paren{\expect f - \hat\expect_S f}} \le 2\Rad_m(\Fcal).
+$$
+
+1. **Insert the ghost.** $\expect f = \expect_{S'}[\hat\expect_{S'} f]$, and the supremum of an expectation is at most
+   the expectation of the supremum, so the left side is at most
+   $\expect_{S,S'}\sup_f\frac1m\sum_i(f(z'_i) - f(z_i))$.
+2. **Insert the signs.** The swap argument of step 2 puts $\sigma_i$ in front of each term without changing the
+   expectation.
+3. **Split.** The supremum of a sum is at most the sum of the suprema. Each part is
+   $\expect\sup_f\frac1m\sum_i\sigma_i f(\cdot)$, because $-\sigma_i$ has the same distribution as $\sigma_i$. Each
+   equals $\Rad_m(\Fcal)$.
+
+The factor 2 is nearly tight. A matching lower bound, the **desymmetrisation inequality**, gives
+$\expect\sup_f\abs{\hat\expect_S f - \expect f} \ge \frac12\expect\sup_f\abs{\frac1m\sum_i\sigma_i(f(z_i) - \expect f)}$
+<Cite id="wainwright2019" />. Up to constants, the Rademacher complexity of the centred class is the uniform
+deviation.
+
+<GhostSample />
+
+## Worked example
+
+**Thresholds.** Take the class of half-lines $\indicator[x \le t]$ on the real line, whose empirical means form the
+empirical cdf. On $2m$ points it produces $2m + 1$ labellings. At $m = 1{,}000$ and $\delta = 0.05$,
+
+$$
+\epsilon = \sqrt{\frac{8\paren{\ln 2{,}001 + \ln 80}}{1{,}000}} = \sqrt{\frac{8 \times (7.60 + 4.38)}{1{,}000}} = 0.310.
+$$
+
+The <NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality">DKW inequality</NoteLink> gives
+$\sqrt{\ln 40/2{,}000} = 0.043$ for the same class, 7.2 times smaller. Two sources account for the gap. Replacing the
+$8$ by Hoeffding's $\frac12$ gives $\sqrt{(7.60 + 4.38)/2{,}000} = 0.077$, so the constants of symmetrisation cost a
+factor 4. The growth-function term costs the remaining factor 1.8. Solving $\epsilon(m) \le 0.1$ by bisection needs
+$m = 11{,}544$, where the DKW inequality needs $185$.
+
+**Measuring each step.** The figure computes the tails exactly at $m = 50$. The one-sample deviation exceeds $0.188$
+with probability 5%. The ghost-sample lemma's right-hand side, $2\pr(D_{50,50} \ge t/2)$, falls to 5% only at
+$t = 0.56$, three times further out. The full inequality, with Hoeffding and the union bound, gives $1.2$ at this sample
+size, a <NoteLink to="non-vacuous-generalisation-bounds">vacuous bound</NoteLink> for a deviation that cannot exceed 1.
+At $m = 200$ the three numbers are $0.095$, $0.29$ and $0.64$.
+
+**Linear classifiers.** Half-spaces in $\reals^{10}$ have <NoteLink to="vapnik-chervonenkis-dimension">VC
+dimension</NoteLink> 11. At $m = 10{,}000$ and $\delta = 0.05$, Sauer–Shelah gives $\ln\Pi(20{,}000) \le 91.4$, and the
+bound is $0.277$. A uniform deviation of $0.1$ needs $m = 96{,}614$. The same class through
+<NoteLink to="massarts-finite-class-lemma" /> and the Rademacher bound gives $0.143$ at $m = 10{,}000$, because the
+expectation form avoids the probability form's factor-4 constants.
+
+## Cost
+
+- **Constants.** The deviation halves in step 1 and the range of each sign-weighted term doubles in step 3. Together
+  they turn Hoeffding's exponent $2m\epsilon^2$ into $m\epsilon^2/8$, a factor 4 in $\epsilon$ at fixed $\delta$.
+- **A factor 2 in probability**, from step 1, and another from the two-sided Hoeffding bound.
+- **The growth function at $2m$, not $m$.** The double sample has $2m$ points.
+- **Nothing in the rate.** The resulting bound decays as $\sqrt{\ln\Pi_\Hcal(2m)/m}$, which for a class of VC dimension
+  $d$ is $\sqrt{d\ln m/m}$.
+
+## Trade-offs
+
+- **Probability form or expectation form.** The probability form leads to the growth function and the VC bound
+  directly. The expectation form, combined with <NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink>
+  for the deviation from the mean, leads to Rademacher bounds with smaller constants and to data-dependent bounds.
+- **Generic or structured.** Symmetrisation works for every class with the same argument. A class with special
+  structure, such as half-lines, has sharper direct bounds like the DKW inequality.
+- **Measurability.** The supremum over an uncountable class must be a <NoteLink to="random-variable">random
+  variable</NoteLink>. Classes of practical interest satisfy this; the general theory assumes a countable dense subclass
+  <Cite id="gine1984" />.

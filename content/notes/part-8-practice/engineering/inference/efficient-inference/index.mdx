@@ -1,0 +1,66 @@
+---
+title: 'Efficient inference'
+kind: overview
+summary: 'Making trained networks cheaper to run: quantisation to 8 or 4 bits, pruning and structured sparsity, knowledge distillation into a smaller student, FlashAttention''s tiled exact attention, and batching, KV caches and continuous batching for serving throughput.'
+tags: [engineering, inference, model-compression, deep-learning]
+aliases: [inference efficiency, inference optimisation]
+requires: [backpropagation, scaled-dot-product-attention]
+related: [training-at-scale, deployment-and-monitoring]
+references: [nagel2021, hinton2015, dao2022]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+**Efficient inference** reduces the memory, time and energy a trained model needs to make predictions, with little or
+no loss of accuracy. The techniques shrink the model, store its numbers in fewer bits, reorganise its computation to
+move less data, or serve many requests together.
+</Definition>
+
+## What it is for
+
+A model is trained once and run millions of times, so the cost of inference often exceeds the cost of training over a
+model's life. Phones, embedded devices and browsers have little memory and power. <Gloss name="llm">Large language
+models</Gloss> are limited by memory bandwidth: generating each token reads every weight once. Halving the bytes per
+weight, or the bytes moved per attention step, therefore speeds up generation almost proportionally. The notes here are
+the standard means to these savings.
+
+## Main ideas
+
+**Store numbers in fewer bits.** <NoteLink to="model-quantisation" /> represents weights and activations as $b$-bit
+integers with a real scale and a zero-point. Each bit removed doubles the rounding step. Eight-bit integers rarely cost
+accuracy; four bits need finer-grained scales or error-correcting methods such as GPTQ <Cite id="nagel2021" />.
+
+**Remove weights.** <NoteLink to="pruning-and-sparsity" /> sets a fraction of a trained network's weights to zero,
+usually those of smallest magnitude, and fine-tunes the rest. Unstructured sparsity saves storage. Only structured
+patterns, such as removing whole channels or the 2:4 pattern supported by recent hardware, also save time.
+
+**Train a smaller model to imitate a larger one.** <NoteLink to="knowledge-distillation" /> trains a student network to
+match a teacher's output distribution, softened by a temperature $T$, as well as the labels <Cite id="hinton2015" />.
+The soft targets carry information about which wrong classes are close to the right one, which a small model cannot
+learn from hard labels alone.
+
+**Move less data.** <NoteLink to="flash-attention" /> computes exact attention in tiles that fit in fast on-chip memory,
+so the $N \times N$ matrix of attention scores is never written to main memory <Cite id="dao2022" />. An online softmax
+rescales partial results as each tile arrives. The arithmetic is unchanged; the memory traffic falls, and so does the
+running time.
+
+**Serve requests together.** <NoteLink to="batching-and-serving-throughput" /> exploits the fact that one decoding step
+reads every weight whatever the batch size. Batching many sequences raises throughput almost linearly until arithmetic
+or the reads of the <Gloss name="kv-cache">key-value cache</Gloss> dominate. Continuous batching swaps finished
+sequences out and new ones in at every step.
+
+## How the notes fit together
+
+Quantisation, pruning and distillation are three independent ways to make the model itself smaller, and can be read in
+any order and combined. FlashAttention and batching change how an unchanged model is executed. Start with
+<NoteLink to="model-quantisation" />, the most widely used, and read <NoteLink to="batching-and-serving-throughput" />
+last, since it explains why bandwidth rather than arithmetic limits serving.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="backpropagation" /> and, for FlashAttention and serving, the
+<NoteLink to="scaled-dot-product-attention" />. The memory accounting of training, and the mixed-precision formats
+shared with quantisation, are in <NoteLink to="training-at-scale" />. Releasing an optimised model safely, and watching
+it once live, is covered in <NoteLink to="deployment-and-monitoring" />. Softmax approximations that cut the cost of
+large output layers are in <NoteLink to="approximate-softmax" />.

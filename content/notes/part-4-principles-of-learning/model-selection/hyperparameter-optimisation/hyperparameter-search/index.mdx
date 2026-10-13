@@ -1,0 +1,118 @@
+---
+title: Hyperparameter optimisation
+kind: overview
+summary: 'Hyperparameter optimisation chooses settings such as a learning rate or a penalty by validation score: grid, random and quasi-random search, Bayesian optimisation, multi-fidelity early stopping, hypergradients and population-based training. Its best score is optimistic.'
+tags: [model-selection, optimisation, hyperparameters]
+aliases: [hyperparameter search, hyperparameter tuning, HPO]
+requires: [cross-validation, model-selection-and-model-assessment]
+related: [bayesian-optimisation, multi-fidelity-hyperparameter-optimisation, selection-bias-and-nested-cross-validation, early-stopping, learning-rate-schedules, gaussian-process-hyperparameter-learning, meta-learning, evolution-strategies-and-covariance-matrix-adaptation]
+references: [hutter2019automl, bergstra2012, jones1998, snoek2012, jamieson2016, li2018hyperband, jaderberg2017, godbole2023, akiba2019, cawley2010]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+A **hyperparameter** is a setting of a learning procedure that is fixed before training, such as a
+<Gloss name="learning-rate">learning rate</Gloss>, a penalty strength or a tree depth. **Hyperparameter optimisation**
+chooses a configuration $\lambdavec$ from a search space $\Lambda$ to minimise a validation loss $L(\lambdavec)$,
+measured by training with $\lambdavec$ and scoring on held-out data or by
+<NoteLink to="cross-validation">cross-validation</NoteLink>. Each evaluation of $L$ is expensive and noisy, and usually
+has no usable <NoteLink to="gradient">gradient</NoteLink> <Cite id="hutter2019automl" />.
+</Definition>
+
+## What it is for
+
+Training a model once may take minutes or days, and a learner may have ten or more hyperparameters. Trying every
+combination is impossible. The search has to decide which configurations to try, in what order, and how much training
+to spend on each before judging it. Hyperparameter optimisation answers the chapter's second question, which
+candidate to choose, when the candidates form a large or continuous space.
+
+Practice today runs in stages. <NoteLink to="random-search">Random</NoteLink> or
+<NoteLink to="quasi-random-search">quasi-random search</NoteLink> comes first, while the ranges are still being learned.
+<NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> takes the final study, and multi-fidelity early
+stopping cuts the cost when trainings are long <Cite id="godbole2023" />. Libraries such as scikit-learn's
+`GridSearchCV`, Optuna and Ray Tune implement these strategies behind one interface <Cite id="akiba2019" />.
+
+## Main ideas
+
+**The search space comes first.** A <NoteLink to="hyperparameter-search-spaces">search space</NoteLink> gives each
+hyperparameter a type, a range, a scale and the conditions under which it applies. The scale often matters more than
+the search algorithm: a learning rate drawn uniformly from $[10^{-5}, 1]$ spends 90% of its trials above $0.1$, so
+scale parameters are searched on a logarithmic scale. Choosing the learning algorithm and its hyperparameters together
+is the CASH problem.
+
+**Designs that ignore earlier results.** <NoteLink to="grid-search">Grid search</NoteLink> scores every combination of a
+few values per hyperparameter, at a cost equal to the product of the numbers of values. It tests only as many distinct
+values of each hyperparameter as its axis has. <NoteLink to="random-search">Random search</NoteLink> draws trials
+independently and tests a new value of every hyperparameter in each trial, which wins when few hyperparameters matter
+<Cite id="bergstra2012" />. Sixty random trials land in the best 5% of the space with probability
+$1 - 0.95^{60} \approx 0.95$, whatever its dimension. Quasi-random designs such as Sobol sequences cover the space more
+evenly still. All three run in parallel and can be stopped at any time.
+
+**Searches that learn from earlier results.** <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> fits
+a surrogate of $L$, usually a <NoteLink to="gaussian-process">Gaussian process</NoteLink>, to all trials so far and
+chooses the next trial by an <NoteLink to="acquisition-functions">acquisition function</NoteLink>
+<Cite id="jones1998" /> <Cite id="snoek2012" />. With surrogate mean $\mu$, standard deviation $\sigma$ and best value
+$f^\star$ so far, <NoteLink to="expected-improvement">expected improvement</NoteLink> is
+$(f^\star - \mu)\Phi(z) + \sigma\varphi(z)$ with $z = (f^\star - \mu)/\sigma$: large where the mean is low or the
+uncertainty high. It pays when trainings are expensive, the hyperparameters number fewer than about 20 and the budget is
+tens to hundreds of trials.
+
+**Spending less on poor trials.** Most bad configurations are visibly bad early in training.
+<NoteLink to="multi-fidelity-hyperparameter-optimisation">Multi-fidelity methods</NoteLink> judge configurations on few
+epochs or a subset of the data and train only the survivors fully. <NoteLink to="successive-halving">Successive
+halving</NoteLink> keeps the best $1/\eta$ at each rung and multiplies their budget by $\eta$. With 27 configurations,
+$\eta = 3$ and a starting budget of one epoch, it spends 108 epochs against 729 for full training of all 27
+<Cite id="jamieson2016" />. <NoteLink to="hyperband">Hyperband</NoteLink> hedges over how aggressive to be
+<Cite id="li2018hyperband" />. These methods assume that early rankings persist, and they discard slow starters such as
+small learning rates or strong regularisation.
+
+**Gradients and populations.** For continuous hyperparameters,
+<NoteLink to="gradient-based-hyperparameter-optimisation">gradient-based hyperparameter optimisation</NoteLink>
+differentiates the validation loss through training, by the implicit function theorem or by unrolling the optimiser, at
+about one extra linear solve per hypergradient. <NoteLink to="population-based-training">Population-based
+training</NoteLink> trains many models in parallel and replaces weak members with perturbed copies of strong ones, so
+the search returns a schedule of hyperparameters within the budget of one parallel search <Cite id="jaderberg2017" />.
+
+**The search reuses the validation data.** The best of many validation scores is an optimistic estimate of the chosen
+configuration's error, and the optimism grows with the number of trials
+(<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Bayesian optimisation
+sharpens the effect by concentrating trials where earlier scores were low, including where they were low by chance. The
+error of the result needs data the search never saw: a test set, or <NoteLink to="nested-cross-validation">nested
+cross-validation</NoteLink> with the whole search inside each outer fold <Cite id="cawley2010" />. Comparing two methods
+tuned with unequal budgets measures the tuning effort, not the methods
+(<NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+
+## How the notes fit together
+
+- Start with <NoteLink to="hyperparameter-search-spaces">hyperparameter search spaces</NoteLink>, then
+  <NoteLink to="grid-search">grid</NoteLink>, <NoteLink to="random-search">random</NoteLink> and
+  <NoteLink to="quasi-random-search">quasi-random</NoteLink> search, which later methods use as baselines and initial
+  designs.
+- The two sub-topics, <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> and
+  <NoteLink to="multi-fidelity-hyperparameter-optimisation">multi-fidelity hyperparameter optimisation</NoteLink>, each
+  have their own overview; <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> combines them.
+- <NoteLink to="gradient-based-hyperparameter-optimisation">Gradient-based</NoteLink> and
+  <NoteLink to="population-based-training">population-based</NoteLink> methods are alternatives for continuous
+  hyperparameters and for schedules.
+- <NoteLink to="hyperparameter-importance">Hyperparameter importance</NoteLink> finds which hyperparameters to search,
+  and <NoteLink to="warm-starting-hyperparameter-optimisation">warm-starting</NoteLink> reuses earlier searches.
+- <NoteLink to="automated-machine-learning">Automated machine learning</NoteLink> and
+  <NoteLink to="neural-architecture-search">neural architecture search</NoteLink> widen the search to pipelines and
+  architectures. <NoteLink to="tuning-deep-learning-hyperparameters">Tuning deep learning hyperparameters</NoteLink>
+  sets out current practice for neural networks, learning rate first.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="cross-validation">cross-validation</NoteLink> as the objective and the distinction
+between <NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>; Bayesian
+optimisation also needs <NoteLink to="gaussian-process">Gaussian process</NoteLink> regression. The bias of the winning
+score is treated in <NoteLink to="selection-bias-and-nested-cross-validation">selection bias and nested
+cross-validation</NoteLink>. Hyperparameters that a model can learn from its own
+<NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> are covered by
+<NoteLink to="empirical-bayes-for-hyperparameters">empirical Bayes for hyperparameters</NoteLink> and
+<NoteLink to="gaussian-process-hyperparameter-learning">Gaussian process hyperparameter learning</NoteLink>. Learning
+across tasks is <NoteLink to="meta-learning">meta-learning</NoteLink>. Derivative-free optimisers such as
+<NoteLink to="evolution-strategies-and-covariance-matrix-adaptation">CMA-ES</NoteLink> suit objectives cheap enough to
+evaluate by the thousand. Training-time hyperparameters are discussed in <NoteLink to="early-stopping">early
+stopping</NoteLink> and <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>.

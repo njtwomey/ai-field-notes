@@ -1,0 +1,160 @@
+---
+title: 'Overfitting and underfitting'
+kind: concept
+summary: 'A model overfits when it fits noise in its training sample, so training error is low and test error high; it underfits when it is too rigid to capture the signal, so both are high. Training error falls with flexibility; test error is U-shaped.'
+tags: [model-selection, generalisation, overfitting, worked-example]
+aliases: [overfitting, underfitting, over-fitting, under-fitting]
+requires: [empirical-risk-minimisation]
+related: [generalisation-gap, bias-variance-decomposition, validation-curves, optimism-of-the-training-error, double-descent]
+references: [hastie2009, geman1992, belkin2019, zhang2017, domingos2012]
+status: draft
+updated: 2026-10-13
+---
+
+import { FitAndErrors } from './FitAndErrors'
+
+<Definition>
+Let a family of models be ordered by a flexibility parameter $c$, such as a polynomial degree, a number of parameters
+or an inverse penalty $1/\lambda$. Fit each member to the same training sample $\Dcal$ of $n$ examples
+$(\xvec_i, y_i)$. Let $\overline{\operatorname{err}}(c)$ be the fitted model's average loss on $\Dcal$, its **training
+error**, and let $\operatorname{Err}_\Dcal(c)$ be its expected loss on a new example from the same distribution, its
+**test error**. A member **overfits** when a less flexible member has lower test error while its own training error is
+lower. A member **underfits** when a more flexible member has lower test error and lower training error
+<Cite id="hastie2009" />.
+</Definition>
+
+## Intuition
+
+A training sample carries two things: the signal, which new data share, and the noise, which is particular to this
+sample. A model that is too rigid cannot represent the signal. It makes the same systematic error on the training
+points and on new points, so both errors are high and close together. That is underfitting. A model that is flexible
+enough to represent the signal can, if it is more flexible still, also bend towards the noise of individual training
+points. The bends lower the training error. On new points the noise is different, so the bends add error instead of
+removing it. That is overfitting.
+
+The two failures are the two ends of the <NoteLink to="bias-variance-decomposition">bias–variance trade-off</NoteLink>
+<Cite id="geman1992" />. Underfitting is high bias: the average fit over many training samples misses the truth.
+Overfitting is high variance: the fit changes a lot from one training sample to the next, because each sample's noise
+pulls it a different way.
+
+## Training and test error against flexibility
+
+**Training error never rises with flexibility.** Suppose the model classes are nested, $\Hcal_1 \subseteq \Hcal_2
+\subseteq \cdots$, as polynomials of increasing degree are, and each model minimises the training loss over its class.
+The minimiser over $\Hcal_c$ is also a member of $\Hcal_{c+1}$, so the minimum over $\Hcal_{c+1}$ is at most as large:
+
+$$
+\overline{\operatorname{err}}(c + 1) = \min_{h \in \Hcal_{c+1}} \frac1n\sum_{i=1}^n \ell(y_i, h(\xvec_i)) \le
+\min_{h \in \Hcal_c} \frac1n\sum_{i=1}^n \ell(y_i, h(\xvec_i)) = \overline{\operatorname{err}}(c).
+$$
+
+A class rich enough to interpolate the $n$ points, such as polynomials of degree $n - 1$ in one input with distinct
+$x_i$, reaches a training error of zero.
+
+**Test error is U-shaped.** For squared error, the expected test error at an input splits into the noise variance
+$\sigma^2$, the squared bias and the variance of the fit (see <NoteLink to="bias-variance-decomposition">bias–variance
+decomposition</NoteLink>). Added flexibility lowers the bias, quickly at first while the class gains the shape of the
+signal, then slowly once the signal is captured. Added flexibility raises the variance throughout: for least squares on
+a fixed design each extra coefficient adds $\sigma^2/n$ to the variance averaged over the training inputs. The sum
+falls, flattens and rises. The bottom of the U is the best flexibility for this family at this sample size. The left arm
+is underfitting and the right arm is overfitting <Cite id="hastie2009" />.
+
+**Training error cannot choose the flexibility.** Training error is minimised by the most flexible member of the family,
+so selecting by training error always overfits. The gap between the two errors is the
+<NoteLink to="generalisation-gap">generalisation gap</NoteLink>. For least squares with $p$ coefficients the expected
+gap at the training inputs is $2p\sigma^2/n$, which grows with the flexibility the training error rewards (see
+<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>). Model selection replaces the
+training error by an estimate of the test error: a held-out set,
+<NoteLink to="cross-validation">cross-validation</NoteLink> or an <NoteLink to="information-criteria">information
+criterion</NoteLink>.
+
+<FitAndErrors />
+
+## Symptoms
+
+The test error is unknown, so overfitting and underfitting are recognised from quantities that can be measured.
+
+- **A large gap between training and validation error** signals overfitting. A training accuracy of 100% with a
+  validation accuracy far lower is the extreme case.
+- **Training and validation error both high and close together** signal underfitting. More flexibility would lower
+  both.
+- **Validation error that rises while training error keeps falling**, along a hyperparameter or along training
+  iterations, locates the onset of overfitting. A <NoteLink to="validation-curves">validation curve</NoteLink> plots the
+  first; <NoteLink to="early-stopping">early stopping</NoteLink> stops at the second.
+- **Fits that change a lot under resampling.** Refitting on <NoteLink to="bootstrap">bootstrap</NoteLink> resamples or
+  on cross-validation folds gives very different predictions or coefficients when the variance is high.
+- **Large or oscillating coefficients.** A high-degree polynomial through noisy points has coefficients of alternating
+  sign and large magnitude, which cancel at the data and swing between them.
+- **Structure left in the residuals.** Residuals that trend with an input, or a learning curve that flattens at a high
+  error, signal underfitting (see <NoteLink to="learning-curves-and-sample-size">learning curves and sample
+  size</NoteLink>).
+
+## Remedies
+
+Each remedy moves the model along the trade-off, so each fixes one failure at the risk of the other.
+
+- **Against overfitting:**
+  - collect more training data, which lowers the variance at every flexibility and moves the bottom of the U towards
+    more flexible models;
+  - reduce the flexibility directly: fewer features or basis functions, shallower trees, larger $k$ in
+    <NoteLink to="k-nearest-neighbours">$k$-nearest neighbours</NoteLink>;
+  - add a penalty, as in <NoteLink to="ridge-regression">ridge regression</NoteLink> and the other forms of
+    <NoteLink to="regularisation">regularisation</NoteLink>;
+  - average many fits, as <NoteLink to="bagging">bagging</NoteLink> does;
+  - stop training early, inject noise or apply <NoteLink to="dropout">dropout</NoteLink> and
+    <NoteLink to="data-augmentation">data augmentation</NoteLink> in neural networks.
+- **Against underfitting:**
+  - add features, basis functions or capacity;
+  - weaken the penalty;
+  - train longer, since an optimiser that has not converged underfits whatever the class.
+
+The amount of each remedy is itself chosen on held-out data. That choice is <NoteLink to="model-selection">model
+selection</NoteLink>.
+
+## Worked example
+
+Draw $n = 20$ training points with $x$ uniform on $[-1, 1]$ and $y = \sin(\pi x) + \varepsilon$, where the noise has
+standard deviation $\sigma = 0.3$, so $\sigma^2 = 0.09$. Fit polynomials of degree $d$ by least squares and measure each
+fit on 2000 fresh test points from the same distribution. The figure above at its default settings shows this sample.
+
+| Degree $d$ | Coefficients $p$ | Training error | Test error | Test − training |
+| --- | --- | --- | --- | --- |
+| 1 | 2 | 0.272 | 0.287 | 0.015 |
+| 3 | 4 | 0.105 | 0.113 | 0.008 |
+| 9 | 10 | 0.058 | 4.03 | 3.97 |
+
+1. **Degree 1 underfits.** A straight line cannot follow one period of a sine. Its training and test errors are both
+   about three times the noise variance $0.09$, and they nearly agree: the line makes the same systematic error
+   everywhere.
+2. **Degree 3 fits well.** A cubic captures the shape of $\sin(\pi x)$ on $[-1, 1]$. Its test error, $0.113$, is
+   $0.023$ above the noise floor $\sigma^2 = 0.09$, which no predictor can beat.
+3. **Degree 9 overfits.** Ten coefficients for 20 points let the curve chase individual noisy points. The training
+   error falls to $0.058$, below the noise variance, which is possible only because the fit has absorbed some of the
+   training noise. The test error is $4.03$, 45 times the noise floor. The 11% of test points that fall outside the
+   training range $[-0.93, 0.83]$ contribute 96% of it, because the polynomial swings far from the data there. Inside
+   the range the test error is $0.203$, still almost twice that of the cubic.
+4. **Training error chooses wrongly.** Training error falls at every degree in the table, so it would pick degree 9, or
+   degree 15 if offered. Test error picks degree 3.
+
+## Pitfalls
+
+- **The U-shape is not a law.** For models with far more parameters than examples, test error can fall a second time
+  after the model interpolates the training data, a pattern called <NoteLink to="double-descent">double
+  descent</NoteLink> <Cite id="belkin2019" />. Interpolating noisy data can then predict well (see
+  <NoteLink to="benign-overfitting">benign overfitting</NoteLink>). Zero training error is not by itself evidence of
+  overfitting. Test error is.
+- **Parameter count is not flexibility.** A heavily penalised model with many parameters can be more rigid than a small
+  unpenalised one. Neural networks large enough to fit random labels exactly can still generalise when trained on true
+  labels <Cite id="zhang2017" />. Measure flexibility by behaviour, for example by
+  <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>.
+- **A small gap is not a good model.** A constant predictor has almost no gap and a large error. Underfitting shows as
+  high error with a small gap.
+- **Selection overfits too.** Choosing among many candidates by their validation error fits the noise of the validation
+  set, in the same way that fitting parameters fits the noise of the training set (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). The validation error of the
+  winner is then optimistic.
+- **Leakage hides overfitting.** Duplicates across the split, or preprocessing fitted on all the data, make the
+  validation error look like the training error (see <NoteLink to="data-leakage">data leakage</NoteLink>).
+- **Overfitting is relative to the sample size.** A model that overfits 20 points can be the best choice for 2000.
+  When the data and prior knowledge do not determine the right model, a flexible learner encodes random quirks of the
+  sample instead <Cite id="domingos2012" />.

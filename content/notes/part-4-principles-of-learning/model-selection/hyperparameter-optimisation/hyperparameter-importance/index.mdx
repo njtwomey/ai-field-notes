@@ -1,0 +1,265 @@
+---
+title: 'Hyperparameter importance'
+kind: concept
+summary: 'Hyperparameter importance measures how much each hyperparameter, or interacting group, moves validation performance. Functional ANOVA splits the variance of the loss over the search space into main effects and interactions; ablation and tunability measure gains over a default.'
+tags: [model-selection, hyperparameters, worked-example]
+aliases: [fANOVA, functional ANOVA of hyperparameters, ablation analysis, tunability, hyperparameter sensitivity]
+requires: [hyperparameter-search, variance-and-covariance]
+related: [hyperparameter-search-spaces, random-search, sequential-model-based-algorithm-configuration, random-forest, feature-attribution-methods, warm-starting-hyperparameter-optimisation, tuning-deep-learning-hyperparameters, support-vector-machine]
+references: [hutter2014, fawcett2016ablation, biedenkapp2017ablation, probst2019tunability, vanrijn2018importance, bergstra2012]
+status: draft
+updated: 2026-10-13
+---
+
+import { ImportanceOverRange } from './ImportanceOverRange'
+
+<Definition>
+Let $L(\lambdavec)$ be the validation loss of a learning procedure run with hyperparameters
+$\lambdavec = (\lambda_1, \dots, \lambda_d)$ from a <NoteLink to="hyperparameter-search-spaces">search space</NoteLink>
+$\Lambda = \Lambda_1 \times \dots \times \Lambda_d$. **Hyperparameter importance** is a measure of how much of the
+variation of $L$ is due to each hyperparameter $\lambda_j$, or to each group of hyperparameters acting together. Three
+measures are in common use. **Functional <Gloss name="anova" />** (fANOVA) decomposes the variance of $L$ over $\Lambda$
+into a part for every subset of the hyperparameters <Cite id="hutter2014" />. **Ablation** measures the loss gained by
+switching each hyperparameter from a default value to a tuned value <Cite id="fawcett2016ablation" />. **Tunability**
+measures the loss gained by tuning a hyperparameter while the others stay at their defaults
+<Cite id="probst2019tunability" />.
+</Definition>
+
+## Intuition
+
+A search space of ten hyperparameters is usually dominated by two or three of them. Bergstra and Bengio found that the
+validation loss of neural networks depends strongly on few hyperparameters and that which few varies from data set to
+data set, which is why <NoteLink to="random-search">random search</NoteLink> beats grid search
+<Cite id="bergstra2012" />. Knowing which hyperparameters matter pays three ways. A later search can fix the unimportant
+ones and spend its budget on the rest. A default can be chosen for a hyperparameter that hardly moves the loss. And the
+importance explains the learner: a support vector machine whose error depends mostly on the kernel width $\gamma$ is
+limited by its kernel, not its penalty.
+
+Importance is a property of a function, the loss surface $L(\lambdavec)$, and of the region over which the function is
+examined. A hyperparameter can be decisive over a wide range and irrelevant over the narrow range where the good
+settings lie. Every measure below therefore states a reference region or a reference configuration.
+
+The surface is not observed directly. A tuning run evaluates $L$ at $N$ configurations, each evaluation noisy and
+expensive. Practical importance analysis fits a surrogate model to those evaluations and measures importance on the
+surrogate.
+
+## Functional ANOVA
+
+Functional ANOVA writes $L$ as a sum of a constant, one function of each hyperparameter, one function of each pair, and
+so on up to one function of all $d$ together. The variance of $L$ then splits into one share per term, and the share of
+a term is its importance.
+
+### The decomposition
+
+Put a product weighting $w(\lambdavec) = \prod_j w_j(\lambda_j)$ on $\Lambda$: each $w_j$ is a probability density, or
+a set of grid weights, over the range of $\lambda_j$. For a subset $U \subseteq \{1, \dots, d\}$, write $\lambdavec_U$
+for the hyperparameters in $U$, and define the **marginal** $m_U(\lambdavec_U) = \expect[L \mid \lambdavec_U]$: the
+loss averaged under $w$ over the hyperparameters outside $U$, with those in $U$ held fixed. The marginal of the empty
+set is the overall mean $\mu = \expect L$. The terms are defined from the smallest subsets upwards:
+
+$$
+f_\emptyset = \mu, \qquad f_U(\lambdavec_U) = m_U(\lambdavec_U) - \sum_{V \subsetneq U} f_V(\lambdavec_V).
+$$
+
+A main effect is a marginal minus the mean, $f_{\{j\}}(\lambda_j) = m_{\{j\}}(\lambda_j) - \mu$. A pair term is what the
+marginal of the pair adds to the two main effects:
+
+$$
+f_{\{j,k\}}(\lambda_j, \lambda_k) = m_{\{j,k\}}(\lambda_j, \lambda_k) - m_{\{j\}}(\lambda_j) - m_{\{k\}}(\lambda_k) + \mu.
+$$
+
+The definition with $U = \{1, \dots, d\}$ gives $m_U = L$, so the terms add back to the loss exactly:
+$L(\lambdavec) = \sum_{U} f_U(\lambdavec_U)$.
+
+### The variance splits
+
+The terms are orthogonal under $w$. The key property is that each term with $U$ non-empty averages to zero over any one
+of its own hyperparameters: for $j \in U$, averaging $f_U$ over $\lambda_j$ with the others fixed gives 0. The proof is
+an induction on the size of $U$ and is given below.
+
+Take two different subsets $U \ne V$, and pick a hyperparameter $j$ that is in one but not the other, say $j \in U$ and
+$j \notin V$. The term $f_V$ does not depend on $\lambda_j$, and under the product weighting $\lambda_j$ is independent
+of the rest. Averaging over $\lambda_j$ first,
+
+$$
+\expect\brack{f_U f_V} = \expect\brack{f_V \cdot \expect_{\lambda_j}\brack{f_U}} = \expect\brack{f_V \cdot 0} = 0.
+$$
+
+Every non-empty term also has mean zero, by the same property. Subtract $\mu$ from both sides of the decomposition,
+square and take the expectation. The cross terms vanish, and
+
+$$
+\var L = \sum_{U \ne \emptyset} \var f_U, \qquad \text{importance of } U = \frac{\var f_U}{\var L}.
+$$
+
+The importances of all non-empty subsets sum to 1. The importance of a single hyperparameter is the fraction of the
+variance of the loss that its main effect explains; the importance of a pair is the fraction that the two explain
+together beyond their main effects.
+
+<Derivation title="Each term averages to zero over its own hyperparameters">
+Claim: for every non-empty $U$ and every $j \in U$, $\expect_{\lambda_j}[f_U] = 0$, where $\expect_{\lambda_j}$
+averages over $\lambda_j$ under $w_j$ with the other hyperparameters fixed.
+
+Under the product weighting, averaging the marginal $m_U$ over $\lambda_j$ gives the marginal of the smaller set:
+$\expect_{\lambda_j}[m_U] = m_{U \setminus \{j\}}$. This is the tower property of conditional expectation, and it
+needs $\lambda_j$ to be independent of the other hyperparameters, which the product form guarantees.
+
+Assume the claim for every subset smaller than $U$. Average the definition of $f_U$ over $\lambda_j$:
+
+$$
+\expect_{\lambda_j}[f_U] = m_{U \setminus \{j\}} - \sum_{V \subsetneq U,\ j \notin V} f_V - \sum_{V \subsetneq U,\ j
+\in V} \expect_{\lambda_j}[f_V].
+$$
+
+The terms with $j \notin V$ do not depend on $\lambda_j$ and pass through the average. The terms with $j \in V$ are
+smaller than $U$, so by the induction hypothesis they average to 0. The subsets $V \subsetneq U$ with $j \notin V$ are
+exactly the subsets of $U \setminus \{j\}$, so
+
+$$
+\expect_{\lambda_j}[f_U] = m_{U \setminus \{j\}} - \sum_{V \subseteq U \setminus \{j\}} f_V = m_{U \setminus \{j\}} -
+m_{U \setminus \{j\}} = 0,
+$$
+
+where the last step is the definition of $f_{U \setminus \{j\}}$ rearranged. The base case $U = \{j\}$ is
+$\expect_{\lambda_j}[m_{\{j\}} - \mu] = \mu - \mu = 0$.
+</Derivation>
+
+### From trials to a surrogate
+
+A tuning run does not give $L$ on a grid. It gives $N$ pairs $(\lambdavec_i, L(\lambdavec_i))$, scattered where the
+search went. Hutter, Hoos and Leyton-Brown fit a <NoteLink to="random-forest">random forest</NoteLink> to the pairs and
+apply the decomposition to the forest's prediction instead of to $L$ <Cite id="hutter2014" />. A regression tree is
+piecewise constant on axis-aligned boxes, so its marginal over any subset of hyperparameters is a weighted sum over its
+leaves. They give an algorithm that computes the marginals of a forest in time linear in the size of its trees. The
+importances are then those of the surrogate, and they are only as accurate as the surrogate is.
+
+Their findings set the pattern for later work. On the perplexity of online latent Dirichlet allocation, the batch size
+explained 65% of the variance and its interaction with $\kappa$, which controls how quickly old information is
+forgotten, another 18%. Across the several hundred hyperparameters of the Auto-WEKA space and on combinatorial solvers,
+a few hyperparameters accounted for most of the variation <Cite id="hutter2014" />. Van Rijn and Hutter ran the analysis
+on 100 data sets from OpenML. For RBF <Gloss name="svm">support vector machines</Gloss> the kernel width $\gamma$ was
+most important, then the penalty $C$; for random forests, the minimum number of samples per leaf and the fraction of
+features tried at each split; for <Gloss name="adaboost" />, the depth of the trees and, less, the
+<Gloss name="learning-rate">learning rate</Gloss> <Cite id="vanrijn2018importance" />.
+
+### Importance in the good region
+
+The variance over the whole space is dominated by the worst settings. A region where training diverges or the model
+predicts a constant contributes a large share of $\var L$, and the hyperparameter that controls entry to that region
+looks important even though every tuned configuration avoids it. Hutter, Hoos and Leyton-Brown measure importance among
+good settings by capping the loss before the analysis: every value above a threshold $y_{\max}$, such as the 25%
+quantile of the observed losses or the loss of the default, is replaced by $y_{\max}$ <Cite id="hutter2014" />. All
+remaining variation then comes from regions better than the threshold. With this cap their single main effects still
+explained a sizeable share of the variance, but less than over the whole space.
+
+## Ablation
+
+Ablation answers a narrower question: a tuned configuration $\lambdavec^\star$ beats a default $\lambdavec^0$, so
+which changes produce the gain? Fawcett and Hoos build an **ablation path** from $\lambdavec^0$ to $\lambdavec^\star$
+<Cite id="fawcett2016ablation" />.
+
+1. Start at the default. Let $D$ be the set of hyperparameters on which the current configuration and
+   $\lambdavec^\star$ differ.
+2. For each $j \in D$, evaluate the configuration with $\lambda_j$ switched to its tuned value.
+3. Keep the switch that lowers the loss most, record the gain, and remove $j$ from $D$.
+4. Repeat until the configuration equals $\lambdavec^\star$.
+
+The order of the path ranks the hyperparameters, and the recorded gains say how much each contributed. A path over
+$\abs{D} = k$ differing hyperparameters needs $k + (k - 1) + \dots + 1 = k(k + 1)/2$ evaluations. Conditional
+hyperparameters are switched together with the hyperparameter that activates them.
+
+Ablation is local: it explains one pair of configurations, and the gain of a switch depends on the switches made before
+it. Each evaluation is a full training run, so Biedenkapp et al. replace the evaluations with predictions from a
+surrogate fitted to the tuning run's data, which made ablation 33 to 14 727 times faster across their scenarios
+<Cite id="biedenkapp2017ablation" />.
+
+**Local sensitivity** is the simplest local measure. Starting from the incumbent $\lambdavec^\star$, vary one
+hyperparameter at a time over its range, with the others fixed, and record how much the loss changes. It shows how
+flat the optimum is along each axis, which tells a user how precisely each hyperparameter must be set. It ignores
+interactions, because no two hyperparameters move together.
+
+## Tunability
+
+Tunability asks how much is gained by tuning at all <Cite id="probst2019tunability" />. Let $R^{(t)}(\lambdavec)$ be
+the risk of a configuration on data set $t$, $\lambdavec^0$ a reference default, and $\lambdavec^{(t)\star}$ the best
+configuration on data set $t$. The tunability of the algorithm on data set $t$ is
+
+$$
+d^{(t)} = R^{(t)}(\lambdavec^0) - R^{(t)}(\lambdavec^{(t)\star}).
+$$
+
+The tunability of hyperparameter $j$ is the same difference when only $\lambda_j$ is tuned and the others stay at their
+defaults. Averages over data sets summarise both.
+
+Probst, Boulesteix and Bischl measured tunability on 38 OpenML data sets with the <Gloss name="auc">AUC</Gloss>,
+relative to defaults that they optimised across the data sets. The mean tunability was 0.042 for support vector
+machines, 0.024 for elastic-net <NoteLink to="logistic-regression">logistic regression</NoteLink>, 0.014 for
+<Gloss name="xgboost" />, 0.012 for CART trees and 0.006 for both $k$-nearest neighbours and random forests. For the
+support vector machine the kernel, $\gamma$ and the polynomial degree were the most tunable hyperparameters and the cost
+$C$ was not; for random forests, the number of features tried at each split <Cite id="probst2019tunability" />.
+
+The three measures answer different questions. Functional ANOVA describes the whole surface over a region. Ablation
+explains one improvement. Tunability prices the decision to tune.
+
+## Worked example
+
+Take nine cells of the SVM surface in the figure below: the cross-validated error, in percent, at
+$\log_{10} C \in \{-2, 0.5, 3\}$ and $\log_{10}\gamma \in \{-3, -1.5, 0\}$, with equal weights on each axis.
+
+| $\log_{10} C$ \ $\log_{10}\gamma$ | $-3$ | $-1.5$ | $0$ | marginal $m_C$ |
+| --- | ---: | ---: | ---: | ---: |
+| $-2$ | 12.8 | 9.9 | 7.8 | 10.17 |
+| $0.5$ | 8.0 | 4.1 | 6.8 | 6.30 |
+| $3$ | 5.9 | 8.0 | 7.2 | 7.03 |
+| marginal $m_\gamma$ | 8.90 | 7.33 | 7.27 | $\mu = 7.83$ |
+
+1. **Mean.** The nine values sum to 70.5, so $\mu = 70.5/9 = 7.83$.
+2. **Marginals.** Each row mean is $m_C$ and each column mean is $m_\gamma$, as in the table margins.
+3. **Main effects.** $f_C = m_C - \mu = (2.33, -1.53, -0.80)$ and $f_\gamma = m_\gamma - \mu = (1.07, -0.50, -0.57)$.
+4. **Their variances.** With equal weights, $\var f_C = (2.33^2 + 1.53^2 + 0.80^2)/3 = 8.44/3 = 2.81$ and
+   $\var f_\gamma = (1.07^2 + 0.50^2 + 0.57^2)/3 = 1.71/3 = 0.57$.
+5. **Total variance.** The squared deviations of the nine values from 7.83 sum to 48.14, so $\var L = 48.14/9 = 5.35$.
+6. **Interaction.** The interaction takes the rest: $\var f_{C\gamma} = 5.35 - 2.81 - 0.57 = 1.97$. At the cell
+   $(\log_{10} C, \log_{10}\gamma) = (0.5, -1.5)$ it is $4.1 - 6.30 - 7.33 + 7.83 = -1.70$: the pair does 1.7 points
+   better than the sum of its main effects predicts.
+7. **Importances.** $C$ explains $2.81/5.35 = 53\%$, $\gamma$ explains $0.57/5.35 = 11\%$ and the interaction 37%.
+
+On these nine cells $C$ is the most important hyperparameter. On the full $21 \times 21$ grid the same computation
+gives $\gamma$ 95%, $C$ 2.5% and the interaction 2.5%, because the full grid includes the cliff at
+$\log_{10}\gamma \ge 1.5$, where the error exceeds 38% whatever $C$ is. Restricting $\log_{10}\gamma$ to
+$[-3, 0]$ gives $C$ 40%, $\gamma$ 7% and the interaction 53%. Capping the full grid at its 25% quantile, an error of
+6.5%, gives $C$ 14%, $\gamma$ 24% and the interaction 62%. The good settings lie along a diagonal valley in which a
+larger $C$ calls for a smaller $\gamma$, and a diagonal valley is an interaction.
+
+<ImportanceOverRange />
+
+## Uses
+
+- **Shrinking the search space.** Fix the hyperparameters with negligible main effects and interactions at good
+  values, and search the rest. Hutter, Hoos and Leyton-Brown found that configuring only the most important
+  hyperparameters often gave good results, and sometimes faster than searching the full space
+  <Cite id="hutter2014" />.
+- **Priors for the next search.** Van Rijn and Hutter turned the distributions of good values across data sets into
+  priors for random search and obtained significant speed-ups <Cite id="vanrijn2018importance" />; see
+  <NoteLink to="warm-starting-hyperparameter-optimisation">warm-starting hyperparameter optimisation</NoteLink>.
+- **Defaults.** A hyperparameter with low tunability can be left at a good default.
+- **Explaining a tuned model.** Ablation tells a reader which of the tuned changes did the work.
+
+## Pitfalls
+
+- **Importance is relative to the range.** Widening a hyperparameter's range into a region of failure makes it more
+  important without changing the good settings. Report the region, and consider capping the loss.
+- **Interactions do not belong to either hyperparameter.** A large pair term means that neither hyperparameter can be
+  tuned alone. A search that fixes one of them at a value good on average can miss the valley.
+- **The surrogate is a model.** Importances computed from a random forest fitted to 50 noisy trials carry the forest's
+  error. Trials gathered by an adaptive search cluster near the optimum, so the surrogate is poor far from it, which is
+  exactly where the variance of the whole space comes from.
+- **Dependent hyperparameters break the decomposition.** The variance split needs a product weighting. Conditional
+  hyperparameters, and constraints such as a minimum split size that must not exceed a leaf size, make the natural
+  weighting non-product, and the shares then depend on how the dependent region is handled.
+- **The data are reused.** Importances computed from the same tuning run that chose the configuration describe that
+  run's validation set. A search space pruned with them and then searched again on the same validation data inherits
+  the optimism of the first search (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>). Estimate importance on earlier data sets, or keep the final assessment on fresh data.
+- **Importance is not where the optimum is.** A hyperparameter can explain little variance and still have a sharp
+  optimum that matters for the last percentage point.

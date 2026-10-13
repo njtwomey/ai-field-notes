@@ -1,0 +1,181 @@
+---
+title: 'What cross-validation estimates'
+kind: concept
+summary: 'Cross-validation estimates the expected test error of a learning procedure over training sets of its size, not the error of the one model fitted to the data at hand. For least squares its estimate is independent of that conditional error given the inputs.'
+tags: [model-selection, evaluation, theory, worked-example]
+aliases: [conditional test error, expected test error, estimand of cross-validation, weak correlation of cross-validation]
+requires: [k-fold-cross-validation, linear-regression]
+related: [variance-of-cross-validation-estimates, model-selection-and-model-assessment, hold-out-validation, bootstrap-estimates-of-prediction-error, generalisation-gap, test-set-bounds]
+references: [hastie2009, bates2024]
+status: draft
+updated: 2026-10-13
+---
+
+import { CvAgainstConditionalError } from './CvAgainstConditionalError'
+
+<Definition>
+Let $\Dcal$ be a training sample of $n$ examples drawn from a distribution $P$, $\hat f_\Dcal$ the model a learning
+procedure fits to it, and $\ell$ a loss. The **conditional test error** is the expected loss of that one model on a new
+example, $\operatorname{Err}_\Dcal = \expect\brack{\ell(y, \hat f_\Dcal(\xvec)) \mid \Dcal}$ with $(\xvec, y) \sim P$
+independent of $\Dcal$. The **expected test error** averages it over training samples,
+$\operatorname{Err} = \expect_\Dcal\brack{\operatorname{Err}_\Dcal}$. The
+<NoteLink to="cross-validation">cross-validation</NoteLink> estimate $\operatorname{CV}$ is closer, in
+<Gloss name="mse">mean squared error</Gloss>, to $\operatorname{Err}$ than to $\operatorname{Err}_\Dcal$, and its
+correlation with $\operatorname{Err}_\Dcal$ is weak <Cite id="hastie2009" /> <Cite id="bates2024" />.
+</Definition>
+
+## Intuition
+
+A practitioner who cross-validates and then fits the final model to all the data wants to know how that final model
+will do. That is $\operatorname{Err}_\Dcal$: a property of one fitted model. Cross-validation never scores that model.
+It scores $K$ other models, each fitted to a different subset of $\Dcal$, on points those models did not see. What it
+measures is how the *procedure* does when handed a training set of about $n(K - 1)/K$ examples from $P$. The fold
+models are a small sample of the models the procedure would produce on other training sets, so their average error
+estimates the average over training sets, $\operatorname{Err}$.
+
+The two targets differ because $\Dcal$ is random. Some training samples are lucky and give a model better than
+average; others are unlucky. A good estimator of $\operatorname{Err}_\Dcal$ would detect the luck. Cross-validation
+cannot, because the information that separates a lucky fitted model from an unlucky one is not in the held-out
+residuals. For least squares that statement is exact, and the proof is short.
+
+## Conditional and expected error
+
+Three targets sit in a row, each an average of the one before <Cite id="bates2024" />:
+
+- $\operatorname{Err}_\Dcal$, the error of the model fitted to this sample, with the training inputs
+  $\Xmat = (\xvec_1, \dots, \xvec_n)$ and outputs $\yvec$ both fixed;
+- $\operatorname{Err}_\Xmat = \expect\brack{\operatorname{Err}_\Dcal \mid \Xmat}$, averaged over the outputs that
+  could have come with these inputs;
+- $\operatorname{Err} = \expect\brack{\operatorname{Err}_\Xmat}$, averaged over inputs as well.
+
+For a deployed model, $\operatorname{Err}_\Dcal$ matters. For a researcher
+<NoteLink to="comparing-learning-algorithms">comparing learning algorithms</NoteLink> on a problem, $\operatorname{Err}$
+matters. The question is which one a cross-validation estimate tracks.
+
+### Least squares: cross-validation is independent of the conditional error
+
+Assume the linear model $y_i = \xvec_i^\top\thetavec + \varepsilon_i$ with $\varepsilon_i \iid \Gauss(0, \sigma^2)$
+independent of the inputs, a least-squares fit $\hat\thetavec = (\Xmat^\top\Xmat)^{-1}\Xmat^\top\yvec$ with
+$\Xmat \in \reals^{n \times p}$ of full column rank, and squared-error loss. Let new inputs have mean $\boldsymbol{0}$
+and covariance $\boldsymbol{\Sigma}$.
+
+**Step 1: the conditional error depends on the data only through $\hat\thetavec$.** A new example has
+$y - \xvec^\top\hat\thetavec = \varepsilon + \xvec^\top(\thetavec - \hat\thetavec)$. The noise is independent of
+$\xvec$ and has mean 0, so the cross term vanishes, and
+
+$$
+\operatorname{Err}_\Dcal = \sigma^2 + (\hat\thetavec - \thetavec)^\top\boldsymbol{\Sigma}(\hat\thetavec - \thetavec).
+$$
+
+**Step 2: the cross-validation estimate depends on the data only through the residuals.** Replace $\yvec$ by
+$\yvec + \Xmat\kappavec$ for any $\kappavec \in \reals^p$. Least squares is equivariant: every fold's fit moves from
+$\hat\thetavec^{-k}$ to $\hat\thetavec^{-k} + \kappavec$, so each held-out residual
+$y_i + \xvec_i^\top\kappavec - \xvec_i^\top(\hat\thetavec^{-k} + \kappavec) = y_i - \xvec_i^\top\hat\thetavec^{-k}$ is
+unchanged, and so is $\operatorname{CV}$. Take $\kappavec = -\hat\thetavec$. Then $\yvec + \Xmat\kappavec$ is the
+residual vector $\evec = (\eye - \Hmat)\yvec$ of the full fit, with hat matrix $\Hmat = \Xmat(\Xmat^\top\Xmat)^{-1}
+\Xmat^\top$. So $\operatorname{CV}$ computed from $\yvec$ equals $\operatorname{CV}$ computed from $\evec$: it is a
+function of $\evec$ and $\Xmat$ alone.
+
+**Step 3: given the inputs, $\hat\thetavec$ and $\evec$ are independent.** Both are linear in $\yvec$, which is
+Gaussian given $\Xmat$, so they are jointly Gaussian. Their covariance is
+
+$$
+\cov(\hat\thetavec, \evec \mid \Xmat) = (\Xmat^\top\Xmat)^{-1}\Xmat^\top(\sigma^2\eye)(\eye - \Hmat)^\top
+= \sigma^2(\Xmat^\top\Xmat)^{-1}(\Xmat^\top - \Xmat^\top\Hmat) = \boldsymbol{0},
+$$
+
+because $\Xmat^\top\Hmat = \Xmat^\top$. Jointly Gaussian variables with zero covariance are independent.
+
+Steps 1 to 3 give the result: $\operatorname{CV}$ and $\operatorname{Err}_\Dcal$ are independent given $\Xmat$
+<Cite id="bates2024" />. Two data sets with the same inputs and different noise would have different conditional
+errors, and the cross-validation estimate of one is as informative about the other's error as about its own.
+
+### What the independence costs
+
+Write $\operatorname{CV} - \operatorname{Err}_\Dcal = (\operatorname{CV} - \operatorname{Err}_\Xmat) -
+(\operatorname{Err}_\Dcal - \operatorname{Err}_\Xmat)$ and square. Given $\Xmat$, the two brackets are independent and
+the second has mean 0, so the cross term vanishes:
+
+$$
+\expect\brack{(\operatorname{CV} - \operatorname{Err}_\Dcal)^2} = \expect\brack{(\operatorname{CV} -
+\operatorname{Err}_\Xmat)^2} + \expect\brack{\var(\operatorname{Err}_\Dcal \mid \Xmat)}.
+$$
+
+As an estimate of the conditional error, cross-validation pays the full variance of $\operatorname{Err}_\Dcal$ on top
+of its error as an estimate of $\operatorname{Err}_\Xmat$. Bates, Hastie and Tibshirani also show that when $n$ and
+$p$ grow together, $\operatorname{Err}_\Xmat$ varies around $\operatorname{Err}$ with variance of order $1/n^2$, while
+$\operatorname{Err}_\Dcal$ varies with variance of order $1/n$ <Cite id="bates2024" />. So $\operatorname{Err}_\Xmat
+\approx \operatorname{Err}$, and the correlation between $\operatorname{CV}$ and $\operatorname{Err}_\Dcal$ tends to 0.
+
+The proof used only step 2's invariance, so it holds for every estimator that is a function of the least-squares
+residuals: hold-out validation, $K$-fold and <Gloss name="loo">leave-one-out cross-validation</Gloss>, the
+<NoteLink to="bootstrap-estimates-of-prediction-error">bootstrap estimators</NoteLink> and Mallows' $C_p$
+<Cite id="bates2024" />.
+
+### Beyond least squares
+
+For other learners there is no exact theorem, but simulations show the same pattern. Hastie, Tibshirani and Friedman
+found that across training sets the cross-validation estimate and the conditional error of classifiers are only weakly
+correlated, while the estimate tracks the expected error well <Cite id="hastie2009" />. Bates, Hastie and Tibshirani
+found small positive correlations for <NoteLink to="logistic-regression">logistic regression</NoteLink>, larger than for
+least squares but still weak <Cite id="bates2024" />. The figure has a nearest-neighbour learner for comparison.
+
+<CvAgainstConditionalError />
+
+## Worked example
+
+Take $p = 20$ standard-normal inputs, $y = x_1 + \dots + x_5 + \varepsilon$ with $\sigma^2 = 1$, least squares without
+an intercept, $n = 100$ and 10-fold cross-validation.
+
+1. **The expected error.** For Gaussian inputs, $\operatorname{Err} = \sigma^2\paren{1 + p/(n - p - 1)}$ (derived
+   below). With $n = 100$ and $p = 20$ that is $1 + 20/79 = 1.253$.
+2. **What the folds estimate.** Each fold model is fitted to 90 rows, so $\operatorname{CV}$ estimates the expected
+   error at $n = 90$: $1 + 20/69 = 1.290$. Its bias as an estimate of $\operatorname{Err}$ is $+0.037$.
+3. **A simulation of 1000 training sets** (the figure's default problem with the inputs redrawn each time) gives a mean
+   conditional error of 1.26 with standard deviation 0.09 across training sets, and a mean $\operatorname{CV}$ of 1.29
+   with standard deviation 0.21. The correlation between $\operatorname{CV}$ and $\operatorname{Err}_\Dcal$ is 0.01.
+4. **Which target is closer.** The root mean squared difference between $\operatorname{CV}$ and
+   $\operatorname{Err}_\Dcal$ is 0.231. Between $\operatorname{CV}$ and $\operatorname{Err} = 1.253$ it is 0.214. The
+   difference of their squares, $0.231^2 - 0.214^2 = 0.0076$, is close to the variance of $\operatorname{Err}_\Dcal$,
+   $0.09^2 \approx 0.008$, as the decomposition above predicts.
+
+With the inputs held fixed, a data set whose fitted model happens to be good, with $\operatorname{Err}_\Dcal = 1.15$,
+gets the same distribution of cross-validation estimates as one whose model is poor, with
+$\operatorname{Err}_\Dcal = 1.40$.
+
+<Derivation title="The expected error of least squares with Gaussian inputs">
+By step 1, $\operatorname{Err}_\Dcal = \sigma^2 + (\hat\thetavec - \thetavec)^\top\boldsymbol{\Sigma}(\hat\thetavec -
+\thetavec)$. Given $\Xmat$, $\hat\thetavec - \thetavec = (\Xmat^\top\Xmat)^{-1}\Xmat^\top\boldsymbol{\varepsilon}$ has
+mean $\boldsymbol{0}$ and covariance $\sigma^2(\Xmat^\top\Xmat)^{-1}$. For a random vector $\uvec$ with mean
+$\boldsymbol{0}$ and covariance $\Cmat$,
+$\expect[\uvec^\top\boldsymbol{\Sigma}\uvec] = \trace(\boldsymbol{\Sigma}\Cmat)$. So
+$\operatorname{Err}_\Xmat = \sigma^2\paren{1 + \trace\paren{\boldsymbol{\Sigma}(\Xmat^\top\Xmat)^{-1}}}$.
+
+When the rows of $\Xmat$ are independent $\Gauss(\boldsymbol{0}, \boldsymbol{\Sigma})$, $\Xmat^\top\Xmat$ has a
+<NoteLink to="wishart-distribution">Wishart distribution</NoteLink> with $n$ degrees of freedom and scale
+$\boldsymbol{\Sigma}$, and the mean of its inverse is $\boldsymbol{\Sigma}^{-1}/(n - p - 1)$ for $n > p + 1$. Taking the
+expectation over $\Xmat$,
+$\operatorname{Err} = \sigma^2\paren{1 + \trace(\eye_p)/(n - p - 1)} = \sigma^2\paren{1 + p/(n - p - 1)}$
+<Cite id="bates2024" />.
+</Derivation>
+
+## Assumptions
+
+The exact independence needs the homoskedastic Gaussian linear model, a least-squares fit and squared-error loss. The
+asymptotic statements need $n$ and $p$ to grow in proportion with $n > p$. The broader claim, that cross-validation
+tracks $\operatorname{Err}$ and not $\operatorname{Err}_\Dcal$, rests on simulations for other learners and losses.
+
+## Pitfalls
+
+- **Reading the estimate as a property of the deployed model.** A cross-validation estimate says how the procedure
+  does on training sets like this one. For the error of the model that will be deployed, score that model on a test
+  set it has never seen. A test set is an unbiased estimate of $\operatorname{Err}_\Dcal$ for the model it scores (see
+  <NoteLink to="hold-out-validation">hold-out validation</NoteLink> and
+  <NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>).
+- **Intervals for the wrong target.** An interval built from the spread of the fold errors is too narrow for either
+  target, and narrower still for $\operatorname{Err}_\Dcal$; see
+  <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>.
+- **The size of the fold models.** $\operatorname{CV}$ estimates the expected error at $n(K - 1)/K$ rows, not at $n$.
+  When the learning curve is steep, the gap is visible, as in step 2 of the worked example.
+- **Selection makes it worse.** The minimum of cross-validation estimates over many candidates is biased low for the
+  chosen candidate; see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>.

@@ -1,0 +1,217 @@
+---
+title: 'Iterative regularisation'
+kind: concept
+summary: 'Stopping an iterative least-squares solver early regularises it. Started at zero, the $t$-th iterate keeps a fraction of each singular component, as Tikhonov does, with the step count $t$ acting like $1/\lambda$. Landweber iteration is the classical form; the error falls and then rises.'
+tags: [model-selection, regularisation, optimisation, linear-models, worked-example]
+aliases: [Landweber iteration, regularisation by early stopping, semiconvergence, spectral filter, spectral regularisation, gradient flow regularisation]
+requires: [tikhonov-regularisation, gradient-descent, singular-value-decomposition]
+related: [early-stopping, implicit-regularisation, ridge-regression, choosing-the-regularisation-strength, gradient-boosting, best-subset-and-stepwise-selection, effective-degrees-of-freedom, iterative-linear-solvers]
+references: [landweber1951, engl1996, hansen1998, ali2019, buhlmann2003, yao2007, raskutti2014, morozov1966]
+status: draft
+updated: 2026-10-13
+---
+
+import { LandweberAgainstTikhonov } from './LandweberAgainstTikhonov'
+
+<Definition>
+Let $\Xmat \in \reals^{n \times p}$ have <Gloss name="svd">singular value decomposition</Gloss>
+$\Xmat = \Umat\Dmat\Vmat^\top$ with singular values $d_1 \ge \dots \ge d_r > 0$, and let $z_j = \uvec_j^\top\yvec$. An
+iterative solver for least squares started at $\wvec_0 = \zeros$ and stopped after $t$ steps is **iterative
+regularisation**: the iterate $\wvec_t$ is the estimate, and the number of steps $t$ is the regularisation parameter.
+For the linear iterations, such as <NoteLink to="gradient-descent">gradient descent</NoteLink>, the iterate is a
+**spectral filter** of the least-squares solution,
+
+$$
+\wvec_t = \sum_{j=1}^r \phi_j(t)\,\frac{z_j}{d_j}\,\vvec_j, \qquad 0 \le \phi_j(t) \le 1,
+$$
+
+with **filter factors** $\phi_j(t)$ that rise towards 1 as $t$ grows, fastest for the largest $d_j$
+<Cite id="engl1996" /> <Cite id="hansen1998" />.
+</Definition>
+
+## Intuition
+
+The least-squares solution $\sum_j (z_j/d_j)\vvec_j$ divides each data coordinate by its singular value. Noise is spread
+evenly over the coordinates, so in a direction with a small $d_j$ the noise is amplified by $1/d_j$. When the singular
+values decay, those directions dominate the least-squares solution with noise.
+
+An iterative solver started at zero recovers the directions in order of their singular values. Gradient descent on
+$\frac12\norm{\yvec - \Xmat\wvec}^2$ moves fastest along directions of high curvature $d_j^2$, so it fits the
+well-determined directions in a few steps and the noisy ones only after many. Stopping in between keeps the signal and
+leaves most of the amplified noise out. The number of steps does what $\lambda$ does in
+<NoteLink to="tikhonov-regularisation">Tikhonov regularisation</NoteLink>.
+
+The error to the true coefficients therefore first falls, while the signal directions are fitted, and then rises, while
+the noise directions are. This behaviour is called **semiconvergence**. The iteration converges, but to the
+unregularised solution; the useful estimate lies on the way.
+
+## Landweber iteration
+
+Landweber's iteration is gradient descent on $\frac12\norm{\yvec - \Xmat\wvec}^2$ with a fixed step $\omega$
+<Cite id="landweber1951" />:
+
+$$
+\wvec_{t+1} = \wvec_t + \omega\,\Xmat^\top(\yvec - \Xmat\wvec_t), \qquad \wvec_0 = \zeros.
+$$
+
+The filter factors follow from the iteration in singular coordinates. Let $c_j(t) = \vvec_j^\top\wvec_t$. Since
+$\vvec_j^\top\Xmat^\top = d_j\uvec_j^\top$ and $\uvec_j^\top\Xmat\wvec = d_jc_j$,
+
+$$
+c_j(t + 1) = c_j(t) + \omega d_j\paren{z_j - d_jc_j(t)}.
+$$
+
+Subtracting the fixed point $z_j/d_j$ from both sides gives
+
+$$
+c_j(t + 1) - \frac{z_j}{d_j} = (1 - \omega d_j^2)\paren{c_j(t) - \frac{z_j}{d_j}}.
+$$
+
+From $c_j(0) = 0$ the gap starts at $-z_j/d_j$ and is multiplied by $1 - \omega d_j^2$ at every step, so
+
+$$
+c_j(t) = \brack{1 - (1 - \omega d_j^2)^t}\frac{z_j}{d_j},
+\qquad
+\phi_j^{\text{Lw}}(t) = 1 - (1 - \omega d_j^2)^t.
+$$
+
+The iteration converges when $\abs{1 - \omega d_j^2} < 1$ for every $j$, that is for $0 < \omega < 2/d_1^2$. Each
+direction's gap shrinks geometrically at its own rate $1 - \omega d_j^2$: fast for large $d_j$, slowly for small.
+Components in the null space of $\Xmat$ are never touched, which is why the limit is the minimum-norm least-squares
+solution (see <NoteLink to="implicit-regularisation">implicit regularisation</NoteLink>).
+
+The iterate $\wvec_t$ is linear in $\yvec$, so the fit $\Xmat\wvec_t = \Smat_t\yvec$ is a linear smoother with
+$\Smat_t = \Umat\,\diag(\phi_j(t))\,\Umat^\top$. Its <NoteLink to="effective-degrees-of-freedom">effective degrees of
+freedom</NoteLink> are $\operatorname{df}(t) = \sum_j \phi_j(t)$, rising from 0 at $t = 0$ to the rank $r$.
+<Gloss name="gcv" />, $C_p$ and leave-one-out can choose $t$ exactly as they choose $\lambda$.
+
+## Spectral filters
+
+Many regularisers are spectral filters of the least-squares solution, differing only in $\phi_j$:
+
+| Method | Filter factor $\phi_j$ | Parameter |
+| --- | --- | --- |
+| Truncated SVD | $1$ if $j \le k$, else $0$ | rank $k$ |
+| Tikhonov, ridge | $d_j^2/(d_j^2 + \lambda)$ | penalty $\lambda$ |
+| Landweber, gradient descent | $1 - (1 - \omega d_j^2)^t$ | steps $t$ |
+| Gradient flow | $1 - e^{-d_j^2\tau}$ | time $\tau$ |
+
+**Steps against penalty.** For a small step, $(1 - \omega d_j^2)^t \approx e^{-\omega d_j^2t}$, so Landweber behaves
+like gradient flow run for time $\tau = \omega t$. Compare the two ends of the spectrum with Tikhonov at
+$\lambda = 1/\tau$, writing $x = d_j^2\tau$:
+
+- **Weak directions, $x \ll 1$.** Gradient flow keeps $1 - e^{-x} \approx x$ and Tikhonov keeps
+  $x/(1 + x) \approx x$. They agree, with $\lambda = 1/(\omega t)$.
+- **Strong directions, $x \gg 1$.** Gradient flow leaves out $e^{-x}$ and Tikhonov leaves out $1/(1 + x)$. Gradient flow
+  passes strong directions almost unchanged, so it acts more like truncated SVD, a sharp cut-off, than like ridge's
+  gradual one.
+
+The <NoteLink to="early-stopping">early stopping</NoteLink> note tabulates the same comparison for a neural network's
+quadratic approximation.
+
+**Conjugate gradients.** The conjugate-gradient method applied to the normal equations (CGLS) is also a semiconvergent
+iteration, and it reaches a useful iterate in far fewer steps than Landweber. Its iterate is the best fit within a
+Krylov subspace that depends on $\yvec$, so its filter factors depend on the data and it is not a linear smoother
+<Cite id="hansen1998" /> (see <NoteLink to="iterative-linear-solvers">iterative linear solvers</NoteLink>).
+
+**Boosting.** $L_2$ boosting fits a base learner to the residuals over and over. With a linear base learner whose
+smoother $\Smat$ is symmetric with eigenvalues $s_j \in [0, 1]$, the fit after $m$ rounds is
+$\paren{\eye - (\eye - \Smat)^m}\yvec$, a spectral filter with factors $1 - (1 - s_j)^m$. The number of rounds is the
+regularisation parameter, and Bühlmann and Yu chose it with a corrected <Gloss name="aic" /> from the trace of that
+operator <Cite id="buhlmann2003" /> (see <NoteLink to="gradient-boosting">gradient boosting</NoteLink>). Forward
+stagewise regression is the same idea with one coordinate moved per step (see
+<NoteLink to="best-subset-and-stepwise-selection">best subset and stepwise selection</NoteLink>).
+
+## Gradient flow and ridge
+
+The filter factors say that early stopping and ridge are similar. Ali, Kolter and Tibshirani made the similarity
+quantitative <Cite id="ali2019" />. Take $\yvec = \Xmat\wvec^\star + \varepsilonvec$ with noise of variance $\sigma^2$
+and any fixed $\Xmat$. Compare gradient flow at time $\tau$ with ridge at $\lambda = 1/\tau$ (in the scaling
+$\norm{\yvec - \Xmat\wvec}^2 + \lambda\norm{\wvec}^2$ for ridge and $\frac12\norm{\yvec - \Xmat\wvec}^2$ for the flow).
+
+In singular coordinates, a spectral filter's estimation risk splits into one bias and one variance term per direction:
+
+$$
+\expect\norm{\wvec_\phi - \wvec^\star}^2 = \sum_j \brack{(1 - \phi_j)^2\paren{\vvec_j^\top\wvec^\star}^2
++ \phi_j^2\frac{\sigma^2}{d_j^2}}.
+$$
+
+The bias term comes from the fraction $1 - \phi_j$ of the true coordinate that the filter leaves out; the variance term
+from the noise $\uvec_j^\top\varepsilonvec$, of variance $\sigma^2$, divided by $d_j$ and kept in the fraction $\phi_j$.
+Compare the two filters term by term, with $x = d_j^2\tau$.
+
+- **Bias.** Gradient flow leaves out $e^{-x}$ and ridge $1/(1 + x)$. Since $e^x \ge 1 + x$, $e^{-x} \le 1/(1 + x)$, so
+  gradient flow's bias term is never larger.
+- **Variance.** The ratio of the variance terms is
+  $\paren{(1 - e^{-x})(1 + x)/x}^2$. It is 1 as $x \to 0$ and as $x \to \infty$, and its maximum, near $x = 1.79$, is
+  about 1.686.
+
+Every term of gradient flow's risk is therefore at most 1.686 times the matching term of ridge's, and so is the sum. Ali
+et al. state the bound as 1.6862 for the estimation risk and the in-sample prediction risk, for every $\wvec^\star$ and
+every design. When both methods are tuned optimally and the coefficients follow a spherical prior, the ratio of their
+best risks lies between 1 and 1.2147 <Cite id="ali2019" />. Early stopping is never much worse than ridge at its best,
+and it costs no more than the iterations it runs.
+
+## Choosing when to stop
+
+Iterative regularisation needs a stopping rule, the counterpart of
+<NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>.
+
+- **Validation.** Track the error on held-out data and keep the best iterate. This is the standard practice for
+  neural networks (see <NoteLink to="early-stopping">early stopping</NoteLink>).
+- **The discrepancy principle.** Stop at the first $t$ with $\norm{\yvec - \Xmat\wvec_t} \le \tau\delta$, where $\delta$
+  is the norm of the noise and $\tau$ is a safety factor slightly above 1 <Cite id="morozov1966" />
+  <Cite id="engl1996" />. The residual falls monotonically along Landweber iterations, so the rule stops at a
+  well-defined step, and no fit beyond it is needed.
+- **Criteria on the degrees of freedom.** For a linear iteration, GCV or $C_p$ with $\operatorname{df}(t) =
+  \sum_j\phi_j(t)$.
+- **Rules from complexity.** For gradient descent in a <Gloss name="rkhs">reproducing kernel Hilbert space</Gloss>,
+  stopping when a local empirical complexity of the kernel class matches the step count gives minimax-optimal rates
+  without held-out data <Cite id="raskutti2014" />. Yao, Rosasco and Caponnetto gave stopping times as functions of the
+  sample size that make kernel gradient descent consistent <Cite id="yao2007" />.
+
+<LandweberAgainstTikhonov />
+
+## Worked example
+
+Take three directions with singular values $\dvec = (3, 1, 0.3)$, true coefficients $(1, 1, 1)$ in the right singular
+basis, and noise $(0.1, -0.1, 0.2)$ along the left singular vectors, of norm $\delta = 0.245$. The data coordinates are
+$z_j = d_j + e_j = (3.1, 0.9, 0.5)$, and the least-squares solution is $z_j/d_j = (1.033, 0.900, 1.667)$. Its error is
+$\norm{(0.033, -0.100, 0.667)} = 0.675$, almost all of it from the weakest direction, where noise 0.2 is divided by 0.3.
+
+Run Landweber with $\omega = 0.1$, inside the limit $2/d_1^2 = 0.22$. The contraction factors are
+$1 - \omega d_j^2 = (0.1, 0.9, 0.991)$.
+
+1. **After 10 steps** the filter factors are $(1 - 0.1^{10}, 1 - 0.9^{10}, 1 - 0.991^{10}) = (1.000, 0.651, 0.086)$.
+   Tikhonov at $\lambda = 1/(\omega t) = 1$ gives $(0.900, 0.500, 0.083)$. The weakest direction is filtered almost
+   identically; the strongest is passed fully by Landweber and shrunk 10% by Tikhonov.
+2. **The error along the iteration.** With $\norm{\wvec_t - \wvec^\star}$ and the residual $\norm{\yvec -
+   \Xmat\wvec_t}$:
+
+   | $t$ | 0 | 10 | 50 | 80 | 101 | 150 | 200 | 1000 |
+   | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+   | error | 1.732 | 0.951 | 0.409 | 0.177 | 0.105 | 0.260 | 0.407 | 0.675 |
+   | residual | 3.266 | 0.554 | 0.318 | 0.243 | 0.201 | 0.129 | 0.082 | 0.000 |
+
+   The error falls to 0.105 at $t = 101$ and climbs back to the least-squares 0.675. The residual falls throughout,
+   so it cannot show where to stop on its own.
+3. **The discrepancy principle** with $\tau = 1$ stops at the first step whose residual is below $\delta = 0.245$:
+   $t = 79$, with error 0.183. It stops a little early, which costs 0.08 against the best step.
+4. **Tikhonov's best** on the same data is at $\lambda = 0.058$ with error 0.152. Landweber's best step does better
+   here, because it passes the first two directions almost unchanged while Tikhonov shrinks them.
+
+## Pitfalls
+
+- **The step limit.** Landweber diverges for $\omega \ge 2/d_1^2$. The default $\omega = 1/d_1^2$ is safe and needs an
+  estimate of the largest singular value, which a few power iterations give.
+- **Slow progress in weak directions.** A direction with $\omega d_j^2 = 10^{-4}$ needs about $10^4$ steps to be fitted.
+  When the right amount of regularisation keeps such directions, Landweber is slow, and conjugate gradients or a direct
+  Tikhonov solve are cheaper.
+- **The schedule changes the filter.** The filter factors above assume a constant step and a start at zero. A decaying
+  step, momentum or an adaptive optimiser such as Adam gives different filters, and a nonzero start keeps its
+  component in the null space of $\Xmat$.
+- **Conjugate gradients overshoot fast.** Because CGLS converges quickly, its semiconvergence minimum is sharp, and
+  running a few steps past it loses much of the benefit. A stopping rule matters more than for Landweber.
+- **Selection by validation is still selection.** Choosing the best of many iterates on a validation set makes that
+  validation error optimistic for the chosen iterate (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

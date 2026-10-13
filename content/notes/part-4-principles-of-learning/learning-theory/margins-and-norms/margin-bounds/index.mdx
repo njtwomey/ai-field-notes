@@ -1,0 +1,242 @@
+---
+title: 'Margin bounds'
+kind: concept
+summary: 'A margin bound limits the risk of a classifier $\sgn(h)$ by the fraction of training points with margin below $\gamma$ plus a capacity term that shrinks with $\gamma$ and ignores the dimension: about $4X/(\gamma\sqrt m)$ for unit-norm linear classifiers on inputs of norm at most $X$.'
+tags: [learning-theory, generalisation, margin, worked-example]
+aliases: [margin bound, margin-based generalisation bound, large-margin bound, ramp loss, empirical margin loss, normalised margin]
+requires: [rademacher-complexity, contraction-lemma]
+related: [support-vector-machine, kernel-support-vector-machine, margin-theory-of-boosting, norm-based-bounds-for-neural-networks, pseudo-dimension-and-fat-shattering-dimension, margins-and-norms, structural-risk-minimisation, sample-compression-bounds]
+references: [bartlett2002, bartlett1998, shawetaylor1998, koltchinskii2002, mohri2018, shalevshwartz2014, vapnik1998]
+status: draft
+updated: 2026-10-12
+---
+
+import { MarginDistribution } from './MarginDistribution'
+
+<Definition>
+Let $h : \Xcal \to \reals$ be a real-valued score and classify by $\sgn(h(x))$, with labels $y \in \set{-1, +1}$. The
+**margin** of $h$ on an example $(x, y)$ is $y\,h(x)$: positive when the example is classified correctly, and large
+when it is classified with room to spare. For a scale $\gamma > 0$, the **empirical margin loss**
+$\hat R_\gamma(h) = \frac1m\sum_{i=1}^m\indicator[y_i h(x_i) < \gamma]$ is the fraction of the $m$ training examples
+with margin below $\gamma$. A **margin bound** states that, with probability at least $1 - \delta$ over the sample,
+every $h$ in a class $\Hcal$ has risk $R(h) \le \hat R_\gamma(h) + C(\Hcal, \gamma, m, \delta)$, where the capacity
+term $C$ falls as $\gamma$ grows <Cite id="bartlett1998" /> <Cite id="bartlett2002" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="vapnik-chervonenkis-dimension">VC bound</NoteLink> for linear classifiers in $\reals^D$ grows with the
+dimension $D$, because half-spaces in $\reals^D$ shatter $D + 1$ points. A <NoteLink to="support-vector-machine">support
+vector machine</NoteLink> with a Gaussian kernel works in an infinite-dimensional feature space, so the VC bound for it
+is infinite. Yet such classifiers generalise well when they separate the data by a wide gap.
+
+The margin explains this. Shattering a set of points with a wide gap is much harder than shattering it with any gap. A
+unit-norm linear function on inputs of norm at most $X$ can separate at most about $(X/\gamma)^2$ points in every way
+with margin $\gamma$, whatever the dimension (see the
+<NoteLink to="pseudo-dimension-and-fat-shattering-dimension">fat-shattering dimension</NoteLink>). A classifier that
+leaves most training points far from its boundary is therefore drawn from an effectively small class, and the bound
+charges it for that small class.
+
+The price is the training points that sit inside the margin. Counting them as errors makes $\hat R_\gamma(h)$ at least
+the training error. A larger $\gamma$ shrinks the capacity term and counts more points as margin errors. The bound
+holds for every $\gamma$, and the best one balances the two terms.
+
+In the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>, the margin bound is the
+move that exploits structure. Concentration and symmetrisation are as in the
+<NoteLink to="rademacher-complexity">Rademacher bound</NoteLink>. The new step is to replace the 0–1 loss, whose class
+is as rich as the VC dimension allows, with a Lipschitz loss whose class is controlled by a norm.
+
+## The margin loss
+
+The 0–1 loss of $\sgn(h)$ is $\indicator[y\,h(x) \le 0]$, a step function of the margin. A step has no Lipschitz
+constant, so the <NoteLink to="contraction-lemma" /> cannot pass from the scores to the losses. The **ramp loss** at
+scale $\gamma$ replaces the step with a slope:
+
+$$
+\rho_\gamma(u) = \begin{cases} 1 & u \le 0, \\ 1 - u/\gamma & 0 < u < \gamma, \\ 0 & u \ge \gamma. \end{cases}
+$$
+
+Three properties make it the bridge between the losses.
+
+1. **It lies above the 0–1 loss:** $\indicator[u \le 0] \le \rho_\gamma(u)$, so the ramp risk bounds the error rate.
+2. **It lies below the margin indicator:** $\rho_\gamma(u) \le \indicator[u < \gamma]$, so the empirical ramp loss is at
+   most $\hat R_\gamma(h)$.
+3. **It is $1/\gamma$-Lipschitz** and takes values in $[0, 1]$, so the contraction lemma and the Rademacher bound both
+   apply to it.
+
+The <NoteLink to="surrogate-losses">hinge loss</NoteLink> $\max(0, 1 - u)$ lies above $\rho_1$. Any bound stated with
+$\hat R_1$ therefore also holds with the average <Gloss name="hinge-loss">hinge loss</Gloss> in its place.
+
+## The bound for linear and kernel classes
+
+**Theorem (fixed margin).** Let $\Hcal$ be a class of real-valued functions and fix $\gamma > 0$ before seeing the
+data. With probability at least $1 - \delta$ over an <Gloss name="iid" /> sample of size $m$, every $h \in \Hcal$
+satisfies
+
+$$
+R(h) \le \hat R_\gamma(h) + \frac{2}{\gamma}\Rad_m(\Hcal) + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The derivation has four steps.
+
+1. **Sandwich the 0–1 loss.** By property 1, $R(h) = \expect\indicator[y\,h(x) \le 0] \le \expect\rho_\gamma(y\,h(x))$.
+2. **Bound the ramp risk uniformly.** The ramp losses $(x, y) \mapsto \rho_\gamma(y\,h(x))$ form a class of functions
+   with values in $[0, 1]$. The <NoteLink to="rademacher-complexity">Rademacher generalisation bound</NoteLink> (proved
+   with <NoteLink to="mcdiarmids-inequality">McDiarmid's inequality</NoteLink> and
+   <NoteLink to="symmetrisation">symmetrisation</NoteLink>) gives, with probability at least $1 - \delta$ and for every
+   $h$ at once,
+   $\expect\rho_\gamma(y\,h(x)) \le \frac1m\sum_i\rho_\gamma(y_i h(x_i)) + 2\Rad_m(\rho_\gamma \circ \Hcal) +
+   \sqrt{\ln(1/\delta)/(2m)}$.
+3. **Pass to the margin indicator.** By property 2, $\frac1m\sum_i\rho_\gamma(y_i h(x_i)) \le \hat R_\gamma(h)$.
+4. **Contract.** The map $u \mapsto \rho_\gamma(y_i u)$ is $1/\gamma$-Lipschitz for each label $y_i = \pm 1$. The
+   contraction lemma gives $\Rad_m(\rho_\gamma \circ \Hcal) \le \Rad_m(\Hcal)/\gamma$.
+
+Chaining the four inequalities proves the theorem. Only the last step depends on the class, through $\Rad_m(\Hcal)$.
+
+**Linear classes.** Let $\Hcal_B = \set{\xvec \mapsto \wvec^\top\xvec : \norm{\wvec} \le B}$ on inputs with
+$\norm{\xvec} \le X$. Cauchy–Schwarz and Jensen's inequality give $\hat\Rad_S(\Hcal_B) \le
+\frac{B}{m}\sqrt{\sum_i\norm{\xvec_i}^2} \le BX/\sqrt m$ (derived in the
+<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> note). The bound becomes
+
+$$
+R(h) \le \hat R_\gamma(h) + \frac{2BX}{\gamma\sqrt m} + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The sign of $\wvec^\top\xvec$ does not change when $\wvec$ is rescaled. Only the ratio $\gamma/B$ matters, so one can
+fix $B = 1$ and measure the **normalised margin** $y\,\wvec^\top\xvec/\norm{\wvec}$, the signed distance of $\xvec$ to
+the hyperplane. The capacity term is then $2X/(\gamma\sqrt m)$: the ratio of the data radius to the margin, divided by
+$\sqrt m$. The dimension $D$ of $\xvec$ does not appear.
+
+**Kernel classes.** Let $k$ be a kernel with feature map $\phi$ into a
+<NoteLink to="reproducing-kernel-hilbert-space">reproducing kernel Hilbert space</NoteLink> (<Gloss name="rkhs" />),
+and let $\Hcal_B = \set{x \mapsto \inner{\wvec, \phi(x)} : \norm{\wvec} \le B}$. The same two steps apply in the
+feature space, and $\norm{\sum_i\sigma_i\phi(x_i)}^2 = \sigmavec^\top\Kmat\sigmavec$ for the kernel matrix
+$K_{ij} = k(x_i, x_j)$. Its expectation over the signs is $\trace\Kmat$, so
+
+$$
+\hat\Rad_S(\Hcal_B) \le \frac{B\sqrt{\trace\Kmat}}{m} \le \frac{B\max_i\sqrt{k(x_i, x_i)}}{\sqrt m}
+$$
+
+<Cite id="bartlett2002" />. For the Gaussian kernel $k(x, x) = 1$, so $\trace\Kmat = m$ and the term is $B/\sqrt m$.
+The feature space is infinite-dimensional, and the bound is the same as for unit-norm inputs in the plane. Using the
+empirical complexity costs a slightly larger confidence term,
+$3\sqrt{\ln(2/\delta)/(2m)}$ in place of $\sqrt{\ln(1/\delta)/(2m)}$ <Cite id="mohri2018" />.
+
+### Choosing the margin after training
+
+The theorem fixes $\gamma$ in advance. In practice $\gamma$ is read off the trained classifier, for example as the
+smallest normalised margin of a hard-margin SVM. A <NoteLink to="union-bound" /> over a grid of margins makes the bound
+hold for every $\gamma \in (0, 1]$ at once. With the inputs scaled so that $X = 1$, every normalised margin lies in
+$[-1, 1]$, and
+
+$$
+R(h) \le \hat R_\gamma(h) + \frac{4}{\gamma\sqrt m} + \sqrt{\frac{\ln(1/\delta) + 2\ln\log_2(4/\gamma)}{2m}}.
+$$
+
+For inputs of norm at most $X$, replace $\gamma$ by $\gamma/X$ throughout.
+
+The factor 4 in place of 2 and the $\ln\log_2$ term are the cost of choosing $\gamma$ from the data
+<Cite id="mohri2018" />. The same argument over a grid of norms $B$ handles a classifier whose norm is read off after
+training.
+
+<Derivation title="The union bound over margins">
+
+Take the grid $\gamma_k = 2^{-k}$ for $k = 1, 2, \dots$ and give scale $\gamma_k$ the confidence
+$\delta_k = \delta/(k(k + 1))$. These sum to $\delta$, because $\sum_k(\frac1k - \frac1{k+1}) = 1$. By the union bound,
+with probability at least $1 - \delta$ the fixed-margin theorem holds at every $\gamma_k$ simultaneously.
+
+Now take any $\gamma \in (0, 1]$ and let $k$ be the smallest index with $\gamma_k \le \gamma$. Then
+$\gamma/2 < \gamma_k \le \gamma$.
+
+1. **The margin loss.** A margin below $\gamma_k$ is a margin below $\gamma$, so $\hat R_{\gamma_k}(h) \le
+   \hat R_\gamma(h)$.
+2. **The capacity term.** $1/\gamma_k < 2/\gamma$, so $\frac{2}{\gamma_k}\Rad_m(\Hcal) < \frac{4}{\gamma}\Rad_m(\Hcal)$.
+3. **The confidence term.** $k < \log_2(1/\gamma) + 1 = \log_2(2/\gamma)$, so $k(k + 1) < (k + 1)^2 <
+   \log_2(4/\gamma)^2$. Hence $\ln(1/\delta_k) < \ln(1/\delta) + 2\ln\log_2(4/\gamma)$.
+
+Substituting the three inequalities into the bound at $\gamma_k$, with $\Rad_m(\Hcal) \le 1/\sqrt m$ for unit-norm
+$\wvec$ and $X = 1$, gives the displayed bound. A finer grid, $\gamma_k = r^{-k}$ with $r$ close to 1, brings the factor
+4 down towards 2 at the cost of a larger logarithmic term.
+
+</Derivation>
+
+### The support vector machine
+
+The soft-margin SVM minimises $\frac12\norm{\wvec}^2 + C\sum_i\max(0, 1 - y_i\wvec^\top\xvec_i)$. Take $\gamma = 1$ in
+the unnormalised scale and $B = \norm{\wvec}$. The hinge loss lies above $\rho_1$, so the bound reads
+
+$$
+R(h) \le \frac1m\sum_{i=1}^m\max(0, 1 - y_i\wvec^\top\xvec_i) + \frac{2\norm{\wvec}X}{\sqrt m} +
+\sqrt{\frac{\ln(1/\delta)}{2m}},
+$$
+
+with a union bound over $\norm{\wvec}$ for a norm chosen after training. The SVM objective has the same two
+ingredients: an average hinge loss and a penalty on $\norm{\wvec}$. The constant $C$ sets the exchange rate between
+them. This is the <NoteLink to="structural-risk-minimisation">structural risk minimisation</NoteLink> reading of the
+SVM <Cite id="shawetaylor1998" /> <Cite id="vapnik1998" />.
+
+## Worked example
+
+Take normalised margins on inputs of norm at most $X = 1$, $m = 10{,}000$ training points and $\delta = 0.05$.
+
+**The capacity and confidence terms.** The table gives the terms of the bound beyond $\hat R_\gamma(h)$. For a margin
+fixed in advance they are $2/(\gamma\sqrt m) + \sqrt{\ln 20/(2m)}$. For a margin read off after training they are
+$4/(\gamma\sqrt m) + \sqrt{(\ln 20 + 2\ln\log_2(4/\gamma))/(2m)}$.
+
+| Margin $\gamma$ | $X/\gamma$ | Fixed in advance | Chosen after training | $m$ for 0.1 (after training) |
+| --- | --- | --- | --- | --- |
+| 0.05 | 20 | 0.412 | 0.818 | 669,584 |
+| 0.1 | 10 | 0.212 | 0.418 | 174,560 |
+| 0.2 | 5 | 0.112 | 0.217 | 47,180 |
+| 0.5 | 2 | 0.052 | 0.096 | 9,238 |
+
+The last column solves for the sample size at which the terms fall to 0.1. The capacity term dominates, so the sample
+size scales as $(4X/(0.1\gamma))^2$: halving the margin quadruples it.
+
+**Trading margin errors against capacity.** Suppose a linear classifier's training margins satisfy
+$\hat R_{0.1} = 0.01$, $\hat R_{0.2} = 0.04$ and $\hat R_{0.5} = 0.30$. The bound with $\gamma$ chosen after training
+is $0.01 + 0.418 = 0.428$ at $\gamma = 0.1$, $0.04 + 0.217 = 0.257$ at $\gamma = 0.2$, and $0.30 + 0.096 = 0.396$ at
+$\gamma = 0.5$. The best scale is $\gamma = 0.2$, with a bound of 0.26. A test error of 0.03 would make the bound loose
+by a factor of about 8, but not vacuous.
+
+**Against the VC bound.** The VC route for half-spaces in $\reals^D$ has VC dimension $d = D + 1$ and, through
+<NoteLink to="massarts-finite-class-lemma">Massart's lemma</NoteLink> and the
+<NoteLink to="growth-function-and-sauer-shelah-lemma">Sauer–Shelah lemma</NoteLink>, a gap of at most
+$2\sqrt{2d\ln(em/d)/m} + \sqrt{\ln(1/\delta)/(2m)}$. At $m = 10{,}000$ and $\delta = 0.05$ this is 0.27 for $D = 10$,
+0.69 for $D = 100$, 1.64 for $D = 1{,}000$ and 2.84 for $D = 10{,}000$. The VC bound is vacuous from $D = 1{,}000$ on.
+The margin bound at $\gamma = 0.2$ stays at 0.22 plus $\hat R_\gamma$ in every dimension, including the
+infinite-dimensional feature space of a Gaussian kernel.
+
+## Simulation
+
+<MarginDistribution />
+
+{/* figure pending engine (A1 marginBound): the bound R̂_γ + 4X/(γ√m) + confidence term drawn against γ beside the
+measured test error, with its minimising γ marked */}
+
+## Assumptions
+
+- **Independent, identically distributed data,** as in every
+  <NoteLink to="uniform-convergence">uniform-convergence</NoteLink> bound.
+- **A bounded data radius.** The constant $X$ is the largest input norm, or $\sqrt{\trace\Kmat/m}$ in the empirical
+  version. Without a bound on the inputs, a margin has no scale to be compared with.
+- **Binary labels.** For $K$ classes the margin is $h_y(x) - \max_{j \ne y}h_j(x)$, and the contraction step needs a
+  vector form, which adds a factor that grows with $K$ <Cite id="mohri2018" />.
+
+## Pitfalls
+
+- **An unnormalised margin means nothing.** Multiplying $\wvec$ by 10 multiplies every margin by 10 and leaves the
+  classifier unchanged. A margin must be divided by $\norm{\wvec}$ (or the class norm $B$) and compared with $X$ before
+  it enters a bound. Raw margins of different models cannot be compared.
+- **Outliers inflate $X$.** One input of large norm raises the worst-case radius for everyone. The trace form
+  $\sqrt{\trace\Kmat}/m$ averages the norms instead, and is the better choice for heavy-tailed inputs.
+- **The minimum margin is fragile.** A bound with $\hat R_\gamma = 0$ uses the smallest training margin, which one
+  mislabelled point can drive to zero. The bound holds for every $\gamma$; the best $\gamma$ usually lets a few points
+  inside the margin.
+- **A bias term changes the class.** The linear bound assumes $\wvec^\top\xvec$ without an offset. An offset $b$ is
+  handled by appending a constant coordinate to $\xvec$, which increases $X$ and makes the normalisation include
+  $b$.
+- **The bound is about the class, not the algorithm.** It holds for every classifier with the stated norm and margins.
+  It says nothing about why a training method finds large margins; that is the subject of
+  <NoteLink to="implicit-regularisation">implicit regularisation</NoteLink> and of the
+  <NoteLink to="margin-theory-of-boosting">margin theory of boosting</NoteLink>.

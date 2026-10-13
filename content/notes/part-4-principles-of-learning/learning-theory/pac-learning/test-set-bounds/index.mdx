@@ -1,0 +1,196 @@
+---
+title: 'Test-set bounds'
+kind: concept
+summary: 'A test-set bound turns the errors of one fixed classifier on $m$ held-out examples into an upper bound on its true risk at confidence $1 - \delta$: by Hoeffding''s inequality, or exactly by inverting the binomial tail (the Clopper–Pearson limit).'
+tags: [learning-theory, generalisation, evaluation, worked-example]
+aliases: [test set bound, holdout bound, binomial tail inversion, binomial tail bound]
+requires: [generalisation-gap, hoeffdings-inequality, binomial-distribution]
+related: [chernoff-bounds, confidence-intervals, metric-confidence-intervals, cross-validation, occam-bound, adaptive-data-analysis]
+references: [langford2005, clopper1934, hoeffding1963, shalevshwartz2014]
+status: draft
+updated: 2026-10-12
+---
+
+import { TestSetTails } from './TestSetTails'
+
+<Definition>
+Let $h$ be a classifier fixed before a test sample $S = ((x_i, y_i))_{i=1}^m$ is drawn independently from the
+distribution $\Dcal$. Let $k = m\hat R_S(h)$ be the number of test examples that $h$ misclassifies. A **test-set
+bound** is a number $\bar p(k, m, \delta)$, computed from $k$, $m$ and a confidence parameter $\delta \in (0, 1)$, such
+that $R(h) \le \bar p(k, m, \delta)$ with probability at least $1 - \delta$ over the draw of $S$. Hoeffding's
+inequality gives $\bar p = \hat R_S(h) + \sqrt{\ln(1/\delta)/(2m)}$. The exact bound is the **binomial tail
+inversion** $\bar p = \max\set{p : \operatorname{Bin}(k; m, p) \ge \delta}$, where $\operatorname{Bin}(k; m, p)$ is the
+probability of at most $k$ errors in $m$ independent trials with error probability $p$ <Cite id="langford2005" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="empirical-risk-minimisation">true risk</NoteLink> $R(h)$ is the
+<NoteLink to="accuracy-and-balanced-accuracy">error rate</NoteLink> of $h$ on the whole distribution, and it cannot be
+computed. A test sample estimates it. Each test example is an independent trial that $h$ gets wrong with probability
+$R(h)$, so the number of errors $k$ follows a <NoteLink to="binomial-distribution">binomial distribution</NoteLink> with
+$m$ trials and success probability $R(h)$. A test-set bound is the largest error rate that still makes the observed $k$
+plausible.
+
+The test-set bound makes the second move of the <NoteLink to="statistical-learning-theory">recipe for a
+generalisation bound</NoteLink>: concentration for one fixed hypothesis. It needs no union bound, because $h$ was
+chosen before the test sample was drawn. A bound computed on the training sample must pay for every hypothesis the
+learner could have chosen. The test-set bound pays for one, so at the same sample size it is far tighter than any
+training-set bound <Cite id="langford2005" />.
+
+## The Hoeffding bound
+
+The derivation takes three steps.
+
+1. **The losses are independent.** The losses $Z_i = \indicator[h(x_i) \ne y_i]$ are functions of independent
+   examples and of $h$, which does not depend on $S$. They are therefore independent, take values in $\set{0, 1}$, and
+   have mean $\expect Z_i = R(h)$. Their average is the test error $\hat R_S(h)$.
+2. **Concentration.** One-sided <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> for the mean of
+   $m$ independent variables in $[0, 1]$ gives, for every $t > 0$ <Cite id="hoeffding1963" />,
+
+$$
+\prob\paren{R(h) - \hat R_S(h) \ge t} \le e^{-2mt^2}.
+$$
+
+3. **Inversion.** Setting the right side equal to $\delta$ and solving gives $t = \sqrt{\ln(1/\delta)/(2m)}$. With
+   probability at least $1 - \delta$,
+
+$$
+R(h) \le \hat R_S(h) + \sqrt{\frac{\ln(1/\delta)}{2m}}.
+$$
+
+The two-sided version replaces $\ln(1/\delta)$ by $\ln(2/\delta)$ and bounds $\abs{R(h) - \hat R_S(h)}$. Solving
+$\sqrt{\ln(1/\delta)/(2m)} \le \epsilon$ for the sample size gives $m \ge \ln(1/\delta)/(2\epsilon^2)$ test examples for
+a margin $\epsilon$ above the test error.
+
+The width $\sqrt{\ln(1/\delta)/(2m)}$ does not depend on the test error. Hoeffding's inequality uses only the range of
+the losses, and the variance $R(h)(1 - R(h))$ of a <NoteLink to="surrogate-losses">0–1 loss</NoteLink> is largest,
+$1/4$, at $R(h) = 1/2$. The bound is therefore tight near an error rate of one half and loose for an accurate
+classifier, whose losses vary far less.
+
+## The exact binomial tail bound
+
+The number of errors $K = m\hat R_S(h)$ has an exactly known distribution, $\operatorname{Bin}(m, R(h))$, up to the
+unknown parameter $R(h)$. The <Gloss name="cdf">cumulative distribution function</Gloss> is
+
+$$
+\operatorname{Bin}(k; m, p) = \sum_{j=0}^{k}\binom{m}{j}p^j(1 - p)^{m - j}.
+$$
+
+For a fixed $k < m$, $\operatorname{Bin}(k; m, p)$ decreases continuously from 1 at $p = 0$ to 0 at $p = 1$: a larger
+error rate makes few errors less likely. The bound $\bar p(k) = \max\set{p : \operatorname{Bin}(k; m, p) \ge \delta}$
+is the error rate at which observing $k$ or fewer errors has probability exactly $\delta$. Its validity takes four
+steps.
+
+1. Write $p^* = R(h)$. The bound fails when $\bar p(K) < p^*$.
+2. Because $\operatorname{Bin}(K; m, \cdot)$ is decreasing, $\bar p(K) < p^*$ holds exactly when
+   $\operatorname{Bin}(K; m, p^*) < \delta$.
+3. $\operatorname{Bin}(k; m, p^*)$ increases with $k$. Let $k^*$ be the largest $k$ with
+   $\operatorname{Bin}(k; m, p^*) < \delta$. The bound fails exactly when $K \le k^*$.
+4. The failure probability is $\prob(K \le k^*) = \operatorname{Bin}(k^*; m, p^*) < \delta$. When no such $k^*$
+   exists, the bound never fails.
+
+The bound is the one-sided Clopper–Pearson upper confidence limit for a binomial proportion
+<Cite id="clopper1934" />. It is essentially tight: for a classifier whose true error is large enough, the bound fails
+on a fraction $\delta$ of test samples <Cite id="langford2005" />. Computing it means solving
+$\operatorname{Bin}(k; m, p) = \delta$ for $p$, a one-dimensional root-finding problem.
+
+Two special cases have closed forms.
+
+- **No errors.** With $k = 0$, $\operatorname{Bin}(0; m, p) = (1 - p)^m$, so $\bar p = 1 - \delta^{1/m}$. Because
+  $1 - e^{-x} \le x$, this is at most $\ln(1/\delta)/m$. At $\delta = 0.05$, $\ln 20 = 3.00$, which gives the "rule of
+  three": zero errors in $m$ trials bound the error rate by about $3/m$.
+- **The relative-entropy relaxation.** For $q = k/m \le p$, the <NoteLink to="chernoff-bounds">Chernoff
+  bound</NoteLink> on the lower binomial tail is $\operatorname{Bin}(k; m, p) \le e^{-m\operatorname{kl}(q \,\|\, p)}$,
+  where $\operatorname{kl}(q \,\|\, p) = q\ln(q/p) + (1 - q)\ln((1 - q)/(1 - p))$ is the
+  <NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> between Bernoulli laws. Hence
+  $\bar p \le \max\set{p : \operatorname{kl}(q \,\|\, p) \le \ln(1/\delta)/m}$.
+
+The three bounds are ordered. The exact bound is at most the relative-entropy bound, because the Chernoff bound
+over-estimates the tail. The relative-entropy bound is at most the Hoeffding bound, because Pinsker's inequality
+$\operatorname{kl}(q \,\|\, p) \ge 2(p - q)^2$ makes the relative-entropy constraint the stricter one. For a small test
+error $q$, the relative-entropy bound behaves like $q + \sqrt{2q\ln(1/\delta)/m} + O(\ln(1/\delta)/m)$: it adapts to
+the variance of the losses, as <NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink> does.
+
+<Derivation title="The relative-entropy bound and Pinsker's inequality">
+**Chernoff step.** For $\lambda > 0$ and $K \sim \operatorname{Bin}(m, p)$, Markov's inequality applied to
+$e^{-\lambda K}$ gives
+
+$$
+\prob(K \le k) = \prob\paren{e^{-\lambda K} \ge e^{-\lambda k}} \le e^{\lambda k}\,\expect e^{-\lambda K} =
+e^{\lambda k}\paren{1 - p + pe^{-\lambda}}^m.
+$$
+
+The exponent $\lambda k + m\ln(1 - p + pe^{-\lambda})$ is convex in $\lambda$. Setting its derivative to zero gives
+$e^{-\lambda} = q(1 - p)/(p(1 - q))$ with $q = k/m$, which is less than 1 when $q < p$. Substituting this value makes
+the exponent equal to $-m\operatorname{kl}(q \,\|\, p)$, so $\prob(K \le k) \le e^{-m\operatorname{kl}(q \,\|\, p)}$.
+
+**Pinsker step.** Fix $q$ and let $g(p) = \operatorname{kl}(q \,\|\, p) - 2(p - q)^2$. Then $g(q) = 0$ and
+$g'(p) = (p - q)\paren{1/(p(1 - p)) - 4}$. Because $p(1 - p) \le 1/4$, $g'(p)$ has the sign of $p - q$, so $g$ is
+smallest at $p = q$ and $g \ge 0$ everywhere. Every $p$ that satisfies $\operatorname{kl}(q \,\|\, p) \le c$ therefore
+satisfies $2(p - q)^2 \le c$, which is the Hoeffding constraint with $c = \ln(1/\delta)/m$.
+</Derivation>
+
+## Worked example
+
+A classifier makes $k = 50$ errors on $m = 1{,}000$ test examples, a test error of $\hat R_S(h) = 0.05$. Take
+$\delta = 0.05$.
+
+1. **Hoeffding.** The width is $\sqrt{\ln 20/2{,}000} = \sqrt{3.00/2{,}000} = 0.039$, so $R(h) \le 0.089$.
+2. **Relative entropy.** Solving $\operatorname{kl}(0.05 \,\|\, p) = \ln 20/1{,}000 = 0.0030$ gives $p = 0.069$.
+3. **Exact.** Solving $\operatorname{Bin}(50; 1{,}000, p) = 0.05$ gives $p = 0.063$.
+
+The exact bound adds 1.3 percentage points to the test error; Hoeffding's adds 3.9, three times as much. None of the
+three is vacuous: each is a usable statement about the classifier.
+
+With zero errors on the same test set, Hoeffding still gives $0.039$, while the exact bound is
+$1 - 0.05^{1/1{,}000} = 0.0030$, thirteen times smaller.
+
+The sample size needed for a target margin shows the same gap. A margin of $\epsilon = 0.01$ above an observed 5% error
+needs $m \ge \ln 20/(2 \times 0.01^2) = 14{,}979$ test examples by Hoeffding. The exact bound reaches the same margin at
+about $m = 1{,}590$ if the test error stays at 5%, nine times fewer.
+
+For a two-sided 95% interval, the exact (Clopper–Pearson) limits at $k = 50$ are $[0.037, 0.065]$. The two-sided
+Hoeffding interval is $0.05 \pm 0.043 = [0.007, 0.093]$.
+
+## Simulation
+
+<TestSetTails />
+
+## Reporting a test error
+
+- **State the inputs and the method.** Report $m$, $k$ or $\hat R_S(h)$, $\delta$ and which bound was used, for example
+  "50 errors in 1,000 test examples; true error at most 6.3% with confidence 95% (binomial tail inversion)".
+- **Prefer the exact bound.** It costs one root-finding step and is never looser than Hoeffding's.
+- **Pay for every model evaluated.** When $K$ classifiers are scored on the same test set and the best is reported, the
+  bound must hold for all $K$ at once. A <NoteLink to="union-bound">union bound</NoteLink> runs each at confidence
+  $\delta/K$; this is the <NoteLink to="occam-bound">Occam bound</NoteLink> with a uniform prior. With $K = 100$ and
+  $\delta = 0.05$, $\ln(1/\delta) = 3.0$ becomes $\ln(2{,}000) = 7.6$, and the Hoeffding width at $m = 1{,}000$ grows
+  from $0.039$ to $0.062$.
+- **Adaptive reuse breaks the bound.** When the choice of the next model depends on earlier test results, the union
+  bound over a fixed list no longer applies. <NoteLink to="adaptive-data-analysis">Adaptive data analysis</NoteLink>
+  treats that case.
+- **A cross-validation estimate is not a test-set bound.** Each fold's classifier is trained on examples that other
+  folds test on, so the pooled errors are neither independent nor binomial
+  (<NoteLink to="cross-validation">cross-validation</NoteLink>). Only weak general guarantees are known for
+  cross-validation <Cite id="langford2005" />.
+
+## Assumptions
+
+- **Independent test examples** drawn from the distribution on which the classifier will be used.
+- **A classifier fixed before the test sample is seen.** Any choice made after looking at the test sample, such as a
+  <NoteLink to="operating-points-and-equal-error-rate">decision threshold</NoteLink>, is part of the learning and voids
+  the bound.
+- **The 0–1 loss** for the exact binomial bound. For any loss with values in $[0, 1]$, the Hoeffding and
+  relative-entropy bounds still hold <Cite id="hoeffding1963" />.
+
+## Pitfalls
+
+- **The normal approximation fails at small error counts.** The Wald interval
+  $\hat R_S(h) \pm 1.96\sqrt{\hat R_S(h)(1 - \hat R_S(h))/m}$ has width zero when $k = 0$, which claims a perfect
+  classifier. The exact bound gives $1 - \delta^{1/m}$ instead (<NoteLink to="confidence-intervals">confidence
+  intervals</NoteLink>).
+- **The bound is about one classifier, not the algorithm.** It says nothing about the classifier obtained by retraining
+  on the training and test data together.
+- **Distribution shift voids it.** The bound covers the distribution that produced the test sample. Deployment data
+  from another distribution is outside its guarantee.

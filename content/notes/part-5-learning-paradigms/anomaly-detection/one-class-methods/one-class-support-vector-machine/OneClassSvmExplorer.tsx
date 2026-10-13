@@ -83,6 +83,8 @@ export function OneClassSvmExplorer() {
           x: r.contour.x,
           y: r.contour.y,
           emphasis: true,
+          // f = 0 is the colour scale's light midpoint in both themes, so the line is dark in both (ink is white in dark).
+          color: '#0b0b0b',
         },
         {
           name: 'training points',

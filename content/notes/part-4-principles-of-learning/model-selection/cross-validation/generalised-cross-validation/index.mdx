@@ -1,0 +1,187 @@
+---
+title: 'Generalised cross-validation'
+kind: technique
+summary: 'Generalised cross-validation replaces each leverage $S_{ii}$ in the leave-one-out shortcut by the average $\trace\Smat/n$, giving $\frac{1}{n}\sum_i ((y_i - \hat y_i)/(1 - \trace\Smat/n))^2$. It needs only the residuals and the trace, is invariant to rotations of the data, and needs no noise variance.'
+tags: [model-selection, evaluation, regularisation, linear-models, worked-example]
+aliases: [GCV, generalized cross-validation, GCV score, GCV criterion]
+requires: [leave-one-out-cross-validation, effective-degrees-of-freedom]
+related: [ridge-regression, smoothing-splines, smoothing-and-penalised-splines, additive-model-smoothing-parameter-selection, choosing-the-regularisation-strength, mallows-cp-and-covariance-penalties, akaike-information-criterion, cross-validating-a-ridge-penalty]
+references: [golub1979, craven1979, wahba1990, li1987, hastie2009, wood2017, opsomer2001]
+status: draft
+updated: 2026-10-13
+---
+
+import { GcvAgainstLoo } from './GcvAgainstLoo'
+
+<Definition>
+Let $\hat\yvec = \Smat_\lambda\yvec$ be the fitted values of a linear smoother with tuning parameter $\lambda$, and
+$\operatorname{df}(\lambda) = \trace\Smat_\lambda$ its <NoteLink to="effective-degrees-of-freedom">effective degrees of
+freedom</NoteLink>. The **generalised cross-validation** (GCV) criterion is
+
+$$
+\operatorname{GCV}(\lambda) = \frac{1}{n}\sum_{i=1}^n \paren{\frac{y_i - \hat y_i}{1 - \operatorname{df}(\lambda)/n}}^2
+= \frac{n\,\norm{\yvec - \Smat_\lambda\yvec}^2}{\paren{n - \trace\Smat_\lambda}^2}.
+$$
+
+The value of $\lambda$ that minimises it is the GCV choice <Cite id="craven1979" /> <Cite id="golub1979" />.
+</Definition>
+
+## Problem
+
+A penalised fit such as <NoteLink to="ridge-regression">ridge regression</NoteLink> or a
+<NoteLink to="smoothing-splines">smoothing spline</NoteLink> has a penalty $\lambda$ to choose. Its error at each
+$\lambda$ can be estimated by <NoteLink to="leave-one-out-cross-validation">leave-one-out cross-validation</NoteLink>,
+which for a linear smoother needs one fit: $\operatorname{LOO}(\lambda) = \frac1n\sum_i ((y_i - \hat y_i)/(1 -
+S_{ii}))^2$, with $S_{ii}$ the diagonal of $\Smat_\lambda$. Leave-one-out has two weaknesses here.
+
+- **It needs every diagonal entry** of an $n \times n$ matrix, at every candidate $\lambda$. The trace is often cheaper:
+  for ridge regression it is $\sum_j d_j^2/(d_j^2 + \lambda)$ from the singular values $d_j$ of the design, with no
+  $n \times n$ matrix formed.
+- **It depends on the coordinate system of the observations.** Points of high leverage dominate the sum, through the
+  factors $1/(1 - S_{ii})$. Rotating the problem, which changes nothing about the fit, changes the leverages and the
+  leave-one-out score.
+
+GCV answers both. It is a criterion for **selecting** $\lambda$, the chapter's second question, and its minimum is an
+estimate of prediction error with the optimism that every selection carries (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## Mechanism
+
+The derivation starts from the leave-one-out shortcut and changes one thing. Leave-one-out for a linear smoother
+inflates each residual by its own leverage, $y_i - \hat y_i^{-i} = (y_i - \hat y_i)/(1 - S_{ii})$. GCV replaces each
+$S_{ii}$ by the mean leverage $\frac1n\sum_j S_{jj} = \trace\Smat/n$. Every residual is then inflated by the same
+factor, and the criterion becomes
+
+$$
+\operatorname{GCV}(\lambda) = \frac{\operatorname{RSS}(\lambda)/n}{\paren{1 - \operatorname{df}(\lambda)/n}^2},
+$$
+
+with $\operatorname{RSS}(\lambda) = \norm{\yvec - \hat\yvec}^2$ the residual sum of squares. The numerator is the
+training error. The denominator penalises the degrees of freedom used to achieve it. In use, GCV is computed for each
+candidate $\lambda$ from the residuals and the trace, and the minimiser is taken.
+
+**Equality with leave-one-out.** When all the leverages are equal, GCV and leave-one-out coincide. That happens for
+evenly spaced inputs with a smoother that treats every position alike, such as a periodic spline on a regular grid.
+Otherwise GCV weights all residuals equally, where leave-one-out gives more weight to the residuals of high-leverage
+points.
+
+**Rotation invariance.** For ridge regression, rotate the data by an orthogonal $n \times n$ matrix $\Qmat$:
+$\tilde\yvec = \Qmat\yvec$ and $\tilde\Xmat = \Qmat\Xmat$. Then $\tilde\Xmat^\top\tilde\Xmat = \Xmat^\top\Xmat$ and
+$\tilde\Xmat^\top\tilde\yvec = \Xmat^\top\yvec$, so the coefficients are unchanged. The smoother becomes
+$\Qmat\Smat\Qmat^\top$, which has the same trace, and the residual vector becomes $\Qmat(\yvec - \hat\yvec)$, which has
+the same length. GCV is therefore the same for every rotation. Leave-one-out is not, because the diagonal of
+$\Qmat\Smat\Qmat^\top$ differs from that of $\Smat$. GCV is ordinary leave-one-out applied in the rotated coordinate
+system in which all the leverages are equal <Cite id="golub1979" />.
+
+<Derivation title="GCV is leave-one-out after a rotation that equalises the leverages">
+Write the full <Gloss name="svd">singular value decomposition</Gloss> $\Xmat = \Umat\Dmat\Vmat^\top$ with $\Umat$ an
+$n \times n$ orthogonal matrix. The ridge smoother is $\Smat = \Umat\Lambdamat\Umat^\top$, where $\Lambdamat$ is
+diagonal with entries $d_j^2/(d_j^2 + \lambda)$ for the singular values $d_j$ and zeros beyond the rank. Let $\Wmat$ be
+the $n \times n$ unitary discrete Fourier matrix, $W_{jk} = e^{2\pi\mathrm{i}jk/n}/\sqrt n$, and rotate by the unitary
+matrix $\Qmat = \Wmat\Umat^\top$. The rotated smoother is $\tilde\Smat = \Wmat\Lambdamat\Wmat^*$, whose diagonal entries
+are
+
+$$
+\tilde S_{jj} = \sum_k \abs{W_{jk}}^2\Lambda_{kk} = \frac1n\sum_k \Lambda_{kk} = \frac{\trace\Smat}{n},
+$$
+
+since $\abs{W_{jk}}^2 = 1/n$. Every rotated point has the average leverage. The ridge objective in the rotated
+coordinates, $\norm{\tilde\yvec - \tilde\Xmat\betavec}^2 + \lambda\norm{\betavec}^2$, has the same minimiser, so the
+leave-one-out shortcut applies to it. Its leave-one-out score is
+
+$$
+\frac1n\sum_j \frac{\abs{\tilde y_j - \hat{\tilde y}_j}^2}{(1 - \trace\Smat/n)^2}
+= \frac{\norm{\Qmat(\yvec - \hat\yvec)}^2/n}{(1 - \trace\Smat/n)^2}
+= \frac{\norm{\yvec - \hat\yvec}^2/n}{(1 - \trace\Smat/n)^2},
+$$
+
+which is $\operatorname{GCV}(\lambda)$.
+</Derivation>
+
+**The link to covariance penalties.** For $\operatorname{df} \ll n$, $1/(1 - u)^2 \approx 1 + 2u$ with
+$u = \operatorname{df}/n$, so
+
+$$
+\operatorname{GCV}(\lambda) \approx \frac{\operatorname{RSS}}{n}\paren{1 + \frac{2\operatorname{df}}{n}}
+= \frac{\operatorname{RSS}}{n} + \frac{2\operatorname{df}}{n}\cdot\frac{\operatorname{RSS}}{n}.
+$$
+
+This is Mallows' $C_p$, $\operatorname{RSS}/n + 2\operatorname{df}\,\sigma^2/n$, with the noise variance $\sigma^2$
+estimated by $\operatorname{RSS}/n$ (see <NoteLink to="mallows-cp-and-covariance-penalties">Mallows' $C_p$ and
+covariance penalties</NoteLink>). GCV behaves like a risk estimate but needs no separate estimate of $\sigma^2$, which
+makes it usable when $n - p$ is small or $p > n$ <Cite id="golub1979" />. The same expansion relates it to
+<Gloss name="aic" /> <Cite id="hastie2009" />.
+
+**Optimality.** Under conditions on the family of smoothers, the GCV choice of $\lambda$ is asymptotically optimal: the
+prediction loss at the chosen $\lambda$, divided by the smallest loss over all $\lambda$, tends to one in probability
+<Cite id="li1987" />. Craven and Wahba showed the same for smoothing splines <Cite id="craven1979" />
+<Cite id="wahba1990" />.
+
+<GcvAgainstLoo />
+
+## Worked example
+
+Fit $y = (1, 3, 2, 5, 4)$ at $x = (0, 1, 2, 3, 4)$ by ridge regression on the slope, with the intercept unpenalised.
+Centre the data: $x_i - \bar x = (-2, -1, 0, 1, 2)$, with $\sum_i (x_i - \bar x)^2 = 10$, and
+$\sum_i (x_i - \bar x)(y_i - \bar y) = 8$ with $\bar y = 3$.
+
+1. **The fit.** The penalised slope is $b(\lambda) = 8/(10 + \lambda)$ and the fitted values are
+   $\hat y_i = 3 + b(\lambda)(x_i - 2)$.
+2. **The smoother.** $\Smat_\lambda = \frac15\ones\ones^\top + \frac{1}{10 + \lambda}\uvec\uvec^\top$ with
+   $\uvec = (-2, -1, 0, 1, 2)$. Its leverages are $S_{ii} = 0.2 + (x_i - 2)^2/(10 + \lambda)$ and its trace is
+   $\operatorname{df}(\lambda) = 1 + 10/(10 + \lambda)$: one for the intercept and a shrunk share for the slope.
+3. **At $\lambda = 2$.** The slope is $0.667$ and the residuals are $(-0.67, 0.67, -1.00, 1.33, -0.33)$, with
+   $\operatorname{RSS} = 3.78$. The degrees of freedom are $1.83$, so
+   $\operatorname{GCV} = (3.78/5)/(1 - 1.83/5)^2 = 0.756/0.401 = 1.88$.
+4. **Leave-one-out at $\lambda = 2$.** The leverages are $(0.53, 0.28, 0.20, 0.28, 0.53)$. Dividing each residual by
+   $1 - S_{ii}$ gives $(-1.43, 0.93, -1.25, 1.86, -0.71)$, and their mean square is $1.69$.
+
+The same computation over a range of penalties:
+
+| $\lambda$ | 0 | 1 | 2 | 5 | 10 |
+| --- | --- | --- | --- | --- | --- |
+| slope $b(\lambda)$ | 0.80 | 0.73 | 0.67 | 0.53 | 0.40 |
+| $\operatorname{df}(\lambda)$ | 2.00 | 1.91 | 1.83 | 1.67 | 1.50 |
+| $\operatorname{RSS}(\lambda)$ | 3.60 | 3.65 | 3.78 | 4.31 | 5.20 |
+| $\operatorname{GCV}(\lambda)$ | 2.00 | 1.91 | 1.88 | 1.94 | 2.12 |
+| $\operatorname{LOO}(\lambda)$ | 1.81 | 1.70 | 1.69 | 1.83 | 2.10 |
+
+GCV is smallest near $\lambda = 2.3$ and leave-one-out near $\lambda = 1.6$. The two disagree because the end points
+carry leverage $0.2 + 4/(10 + \lambda)$, two to three times the middle point's 0.2 for $\lambda$ between 10 and 0.
+Leave-one-out inflates their residuals by up to $1/(1 - 0.6) = 2.5$; GCV inflates every residual by $1/(1 - 0.4) = 1.67$
+at $\lambda = 0$. As the penalty grows the leverages even out and the two criteria converge: at $\lambda = 10$ they
+differ by 1%.
+
+## Cost
+
+One fit and one trace per candidate $\lambda$. For ridge regression one singular value decomposition of the design,
+$O(np^2)$ for $n \ge p$, gives the residuals and the trace at every $\lambda$ in $O(np)$ each. For smoothing splines and
+P-splines the trace comes from banded linear algebra.
+
+## Trade-offs
+
+- **Against leave-one-out.** GCV is less sensitive to a few high-leverage points and needs only the trace. Where
+  leverages vary strongly it is a different criterion, not an approximation, and the two can choose different
+  penalties, as in the worked example.
+- **Against $C_p$ and SURE.** GCV needs no estimate of the noise variance. $C_p$ and
+  <NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink> are unbiased for the risk when
+  $\sigma^2$ is known, and GCV only approximately so.
+- **Against marginal likelihood.** For smoothing parameters of additive models, restricted maximum likelihood is
+  often preferred because its criterion is smoother and less prone to undersmoothing (see
+  <NoteLink to="additive-model-smoothing-parameter-selection">additive-model smoothing-parameter selection</NoteLink>)
+  <Cite id="wood2017" />.
+- **Only for linear smoothers** in this form. Generalised linear and additive models use a version with the deviance in
+  place of the residual sum of squares <Cite id="wood2017" />.
+
+## Pitfalls
+
+- **Undersmoothing on small samples.** The GCV curve can be flat or can have its minimum at a very small penalty,
+  where the fit nearly interpolates and $\operatorname{df}$ approaches $n$. Inflating the degrees of freedom in the
+  denominator by a factor $\gamma$ of about 1.4 is a common guard <Cite id="wood2017" />.
+- **Correlated errors.** Positively autocorrelated noise looks like signal to the smoother. GCV and leave-one-out
+  assume independent errors, and under correlation they break down, typically choosing too small a penalty
+  <Cite id="opsomer2001" />.
+- **Reporting the minimum as the prediction error.** The smallest GCV value over a grid is optimistic for the chosen
+  penalty.
+- **Selecting several smoothing parameters** by GCV over a fine grid in many dimensions overfits the criterion; the same
+  caution applies as for any search (see <NoteLink to="hyperparameter-search">hyperparameter optimisation</NoteLink>).

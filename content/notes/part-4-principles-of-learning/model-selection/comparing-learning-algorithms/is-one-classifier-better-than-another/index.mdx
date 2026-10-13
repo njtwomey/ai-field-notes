@@ -1,0 +1,127 @@
+---
+title: 'Is one classifier better than another?'
+kind: example
+summary: 'Two equally good classifiers compared on one 200-row data set by McNemar''s test, the paired t-test on 10-fold and on 10×10-fold cross-validation, the corrected resampled t-test and the 5×2cv tests: only the naive 10×10 test declares a difference, and the example shows why.'
+tags: [model-selection, worked-example, hypothesis-testing, evaluation]
+aliases: []
+requires: [mcnemars-test, corrected-resampled-t-test, five-by-two-cross-validation-test]
+related: [comparing-learning-algorithms, bayesian-comparison-of-classifiers, variance-of-cross-validation-estimates, repeated-and-monte-carlo-cross-validation, variance-in-machine-learning-benchmarks]
+references: [dietterich1998, nadeau2003, alpaydin1999, bouckaert2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { AllTests } from './AllTests'
+import { TypeIErrorRates } from '../_shared/TypeIErrorRates'
+
+<Definition>
+A data set has $n = 200$ rows. Each row has two standard-normal inputs $(x_1, x_2)$ and a label $y = 1$ when
+$\sqrt{x_1^2 + x_2^2} + 0.3\varepsilon > 1.18$, with $\varepsilon$ standard normal, and $y = 0$ otherwise. Learner A is
+a <NoteLink to="decision-tree">decision tree</NoteLink> of depth 4 trained on $(x_1, x_2)$. Learner B is the same tree
+trained on the inputs rotated by 45°, $\paren{(x_1 - x_2)/\sqrt2,\ (x_1 + x_2)/\sqrt2}$. Using these 200 rows, decide
+whether A is more accurate than B at the 5% level with each of: <NoteLink to="mcnemars-test">McNemar's test</NoteLink>
+on a hold-out third, the <NoteLink to="paired-t-test">paired t-test</NoteLink> on 10-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink>, the paired t-test on 10 repeats of 10-fold
+cross-validation, the corrected resampled t-test on the same 10 repeats, and the 5×2 cross-validation t and F tests.
+</Definition>
+
+## Setup
+
+- **The truth.** The class boundary is a circle, and a circle looks the same after any rotation. The rotated inputs have
+  the same joint distribution with $y$ as the original ones, so B trained on a random sample faces exactly the problem A
+  faces. Their expected accuracies are equal at every training size. The null hypothesis of every test holds, and any
+  rejection is a <Gloss name="fp">false positive</Gloss>.
+- **On this sample.** A fixed sample can still suit one learner. Fitted to all 200 rows and scored on 2000 fresh rows, A
+  is less accurate than B by 0.0005: nothing.
+- **What each test sees.** Every score below is accuracy, and every difference is A's accuracy minus B's, with both
+  learners trained and tested on the same rows.
+
+## Solution
+
+1. **McNemar's test.** Train both on a random two thirds (133 rows) and score both on the other 67. Both are right on 50
+   rows and both wrong on 9; only A is right on $b = 5$ and only B on $c = 3$. Under the null, $b \sim \Binom(8,
+   1/2)$, and the exact two-sided p-value is $0.73$. No difference.
+2. **Paired t-test on 10-fold cross-validation.** The ten fold differences have mean $-0.010$ and standard deviation
+   $0.070$. Then $t = -0.010/(0.070/\sqrt{10}) = -0.45$ on 9 degrees of freedom, $p = 0.66$. No difference. Dietterich
+   found this test rejects up to twice as often as it should <Cite id="dietterich1998" />, but here it does not.
+3. **Paired t-test on 10 repeats of 10-fold.** Ten repeats give 100 fold differences, with mean $\bar d = 0.029$ and
+   standard deviation $\hat\sigma = 0.0916$. Treating them as independent, $t = 0.029/(0.0916/10) = 3.17$ on 99 degrees
+   of freedom, $p = 0.002$. **A is declared better.**
+4. **Corrected resampled t-test on the same 100 differences.** Each fold trains on $n_1 = 180$ rows and tests on $n_2 =
+   20$, so the variance factor is $1/100 + 20/180 = 0.121$ instead of $0.01$ <Cite id="nadeau2003" />. Then $t = 0.029
+   /(0.0916\sqrt{0.121}) = 0.91$, $p = 0.37$. No difference.
+5. **5×2 cross-validation t-test.** Five replications of 2-fold cross-validation give the differences (0.03, 0.10),
+   (0.00, 0.04), (−0.01, −0.08), (0.03, 0.03) and (0.07, 0.05). The pooled variance $\frac15\sum_i s_i^2 = 0.00118$, and
+   $\tilde t = 0.03/\sqrt{0.00118} = 0.87$ on 5 degrees of freedom, $p = 0.42$. No difference.
+6. **Combined F test.** $f = 0.0282/(2 \times 0.0059) = 2.39$ against $F(10, 5)$, $p = 0.17$ <Cite id="alpaydin1999" />.
+   No difference.
+
+Five tests find nothing and one declares A better. The one is the test with the most data behind it: 100 fits of each
+learner.
+
+## Why they disagree
+
+**The 100 differences are not 100 measurements.** All of them come from the same 200 rows. Two folds from different
+repeats share most of their training rows, and the test rows of one fold are in the training sets of the others. If the
+200 rows happen to suit A, every one of the 100 differences leans towards A together. Averaging them converges on what
+this one sample says, here $+0.029$, and not on the population difference, 0. The first repeat alone gave $-0.010$. The
+repeats differ because of the partition, and their average removes that noise, but the sample's own lean remains.
+
+**The naive test divides by the wrong number.** It estimates the <NoteLink to="standard-error">standard error</NoteLink>
+of $\bar d$ as $\hat\sigma/\sqrt{100}$, as if each difference brought new information. With the differences correlated
+at about $\rho$, the variance of their mean is $\sigma^2(\rho + (1 - \rho)/J)$, which stops falling once $J$ passes
+$1/\rho$. The naive standard error, 0.009, is under a third of the corrected one, 0.032. The corrected test's factor
+$n_2/n_1$ stands in for the correlation it cannot estimate from the folds (see
+<NoteLink to="corrected-resampled-t-test">corrected resampled t-test</NoteLink>).
+
+**The other tests avoid the trap differently.**
+
+- McNemar's test uses one training set and asks only whether these two fitted models differ on the hold-out rows.
+- The 5×2 tests estimate the variance from the disagreement between the two halves of each replication, whose training
+  sets do not overlap (see <NoteLink to="five-by-two-cross-validation-test">5×2 cross-validation test</NoteLink>).
+- The paired t-test on one 10-fold run has the same flaw as the naive test but only ten differences, so the error is
+  smaller.
+
+## Simulation
+
+<AllTests />
+
+The figure reruns the six tests on simulated data sets. The default is the data set of the solution. With no noise on
+B's inputs, stepping through data sets shows the naive 10×10 test rejecting on most of them and the others rarely.
+
+<TypeIErrorRates highlight={['resampledT', 'corrected', 'fiveByTwoT', 'combinedF', 'mcnemar']} />
+
+Over many data sets the rejection rates measure each test's level. At the default 100 rows, the naive test on 10 repeats
+of 10-fold cross-validation rejects on about 60% of data sets where the learners are equal; the corrected test, the
+5×2 tests and McNemar's test stay near or below 5%. Adding noise to B's inputs makes B worse, and the same bars then
+measure power: the corrected 10×10 test finds the difference most often among the tests that hold their level.
+
+## What it illustrates
+
+- **Correlated resamples.** Folds of the same data share information, so their errors move together and the naive
+  standard error is too small; see <NoteLink to="variance-of-cross-validation-estimates">variance of
+  cross-validation estimates</NoteLink>.
+- **Repetition does not add data.** Repeating cross-validation steadies the estimate for this data set but cannot reduce
+  the uncertainty that comes from the data set itself; see <NoteLink to="repeated-and-monte-carlo-cross-validation">
+  repeated and Monte Carlo cross-validation</NoteLink>.
+- **Which question each test answers.** McNemar's test compares two fitted models; the resampled tests compare learning
+  algorithms at a training size; see <NoteLink to="comparing-learning-algorithms">comparing learning
+  algorithms</NoteLink>.
+- **Replicable verdicts.** The corrected 10×10 test changes its verdict least when the data are re-partitioned
+  <Cite id="bouckaert2004" />. The <NoteLink to="bayesian-comparison-of-classifiers">Bayesian correlated
+  t-test</NoteLink> on the same differences gives probabilities 0.11, 0.16 and 0.72 that B is practically better, that
+  they are equivalent within one point of accuracy, or that A is practically better: no decision.
+
+## Variations
+
+- **A real difference.** With noise of standard deviation 0.6 added to B's inputs and 100 rows, B is about 15 points
+  less accurate. The corrected test then rejects on about 60% of data sets, the combined F test on about 40% and
+  McNemar's test on about a fifth. The naive test rejects on nearly all, and its false rejections under the null are
+  hidden among true ones, which is why its flaw is easy to miss.
+- **More rows.** At larger $n$ each fold's test set is larger and the fold differences are less noisy, but the naive
+  test's level stays far above 5%, because the ratio of its standard error to the true one depends on $\rho$ and $J$,
+  not on $n$: at 300 rows it rejects on about 63% of data sets. The corrected test drifts a little above its level,
+  to about 9%, the liberal side that Nadeau and Bengio predict for unstable learners such as trees.
+- **Fewer repeats.** The second panel of the figure in <NoteLink to="corrected-resampled-t-test">corrected resampled
+  t-test</NoteLink> shows the naive test's false-rejection rate growing with each repeat, from about 8% with one 10-fold
+  run to about 60% with ten.

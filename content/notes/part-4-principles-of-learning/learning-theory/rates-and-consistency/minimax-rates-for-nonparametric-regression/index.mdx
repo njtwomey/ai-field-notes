@@ -1,0 +1,204 @@
+---
+title: 'Minimax rates for nonparametric regression'
+kind: concept
+summary: 'For regression functions with smoothness $s$ on $[0, 1]^d$, the best achievable mean squared error from $m$ noisy samples falls as $m^{-2s/(2s+d)}$. Local averaging attains the rate, and a hypercube of bumps shows nothing does better: the curse of dimensionality made exact.'
+tags: [learning-theory, rates, nonparametric, worked-example]
+aliases: [optimal rates of convergence for nonparametric regression, Stone's optimal rates, nonparametric minimax rate, Hölder class]
+requires: [minimax-lower-bounds, kernel-density-estimation]
+related: [local-regression, curse-of-dimensionality-for-neighbours, nearest-neighbour-consistency, local-rademacher-complexity, bias-variance-decomposition, consistency-of-learning-algorithms, generalised-additive-model, k-nearest-neighbours, rates-and-consistency]
+references: [stone1982, tsybakov2009, gyorfi2002, wainwright2019, kpotufe2011]
+status: draft
+updated: 2026-10-12
+---
+
+import { KnnRates } from './KnnRates'
+
+<Definition>
+In nonparametric regression, $m$ pairs are drawn with $\xvec_i \in [0, 1]^d$ and $y_i = f(\xvec_i) + \varepsilon_i$,
+where the noise $\varepsilon_i$ has mean zero and variance $\sigma^2$, and $f$ is known only to lie in a smoothness
+class. For the **Hölder class** $\Sigma(s, L)$ of functions with smoothness $s > 0$ and constant $L$, the minimax
+<Gloss name="mse">mean squared error</Gloss> is of order
+
+$$
+\inf_{\hat f}\ \sup_{f \in \Sigma(s, L)}\ \expect\norm{\hat f - f}_{L_2}^2 \asymp m^{-2s/(2s + d)},
+$$
+
+where the infimum runs over all estimators <Cite id="stone1982" />. Local averaging with a well-chosen bandwidth
+attains the rate, and no estimator beats it on every function of the class.
+</Definition>
+
+## Intuition
+
+A nonparametric estimate of $f(\xvec)$ averages the labels of training points near $\xvec$. The size $h$ of the
+neighbourhood sets two errors that move in opposite directions.
+
+- **Bias.** Points within distance $h$ have $f$ values that differ from $f(\xvec)$ by up to $Lh^s$ when $f$ has
+  smoothness $s \le 1$. The squared bias is of order $L^2h^{2s}$.
+- **Variance.** A neighbourhood of side $h$ in $d$ dimensions holds about $mh^d$ points. Their average label has noise
+  variance $\sigma^2/(mh^d)$.
+
+Shrinking $h$ cuts the bias and raises the variance. Balancing $h^{2s}$ against $1/(mh^d)$ gives
+$h \asymp m^{-1/(2s + d)}$ and an error of order $m^{-2s/(2s + d)}$. The dimension enters only through the variance:
+a neighbourhood of fixed side holds a fraction $h^d$ of the data, which vanishes quickly as $d$ grows. This is the
+<NoteLink to="curse-of-dimensionality-for-neighbours">curse of dimensionality</NoteLink> as a rate.
+
+The rate is also a floor. A <NoteLink to="minimax-lower-bounds">minimax lower bound</NoteLink> builds many functions in
+the class that differ only in small bumps, each bump too small for the data to detect. No estimator can tell which
+bumps are present, and the bumps it misses cost exactly $m^{-2s/(2s + d)}$.
+
+<KnnRates />
+
+## Smoothness classes
+
+For $0 < s \le 1$, the **Hölder class** $\Sigma(s, L)$ on $[0, 1]^d$ holds the functions with
+
+$$
+\abs{f(\xvec) - f(\xvec')} \le L\norm{\xvec - \xvec'}^s \quad\text{for all } \xvec, \xvec'.
+$$
+
+$s = 1$ is the Lipschitz class. For $s > 1$, write $s = k + \beta$ with an integer $k$ and $0 < \beta \le 1$; then
+$\Sigma(s, L)$ requires every partial derivative of order $k$ to be in $\Sigma(\beta, L)$ <Cite id="tsybakov2009" />.
+Larger $s$ means a smoother function, which data at a distance can predict more accurately. Sobolev classes, which
+bound the $L_2$ norm of derivatives instead of their pointwise variation, give the same rates.
+
+The rate depends on the error measure. For the squared $L_2$ norm it is $m^{-2s/(2s + d)}$; for the sup norm it is
+$(m/\ln m)^{-s/(2s + d)}$, slower by a logarithm <Cite id="stone1982" />.
+
+## The upper bound
+
+The **partitioning estimator** is the simplest local average. Divide $[0, 1]^d$ into $h^{-d}$ cubes of side $h$, and
+predict at $\xvec$ the mean label of the training points in the cube $A(\xvec)$ that contains it, or 0 if the cube is
+empty. Take $\xvec$ uniform on $[0, 1]^d$, $f \in \Sigma(s, L)$ with $s \le 1$, and $\abs{f} \le F$. The derivation
+splits the error at $\xvec$ into three parts <Cite id="gyorfi2002" />.
+
+1. **Bias.** Given that the cube is not empty, the estimate's mean is the average of $f$ over the training points in
+   it. Each lies within the cube's diameter $\sqrt d\,h$ of $\xvec$, so the bias is at most $L(\sqrt d\,h)^s$ and the
+   squared bias at most $L^2d^sh^{2s}$.
+2. **Variance.** Given $N$ points in the cube, the estimate averages $N$ independent noises and has variance
+   $\sigma^2/N$. $N$ is binomial with $m$ trials and success probability $h^d$, and
+   $\expect[\indicator[N > 0]/N] \le 2/(mh^d)$, so the variance term is at most $2\sigma^2/(mh^d)$.
+3. **Empty cubes.** A cube is empty with probability $(1 - h^d)^m \le e^{-mh^d} \le 1/(emh^d)$, and an empty cube
+   costs at most $F^2$.
+
+Adding the three parts,
+
+$$
+\expect\norm{\hat f - f}^2 \le L^2d^s h^{2s} + \frac{2\sigma^2 + F^2/e}{mh^d}.
+$$
+
+The first term increases with $h$ and the second decreases. Setting the
+<NoteLink to="derivative">derivative</NoteLink> to zero gives
+
+$$
+\begin{aligned}
+h^* &= \paren{\frac{d\,C}{2s\,A\,m}}^{1/(2s + d)}, \\
+\expect\norm{\hat f - f}^2 &\le \paren{1 + \frac{2s}{d}}A^{d/(2s + d)}\paren{\frac{d\,C}{2s\,m}}^{2s/(2s + d)},
+\end{aligned}
+$$
+
+with $A = L^2d^s$ and $C = 2\sigma^2 + F^2/e$. The rate is $m^{-2s/(2s + d)}$.
+
+**Beyond $s = 1$.** A local average fits a constant in each neighbourhood. However smooth $f$ is, its bias falls no
+faster than $h^2$ in the interior of the domain, and only like $h$ near the boundary. To exploit larger $s$, fit a
+polynomial of degree $\lfloor s\rfloor$ in each neighbourhood (<NoteLink to="local-regression">local polynomial
+regression</NoteLink>). Its bias is of order $h^s$, and the same balance gives the rate $m^{-2s/(2s + d)}$
+<Cite id="tsybakov2009" />. <NoteLink to="kernel-ridge-regression">Kernel ridge regression</NoteLink> and
+<NoteLink to="smoothing-splines">smoothing splines</NoteLink> reach the same rate through a penalty instead of a
+bandwidth; the <NoteLink to="local-rademacher-complexity">local Rademacher complexity</NoteLink> of a kernel class with
+eigenvalues $j^{-2s}$ gives $m^{-2s/(2s + 1)}$ in one dimension <Cite id="wainwright2019" />.
+
+## The lower bound
+
+The lower bound uses <NoteLink to="minimax-lower-bounds">Assouad's lemma</NoteLink> on a hypercube of bumpy functions
+<Cite id="tsybakov2009" />. Take $s \le 1$ for concreteness.
+
+1. **Bumps.** Divide $[0, 1]^d$ into $K = h^{-d}$ cubes of side $h$ with centres $\mathbf c_j$. Let $\phi$ be a bump
+   supported on the unit cube centred at 0, vanishing on its boundary, with $\phi \in \Sigma(s, 1)$. For
+   $\omega \in \set{0, 1}^K$ let
+
+   $$
+   f_\omega(\xvec) = \sum_{j=1}^K \omega_j\,Lh^s\,\phi\paren{\frac{\xvec - \mathbf c_j}{h}}.
+   $$
+
+   Each $f_\omega$ is in $\Sigma(s, L)$: the bumps have disjoint supports, vanish where they meet, and scaling by $h$
+   in the argument and $h^s$ in height keeps the Hölder constant at $L$.
+2. **Separation.** Switching bump $j$ changes $f$ only on cube $j$, by $L^2h^{2s}h^d\norm{\phi}_2^2$ in squared
+   $L_2$ norm. For any estimate $\hat f$, let $\hat\omega_j$ indicate which of the two versions of cube $j$ is closer
+   to $\hat f$. If $\hat\omega_j \ne \omega_j$, the triangle inequality gives
+   $\int_{\text{cube } j}(\hat f - f_\omega)^2 \ge \frac14L^2h^{2s + d}\norm{\phi}_2^2$. Summing over cubes,
+   $\norm{\hat f - f_\omega}^2 \ge \frac14L^2h^{2s + d}\norm{\phi}_2^2\,\rho_H(\hat\omega, \omega)$.
+3. **Closeness.** Neighbouring $\omega$ and $\omega'$ differ in one bump. With Gaussian noise, the sample's
+   <NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> is
+   $m\,\expect[(f_\omega - f_{\omega'})^2]/(2\sigma^2) = mL^2h^{2s + d}\norm{\phi}_2^2/(2\sigma^2)$. Choosing
+   $h^{2s + d} = \sigma^2/(mL^2\norm{\phi}_2^2)$ makes it $\frac12$, and Pinsker's inequality gives total variation at
+   most $\frac12$.
+4. **Assouad.** The expected Hamming distance is at least $\frac K2(1 - \frac12) = K/4$ for some $\omega$. Hence
+
+   $$
+   \sup_\omega\expect\norm{\hat f - f_\omega}^2 \ge \frac14L^2h^{2s + d}\norm{\phi}_2^2 \cdot \frac{h^{-d}}{4}
+   = \frac{L^2\norm{\phi}_2^2}{16}\,h^{2s} \asymp m^{-2s/(2s + d)}.
+   $$
+
+Many bumps ($h$ small) mean many coordinates to get wrong, but each is
+cheap. Few bumps mean each is costly but detectable. The balance point is the same $h \asymp m^{-1/(2s + d)}$ that the
+upper bound chose.
+
+## Worked example
+
+**One dimension.** Take $d = 1$, $s = 1$, $L = 1$, $\sigma = 0.5$ and $\abs f \le 1$, so $A = 1$ and
+$C = 2(0.25) + 1/e = 0.868$.
+
+1. **The bound at $m = 1{,}000$.** $h^* = (0.868/2{,}000)^{1/3} = 0.076$, about 13 cells. The bound is
+   $3 \times 0.076^2 = 0.017$.
+2. **The measurement.** In the figure, $k$-NN with $k \approx m^{2/3}$ on the sine target has
+   <NoteLink to="empirical-risk-minimisation">excess risk</NoteLink> 0.011 at $m = 640$, below the bound at
+   $m = 1{,}000$. The bound holds for every Lipschitz function, the sine is smoother than that, and $k$-NN adapts its
+   neighbourhoods to the data; all three make it conservative.
+3. **Sample size.** The bound falls as $m^{-2/3}$. It reaches 0.001 at $m \approx 71{,}000$.
+4. **The lower bound.** With the tent bump $\phi(u) = (\frac12 - \abs u)_+$, $\norm{\phi}_2^2 = \frac1{12}$, and
+   $h^3 = 12\sigma^2/m = 0.003$ at $m = 1{,}000$, so $h = 0.144$. The bound is $h^2/192 = 1.1 \times 10^{-4}$. Upper
+   and lower bounds differ by a factor of 160 in constants and agree in the exponent $-2/3$.
+
+**Ten dimensions.** The same constants with $d = 10$ give $A = 10$ and an upper bound of 3.3 at $m = 1{,}000$ and 1.0
+at $m = 10^6$, both vacuous, since predicting 0 has error at most 1. The bound reaches 0.1 only at $m \approx 1.3
+\times 10^{12}$. The rate exponent $2/12$ means that each tenfold improvement costs a millionfold more data.
+
+**The exponent across dimensions.** The factor by which $m$ must grow to cut the error tenfold is $10^{(2s + d)/2s}$:
+
+| $d$ | Exponent, $s = 1$ | Factor, $s = 1$ | Exponent, $s = 2$ | Factor, $s = 2$ |
+| --- | --- | --- | --- | --- |
+| 1 | 0.67 | 32 | 0.80 | 18 |
+| 2 | 0.50 | 100 | 0.67 | 32 |
+| 5 | 0.29 | 3,200 | 0.44 | 180 |
+| 10 | 0.17 | $10^6$ | 0.29 | 3,200 |
+| 100 | 0.02 | $10^{51}$ | 0.04 | $10^{26}$ |
+
+A parametric model with a fixed number of parameters has exponent 1 and factor 10 in every dimension.
+
+## Escaping the curse
+
+The rate is a worst case over the whole class. Methods that work in high dimensions assume more structure than
+smoothness, and the minimax rate over the smaller class is faster.
+
+- **More smoothness.** The exponent $2s/(2s + d)$ approaches 1 as $s$ grows relative to $d$. Smoothness $s = d$ gives
+  the rate $m^{-2/3}$ in every dimension.
+- **Additive structure.** If $f(\xvec) = \sum_j f_j(x_j)$, each component is a one-dimensional problem, and the rate
+  is the one-dimensional $m^{-2s/(2s + 1)}$ (see <NoteLink to="generalised-additive-model">generalised additive
+  models</NoteLink>).
+- **Low intrinsic dimension.** If the inputs lie near a manifold of dimension $d_0 < d$, $k$-NN regression adapts and
+  attains rates governed by $d_0$ without knowing it <Cite id="kpotufe2011" />.
+
+## Pitfalls
+
+- **The rate is an exponent, not a prediction.** Two estimators with the same rate can differ by large constants,
+  and the minimax bound holds for the worst function in the class, not the one at hand.
+- **The bandwidth depends on the smoothness.** The optimal $h$ involves $s$, which is unknown. Choosing $h$ from the
+  data, by <NoteLink to="cross-validation">cross-validation</NoteLink> or by splitting the sample, adapts to the
+  unknown smoothness <Cite id="gyorfi2002" />.
+- **A local constant fit caps the rate.** Local averaging and $k$-NN reach the optimal rate for $s \le 1$. For
+  smoother $f$, their boundary bias of order $h$, and interior bias of order $h^2$ at best, keep them below it.
+- **The derivations assume a bounded input density and finite noise variance.** Without a lower bound on the density,
+  regions with few points have their own, slower rate.
+
+{/* figure pending engine (C1 nonparametricRates): Nadaraya–Watson or partitioning regression of an s-Hölder target
+in dimension d = 1, 2, 5, risk against m on log–log axes with the minimax slopes −2s/(2s + d) beside it */}

@@ -1,0 +1,205 @@
+---
+title: 'Sequential model-based algorithm configuration'
+kind: technique
+summary: 'SMAC is Bayesian optimisation with a random-forest surrogate: the mean and variance of the trees'' predictions stand in for a posterior, and expected improvement picks each next configuration. Forests handle categorical and conditional hyperparameters and thousands of evaluations.'
+tags: [model-selection, hyperparameters, bayesian, optimisation, worked-example]
+aliases: [SMAC3, random-forest surrogate, random-forest Bayesian optimisation, algorithm configuration, random online aggressive racing]
+requires: [bayesian-optimisation, random-forest, expected-improvement]
+related: [tree-structured-parzen-estimator, automated-machine-learning, hyperparameter-search-spaces, gaussian-process, bagging, bayesian-optimisation-and-hyperband, overfitting-in-model-selection, log-normal-distribution]
+references: [hutter2011smac, lindauer2022smac3, breiman2001, jones1998, snoek2012, hutter2019automl, feurer2015autosklearn]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Sequential model-based algorithm configuration** (SMAC) is <NoteLink to="bayesian-optimisation">Bayesian
+optimisation</NoteLink> with a <Gloss name="random-forest">random forest</Gloss> as the surrogate
+<Cite id="hutter2011smac" />. After $t$ evaluations of an objective $f(\lambdavec)$, such as a validation loss or a
+solver's runtime, it fits $B$ regression trees $T_1, \dots, T_B$ to the configurations and their costs. The forest's
+prediction at a configuration $\lambdavec$ is the mean $\mu_t(\lambdavec)$ of the trees' predictions, and its
+uncertainty is their variance $\sigma_t^2(\lambdavec)$. SMAC evaluates next the configuration with the largest
+<NoteLink to="expected-improvement">expected improvement</NoteLink> under $\Gauss(\mu_t, \sigma_t^2)$, alternating
+model-chosen configurations with random ones.
+</Definition>
+
+## Problem
+
+A <Gloss name="gp">Gaussian process</Gloss> is the default surrogate of Bayesian optimisation, and it fits three
+features of many tuning problems badly.
+
+- **Categorical and conditional hyperparameters.** A kernel measures distance between configurations. The distance
+  between the optimisers "Adam" and "<Gloss name="sgd" />" has no natural value. A conditional hyperparameter, such as
+  the momentum of SGD, has no value at all when Adam is chosen. Such spaces arise whenever a search chooses among
+  algorithms, which is the CASH problem of <NoteLink to="automated-machine-learning">automated machine
+  learning</NoteLink> (see <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink>).
+- **Many evaluations.** Exact GP regression costs $O(t^3)$ time to fit $t$ evaluations. Algorithm configuration runs a
+  solver thousands of times, and a cubic cost per step then dominates the search.
+- **Irregular costs.** Runtimes are heavy-tailed and change abruptly when a parameter switches a solver's strategy. A
+  stationary kernel assumes the same smoothness everywhere.
+
+SMAC was built for the configuration of combinatorial solvers, such as the 76 parameters of the CPLEX
+mixed-integer programming solver, over sets of problem instances <Cite id="hutter2011smac" />. Machine learning uses it
+for the same reasons: auto-sklearn tunes whole scikit-learn pipelines with it <Cite id="feurer2015autosklearn" />.
+
+## Mechanism
+
+SMAC keeps the loop of <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> and changes the surrogate,
+the acquisition's arithmetic, the inner search and the bookkeeping of noisy costs.
+
+### The forest as a surrogate
+
+Each of the $B$ trees is a regression tree grown on a <NoteLink to="bootstrap">bootstrap</NoteLink> resample of the $t$
+evaluations, as in <NoteLink to="bagging">bagging</NoteLink>. At every split a tree considers a random fraction $p$ of
+the hyperparameters, as in a <NoteLink to="random-forest">random forest</NoteLink> <Cite id="breiman2001" />. The
+original SMAC used $B = 10$, $p = 5/6$ and stopped splitting nodes with fewer than 10 points
+<Cite id="hutter2011smac" />. The forest predicts with the empirical mean and variance over trees,
+
+$$
+\mu_t(\lambdavec) = \frac{1}{B}\sum_{b=1}^{B} T_b(\lambdavec), \qquad
+\sigma_t^2(\lambdavec) = \frac{1}{B}\sum_{b=1}^{B} \paren{T_b(\lambdavec) - \mu_t(\lambdavec)}^2,
+$$
+
+where $T_b(\lambdavec)$ is the mean cost in the leaf of tree $b$ that contains $\lambdavec$.
+
+The variance stands in for posterior uncertainty. Near many evaluations every bootstrap sample contains similar points,
+the trees grow similar leaves, and their predictions agree. In a sparsely evaluated region the trees' splits depend on
+which few points each bootstrap sample drew, so the trees disagree and $\sigma_t$ is large. The variance is not a
+Bayesian posterior: nothing makes it calibrated, and it measures disagreement among trees rather than distance from
+the data.
+
+### Categorical and conditional hyperparameters
+
+A tree splits a categorical hyperparameter by sending some categories left and the rest right, so categories need no
+distance. A conditional hyperparameter needs a value even when inactive. One encoding gives every inactive
+hyperparameter a fixed placeholder value outside its range. A split on the parent hyperparameter (the optimiser, say)
+then separates the subspaces, and splits on the child (the momentum) fall only where the child is active. SMAC3 models
+spaces with several levels of conditions this way <Cite id="lindauer2022smac3" />.
+
+### Expected improvement on a log scale
+
+SMAC treats the forest's output as Gaussian and scores candidates by <NoteLink to="expected-improvement">expected
+improvement</NoteLink> over the incumbent $f^\star_t$. For a validation loss this is the usual closed form. For
+runtimes SMAC fits the forest to log costs, $o_i = \ln f(\lambdavec_i)$, because log runtimes are far easier to predict
+<Cite id="hutter2011smac" />. The forest then gives a Gaussian for $\ln f(\lambdavec)$, which makes $f(\lambdavec)$
+<NoteLink to="log-normal-distribution">log-normal</NoteLink>. The improvement that matters is in seconds, not log
+seconds, so SMAC computes the expected improvement of the cost itself.
+
+Fix a candidate and write $Y = \ln f(\lambdavec) \sim \Gauss(\mu, \sigma^2)$. The improvement is
+$\max(f^\star - e^{Y}, 0)$, positive exactly when $Y < c$ with $c = \ln f^\star$. Its expectation splits into two
+integrals over $y < c$, with $\varphi_{\mu,\sigma}$ the density of $Y$:
+
+$$
+\expect\brack{\max(f^\star - e^{Y}, 0)} = f^\star\int_{-\infty}^{c}\varphi_{\mu,\sigma}(y)\,dy
+- \int_{-\infty}^{c} e^{y}\varphi_{\mu,\sigma}(y)\,dy.
+$$
+
+The first integral is $\Phi(v)$ with $v = (c - \mu)/\sigma$. For the second,
+<NoteLink to="completing-the-square">complete the square</NoteLink> in the exponent:
+
+$$
+y - \frac{(y - \mu)^2}{2\sigma^2} = \mu + \frac{\sigma^2}{2} - \frac{(y - \mu - \sigma^2)^2}{2\sigma^2},
+$$
+
+so $e^{y}\varphi_{\mu,\sigma}(y) = e^{\mu + \sigma^2/2}\,\varphi_{\mu + \sigma^2,\sigma}(y)$, a Gaussian density with
+its mean shifted by $\sigma^2$, scaled by the log-normal mean $e^{\mu + \sigma^2/2}$. Integrating it up to $c$ gives
+$e^{\mu + \sigma^2/2}\,\Phi\paren{(c - \mu - \sigma^2)/\sigma} = e^{\mu + \sigma^2/2}\,\Phi(v - \sigma)$. Together,
+
+$$
+\operatorname{EI}_{\exp}(\lambdavec) = f^\star\,\Phi(v) - e^{\mu + \sigma^2/2}\,\Phi(v - \sigma), \qquad
+v = \frac{\ln f^\star - \mu}{\sigma},
+$$
+
+which is the criterion SMAC maximises <Cite id="hutter2011smac" />. SMAC3's default for <Gloss name="hpo">hyperparameter
+optimisation</Gloss> uses this log-scale EI with a random forest and a Sobol initial design
+<Cite id="lindauer2022smac3" />.
+
+### Maximising the acquisition
+
+A forest's mean is piecewise constant, so EI has no useful gradient. SMAC computes EI at every configuration evaluated
+so far, starts a local search from the ten with the largest EI, and moves to the best neighbour until none improves. A
+neighbour changes one categorical value, or one numerical value by a Gaussian step of standard deviation 0.2 on the
+hyperparameter's range rescaled to $[0, 1]$. SMAC adds 10,000 random configurations and sorts all candidates by EI
+<Cite id="hutter2011smac" />.
+
+### Interleaved random configurations
+
+SMAC alternates the configurations from that sorted list with configurations drawn uniformly at random
+<Cite id="hutter2011smac" />. The random ones give the forest data the acquisition would never choose, which matters
+because the forest's spread can understate uncertainty far from the data. In a finite space every configuration keeps a
+positive probability of being tried, which is the basis of SMAC's convergence argument.
+
+### Intensification
+
+When the cost is noisy, as for runtimes on random instances or validation losses over seeds, one evaluation cannot show
+that a challenger beats the incumbent. SMAC races them: the incumbent gets one more run, then the challenger is run on
+the instances and seeds the incumbent has used, doubling its number of runs each round. The challenger is rejected as
+soon as its mean cost over the shared runs is worse, and becomes the incumbent if it matches the incumbent on all of
+them <Cite id="hutter2011smac" />. The same racing with every challenger drawn at random and no model is ROAR, SMAC's
+model-free baseline.
+
+{/* figure pending engine (random-forest regression surrogate and a forest-surrogate option for bayesianOptimisationSteps, see log): the forest's mean and tree spread against a GP posterior on the same evaluations, and a SMAC run on a mixed categorical and continuous space */}
+
+## Worked example
+
+A search tunes a pipeline by validation error. The incumbent is $f^\star_t = 0.10$. A forest of $B = 5$ trees predicts
+at two candidates:
+
+| candidate | tree predictions | description |
+| --- | --- | --- |
+| A | $0.11, 0.10, 0.09, 0.12, 0.10$ | a numerical neighbour of the incumbent |
+| B | $0.16, 0.07, 0.13, 0.06, 0.15$ | a different preprocessing choice, tried twice so far |
+
+**Step 1: moments.** For A the mean is $0.104$. The squared deviations are $0.000036, 0.000016, 0.000196, 0.000256,
+0.000016$, whose mean is $0.000104$, so $\sigma_A = 0.0102$. For B the mean is $0.114$ and the variance $0.001704$, so
+$\sigma_B = 0.0413$. The trees agree about A and disagree about B.
+
+**Step 2: expected improvement.** For A, $z = (0.10 - 0.104)/0.0102 = -0.392$, with $\Phi(z) = 0.3474$ and
+$\varphi(z) = 0.3694$, so $\operatorname{EI}_A = (-0.004)(0.3474) + 0.0102 \times 0.3694 = 0.0024$. For B,
+$z = -0.339$, $\Phi(z) = 0.3672$, $\varphi(z) = 0.3766$ and $\operatorname{EI}_B = (-0.014)(0.3672) + 0.0413 \times
+0.3766 = 0.0104$.
+
+**Step 3: choice.** B has the worse mean, but its spread gives it four times A's expected improvement, so SMAC
+evaluates B next. The next configuration in SMAC's list is drawn at random.
+
+**A runtime.** A solver's incumbent takes $f^\star = 10$ s. For a candidate the forest gives the log runtime mean
+$\mu = \ln 12 = 2.485$ and $\sigma = 0.6$. The median runtime $e^{\mu} = 12$ s is worse than the incumbent. Then
+$v = (\ln 10 - \ln 12)/0.6 = -0.304$, $\Phi(v) = 0.381$, $\Phi(v - \sigma) = \Phi(-0.904) = 0.183$, and
+$e^{\mu + \sigma^2/2} = 14.37$ s. So $\operatorname{EI}_{\exp} = 10 \times 0.381 - 14.37 \times 0.183 = 1.18$ s: a
+38% chance of beating the incumbent, by about 3.1 s on average when it does.
+
+## Cost
+
+Fitting $B$ trees to $t$ evaluations with $d$ hyperparameters takes about $O(B\,p\,d\,t\log t)$ time, and a prediction
+takes $B$ root-to-leaf descents. A Gaussian process takes $O(t^3)$ to fit and $O(t^2)$ per predictive variance. At
+thousands of evaluations the forest is faster by orders of magnitude. The local search adds a few thousand cheap forest
+predictions per step. The dominant cost remains the evaluations of $f$.
+
+## Trade-offs
+
+- **Against a Gaussian process.** On low-dimensional continuous spaces with smooth objectives and few evaluations, a
+  GP's calibrated uncertainty wins. SMAC3 itself uses a GP with a Matérn 5/2 kernel and expected improvement for such
+  problems, and the random forest for structured hyperparameter spaces <Cite id="lindauer2022smac3" />.
+- **Against TPE.** <NoteLink to="tree-structured-parzen-estimator">TPE</NoteLink> also handles conditional spaces and
+  scales linearly in $t$, but models each hyperparameter separately. Trees model interactions between hyperparameters
+  through nested splits.
+- **Multi-fidelity.** SMAC3 combines the forest with <NoteLink to="hyperband">Hyperband</NoteLink>'s budgets, as
+  <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> combines TPE with them, and reports better results
+  than BOHB on its examples <Cite id="lindauer2022smac3" />.
+- **Instances.** For algorithm configuration the forest takes features of the problem instance as extra inputs, and
+  predictions are averaged over the training instances <Cite id="hutter2011smac" />. This handles costs that vary by
+  instance without running every configuration on every instance.
+
+## Pitfalls
+
+- **Flat uncertainty far from the data.** Beyond the last evaluation in some direction, every tree predicts the value
+  of its outermost leaf, so the spread stays at its value near the boundary however far the candidate lies. EI then
+  under-explores unvisited corners. The interleaved random configurations are the safeguard; removing them to save
+  evaluations removes it.
+- **Too few trees.** With $B = 10$ the variance is estimated from ten numbers and is itself noisy. A small $\sigma_t$
+  from chance agreement among trees can make EI ignore a region.
+- **Piecewise-constant means.** Many candidates share one prediction, so EI has ties and plateaus. Gradient-based
+  maximisers of the acquisition do not work. The local search and the random candidates do.
+- **The incumbent's score.** Intensification guards against a challenger that wins one lucky run, but the incumbent's
+  mean over its runs is still the minimum over many configurations and is biased low (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Its error needs instances
+  or data the search never used.

@@ -1,0 +1,233 @@
+---
+title: 'Tuning deep learning hyperparameters'
+kind: concept
+summary: 'Deep networks are tuned in rounds: fix the architecture, optimiser and step budget; sweep the learning rate on a log scale; then tune the hyperparameters that interact with it, such as momentum, weight decay and warmup, over several seeds. The batch size is set for throughput.'
+tags: [model-selection, hyperparameters, deep-learning, practice, worked-example]
+aliases: [deep learning tuning, tuning neural networks, learning-rate sweep, learning rate range test, deep learning tuning playbook, scientific and nuisance hyperparameters, square-root scaling rule]
+requires: [hyperparameter-search, training-deep-networks]
+related: [learning-rate-schedules, adam, decoupled-weight-decay, maximal-update-parameterisation, model-selection-at-scale, minibatching-and-batch-size, early-stopping, quasi-random-search, multi-fidelity-hyperparameter-optimisation, variance-in-machine-learning-benchmarks, tuning-budgets-in-comparisons, hyperparameter-importance]
+references: [godbole2023, bengio2012practical, smith2017clr, goyal2017, mccandlish2018, smith2018batch, shallue2019, malladi2022sde, choi2019optimizers, loshchilov2019, yang2021mup, dodge2019, bouthillier2021]
+status: draft
+updated: 2026-10-13
+---
+
+import { LearningRateSweep } from './LearningRateSweep'
+
+<Definition>
+**Tuning a deep network** means choosing the hyperparameters of its training run by validation performance: the
+<Gloss name="learning-rate">learning rate</Gloss> and its schedule, the optimiser's other constants, the
+<NoteLink to="minibatching-and-batch-size">batch size</NoteLink> and number of steps, and the strength of each
+regulariser. Each trial is a full training run, so the budget is tens of trials, not thousands. Current practice tunes
+in rounds. It fixes the model, the optimiser and the training budget, sweeps the learning rate on a logarithmic scale
+first, then tunes the few hyperparameters that interact with it, and repeats promising settings over several random
+seeds <Cite id="godbole2023" />.
+</Definition>
+
+## Intuition
+
+The learning rate sets the size of every update. Set it ten times too large and training diverges; ten times too small
+and training crawls and stops far from a good solution within the step budget. Every other hyperparameter's effect is
+visible only once the learning rate is in the right range: a better <Gloss name="weight-decay">weight decay</Gloss>
+cannot be detected in a run that diverged. Bengio called the initial learning rate "often the single most important
+hyper-parameter", to be tuned to within about a factor of 2 <Cite id="bengio2012practical" />.
+
+The other hyperparameters fall into groups by how they interact with it. The batch size, momentum and schedule change
+the effective step size, so the best learning rate moves when they move. Regularisers such as weight decay and dropout
+interact with it more weakly. Architecture sizes change the best learning rate unless the network is parameterised to
+prevent it (see <NoteLink to="maximal-update-parameterisation">maximal update parameterisation</NoteLink>). The order
+of tuning follows the strength of these interactions.
+
+Tuning a network is also a selection among noisy candidates. Two runs with different seeds differ in their initial
+weights and in the order of the minibatches, and their validation scores differ by an amount that can be as large as
+the effect being tuned. The best of many runs is then partly the luckiest.
+
+## Which hyperparameters, in which order
+
+Godbole et al. classify hyperparameters by their role in an experiment <Cite id="godbole2023" />.
+- **Scientific** hyperparameters are those whose effect the experiment measures, such as the number of layers.
+- **Nuisance** hyperparameters must be re-tuned for each value of the scientific ones before the comparison is fair.
+  The learning rate is almost always a nuisance hyperparameter: comparing two depths at one shared learning rate
+  compares the depths and how well that rate suits each.
+- **Fixed** hyperparameters are held constant, which saves trials and restricts the conclusion to that value.
+
+For Adam they recommend tuning only the base learning rate with fewer than 10 trials; the learning rate and $\beta_1$
+with 10 to 25; the learning rate, $\beta_1$ and $\epsilon$ with more than 25; and $\beta_2$ as well only with
+substantially more <Cite id="godbole2023" />. Choi et al. showed how much this matters. Comparisons between optimisers
+reversed when the <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink> of their hyperparameters changed,
+and with enough tuning a more general optimiser, such as <NoteLink to="adam">Adam</NoteLink> against momentum, never did
+worse <Cite id="choi2019optimizers" />.
+
+A working order:
+1. **Fix the recipe.** Take a published architecture, optimiser and schedule for a similar problem, and choose the
+   number of training steps the budget allows.
+2. **Choose the batch size for throughput,** as large as the hardware supports while the time per step stays nearly
+   constant. The batch size is not a hyperparameter to tune for validation performance: with the learning rate and
+   <NoteLink to="regularisation">regularisation</NoteLink> re-tuned, the same final performance is reachable at any
+   batch size given enough steps <Cite id="godbole2023" /> <Cite id="shallue2019" />.
+3. **Sweep the learning rate** on a logarithmic grid, with warmup and decay in place.
+4. **Tune its partners** jointly with it: momentum or $\beta_1$, weight decay, the warmup length.
+5. **Tune regularisation** (dropout, label smoothing, augmentation strength) once the model fits well.
+6. **Confirm with seeds.** Rerun the best few settings with new seeds before choosing.
+
+## The learning rate
+
+**Sweep on a log scale.** Good learning rates span orders of magnitude across models, so a grid in
+$\log_{10}\eta$ with steps of $0.5$ (a factor of about 3) or $1/3$ (a factor of about 2) covers the range evenly. A
+uniform grid on $[10^{-5}, 1]$ would put 90% of its points above $0.1$. If the best value is at the edge of the grid,
+the grid is extended in that direction until the best value is interior.
+
+**The loss is asymmetric in the learning rate.** Below the optimum the validation loss rises slowly, because training
+makes less progress in the fixed number of steps. Above the optimum it rises sharply, because the updates overshoot,
+and beyond some rate training diverges. The best learning rate often sits close to that edge. A sweep therefore needs
+finer steps on the high side than the low side, and a value slightly below the best is a safer choice than one slightly
+above.
+
+**The range test.** Smith's learning-rate range test is a one-run shortcut: train for a few epochs while the learning
+rate rises linearly from very small to large, and read off the range over which the accuracy improves before it
+degrades <Cite id="smith2017clr" />. It locates the scale cheaply. It does not replace a sweep, because a rate that
+works for a few epochs at the start of training is not the best rate for a full schedule.
+
+**Schedules.** The learning rate that is tuned is the peak of a schedule, usually a linear warmup followed by a decay
+(see <NoteLink to="learning-rate-schedules">learning-rate schedules</NoteLink>). A decaying schedule is defined
+relative to the total number of steps, so the best peak rate depends on the step budget. Truncated runs of a decaying
+schedule are poor proxies for full runs, which limits what <NoteLink
+to="multi-fidelity-hyperparameter-optimisation">multi-fidelity methods</NoteLink> can do for deep networks unless each
+fidelity runs its own complete schedule.
+
+## Batch size and the learning rate
+
+When the batch size changes, the best learning rate moves. For <Gloss name="sgd" /> the move follows from the noise in
+the gradient. Let $\gvec$ be the gradient of the training loss at the current parameters and $\Sigmab$ the covariance of
+a single example's gradient. A minibatch of $B$ examples drawn at random gives a gradient estimate with mean $\gvec$
+and covariance approximately $\Sigmab/B$.
+
+**$k$ small steps.** Take $k$ steps with batch size $B$ and learning rate $\eta$. Assume that the gradient changes
+little over the $k$ steps, so each step uses the same $\gvec$ with independent noise. The parameters move by
+$-k\eta\gvec$ on average, and the noise of the $k$ steps adds, giving covariance $k\eta^2\Sigmab/B$.
+
+**One large step.** Take one step with batch size $kB$ and learning rate $\eta'$. The parameters move by $-\eta'\gvec$
+on average, with covariance $\eta'^2\Sigmab/(kB)$.
+
+**Matching.** The means agree when $\eta' = k\eta$. The covariances then agree too, since
+$(k\eta)^2\Sigmab/(kB) = k\eta^2\Sigmab/B$. Multiplying the batch size by $k$ and the learning rate by $k$ reproduces
+$k$ small steps in one, in mean and in noise. This is the **linear scaling rule** <Cite id="goyal2017" />, and the
+ratio $\eta/B$ sets the scale of the noise in SGD's trajectory <Cite id="smith2018batch" />.
+
+The rule fails where its assumption fails.
+- **Early in training** the gradient changes quickly, so $k$ small steps are not one large step. Goyal et al. needed a
+  warmup of the learning rate to train with batches of 8192 images <Cite id="goyal2017" />.
+- **At large batch sizes** the gradient noise is no longer what limits progress. McCandlish et al. predict the
+  **critical batch size**, beyond which a larger batch stops cutting the number of steps, from the noise scale
+  $B_\text{simple} = \trace\Sigmab/\norm{\gvec}^2$ <Cite id="mccandlish2018" />. Shallue et al. measured the number of
+  steps to reach a target error across 35 workloads. They found three regimes as the batch size grows: steps fall in
+  proportion to the batch size, then fall more slowly, then stop falling. Where the regimes begin varied greatly
+  between workloads, and disagreements in the literature about large batches were largely explained by differences in
+  tuning <Cite id="shallue2019" />.
+- **Adaptive optimisers** normalise each step by a running gradient scale, so the linear rule does not carry over.
+  Malladi et al. derive a **square-root scaling rule** for Adam and <Gloss name="rmsprop" />: multiply the batch size by
+  $\kappa$, multiply the learning rate by $\sqrt\kappa$, replace $1 - \beta_1$ and $1 - \beta_2$ by $\kappa$ times their
+  values, and divide $\epsilon$ by $\sqrt\kappa$ <Cite id="malladi2022sde" />.
+
+Scaling rules give the starting point after a change of batch size. The learning rate is then re-tuned near it.
+
+## Regularisation and the rest
+
+**Weight decay** interacts with the learning rate through the optimiser. With Adam, an L2 penalty added to the loss is
+rescaled per coordinate; decoupled weight decay (AdamW) applies a uniform shrinkage, and Loshchilov and Hutter found
+that the best decay then depends much less on the learning rate, so the two can be tuned more separately
+<Cite id="loshchilov2019" />; see <NoteLink to="decoupled-weight-decay">decoupled weight decay</NoteLink>. Libraries
+differ in whether the decay is multiplied by the learning rate, so a tuned value does not transfer between them
+unchanged.
+
+**Dropout, label smoothing and augmentation** are tuned after the optimisation hyperparameters, on a model that fits the
+training data well. Their best values grow with the model's capacity and shrink with the amount of data.
+
+**Width and depth** change the best learning rate under the standard parameterisation. Under µP the optimisation
+hyperparameters tuned on a narrow proxy transfer to a wide target, while regularisation hyperparameters such as dropout
+and weight decay do not <Cite id="yang2021mup" />; see <NoteLink to="model-selection-at-scale">model selection at
+scale</NoteLink>.
+
+## Search algorithms and budgets
+
+**Exploration, then exploitation.** Godbole et al. use <NoteLink to="quasi-random-search">quasi-random search</NoteLink>
+while they are still learning which hyperparameters matter and over which ranges. Its trials cover the space evenly and
+do not depend on earlier results, so a study can be re-analysed for a different objective without rerunning it. Once the
+search space is settled, they recommend <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> for the
+final study, where only the best configuration matters <Cite id="godbole2023" />.
+
+**Boundaries.** After a study, check where the best trials lie. If they crowd against the edge of a range, the range was
+too narrow and the study is repeated with it widened <Cite id="godbole2023" />.
+
+**Seeds.** Run-to-run variation sets a floor below which tuning cannot see. Bouthillier et al. found that the variance
+from data sampling, initialisation and hyperparameter choice markedly changed the results of benchmarks
+<Cite id="bouthillier2021" />. Differences between settings smaller than the spread over seeds are not evidence; see
+<NoteLink to="variance-in-machine-learning-benchmarks">variance in machine learning benchmarks</NoteLink>.
+
+**The expected best of $N$ trials.** The best validation score of a search grows with the number of trials, so a score
+is meaningful only with its budget. Dodge et al. report the expected best score as a function of the budget
+<Cite id="dodge2019" />. If $N$ trials have independent scores $V_1, \dots, V_N$ with distribution function $F$, the
+best of them is at most $v$ exactly when every one is, so
+
+$$
+\prob\paren{\max_i V_i \le v} = \prod_{i=1}^{N}\prob(V_i \le v) = F(v)^N.
+$$
+
+With $F$ replaced by the empirical distribution function $\hat F$ of the trials already run, the expected best of $n$
+trials is $\sum_v v\,\brack{\hat F(v)^n - \hat F(v^-)^n}$, where the sum runs over the distinct observed values and
+$\hat F(v^-)$ is the fraction of trials strictly below $v$ <Cite id="dodge2019" />. A curve of this quantity against $n$
+shows how fast a model's score improves with tuning effort, which is the fair way to compare a cheaply tuned model with
+an expensively tuned one (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+
+<LearningRateSweep />
+
+## Worked example
+
+The figure trains a small network on the two-moons problem and sweeps the learning rate of Adam over
+$\eta = 10^{-3.5}, 10^{-3}, \dots, 10^{0.5}$, with 3 seeds per rate, batches of 32 and 200 steps. The mean validation
+cross-entropy at each rate, with the standard deviation over seeds:
+
+| $\log_{10}\eta$ | $-3.5$ | $-3$ | $-2.5$ | $-2$ | $-1.5$ | $-1$ | $-0.5$ | $0$ | $0.5$ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| mean | 0.534 | 0.344 | 0.309 | 0.233 | 0.215 | 0.246 | 0.260 | 1.210 | 2.014 |
+| sd | 0.078 | 0.015 | 0.011 | 0.016 | 0.007 | 0.021 | 0.040 | 1.020 | 2.355 |
+
+1. **The shape.** From $10^{-3.5}$ the loss falls steadily for two decades. Above the best rate it rises by 0.045 over
+   the next decade, then jumps: at $\eta = 1$ the three seeds give 2.35, 0.90 and 0.38, and two of the three runs end
+   worse than a constant prediction, which scores $\ln 2 = 0.69$. This is the asymmetry of the learning-rate curve.
+2. **The best rate.** The lowest mean is at $\eta = 10^{-1.5} \approx 0.032$, with mean 0.215. It is interior to the
+   grid, so the grid need not be extended.
+3. **Is it better than its neighbours?** The <NoteLink to="standard-error">standard error</NoteLink> of a mean of 3 runs
+   is about $\text{sd}/\sqrt 3$: about 0.004 at $10^{-1.5}$, 0.009 at $10^{-2}$ and 0.012 at $10^{-1}$. The gap to
+   $10^{-2}$ is $0.233 - 0.215 = 0.018$, about twice the standard error of the difference,
+   $\sqrt{0.004^2 + 0.009^2} = 0.010$. The gap to $10^{-1}$ is 0.031, about $2.4$ standard errors. The optimum is
+   located to within about half a decade, which is what a half-decade grid can resolve.
+4. **Refine.** A second sweep with steps of $\log_{10}\eta = 1/6$ between $10^{-2}$ and $10^{-1}$ would locate the
+   optimum to within a factor of 1.5, near Bengio's recommended factor of 2.
+5. **Change the optimiser.** With SGD and momentum 0.9 the same sweep has its lowest mean, 0.202, at $\eta = 0.1$,
+   half a decade higher than Adam's, and one seed ends at $\eta = 1$ with a loss of 92. The best learning rate
+   belongs to the optimiser and must be re-tuned when the optimiser changes.
+6. **Change the batch size.** With SGD and batches of 8, the loss at $\eta = 10^{-0.5}$ is 0.63, near chance; with
+   batches of 128 it is 0.23, close to the best. Larger batches have less gradient noise, and the range of usable
+   learning rates extends upwards, as the linear scaling argument predicts. With a fixed number of steps the larger
+   batch also sees more examples, so the comparison is not of equal data.
+
+The selection used the same validation set that reports 0.215. With 9 rates the optimism is small next to the gaps in
+step 3, but the reported number is still the minimum of nine noisy means (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## Pitfalls
+
+- **Tuning other hyperparameters at a fixed, wrong learning rate.** A regulariser or architecture that looks worse at
+  one learning rate may be better at its own best rate. Re-tune the learning rate for each candidate being compared.
+- **Changing the batch size without re-tuning.** The best learning rate, and often momentum and weight decay, move with
+  the batch size. A batch-size comparison at one learning rate measures the mismatch.
+- **Tuning on short runs of a long schedule.** A truncated cosine schedule has not decayed, and its ranking of learning
+  rates can differ from that of the full run. Shorten the schedule, not the run.
+- **The best seed as the result.** The best of several seeds is a selection statistic. Report the mean and spread over
+  seeds at the chosen setting.
+- **Grids that stop at the edge.** A best value at the boundary of the grid means the optimum may lie outside it.
+- **Unequal tuning in comparisons.** A new method tuned with many trials against a baseline tuned with few measures
+  the tuning effort. Choi et al. showed that optimiser rankings can be reversed by the search space alone
+  <Cite id="choi2019optimizers" />.
+- **Selecting on the test set.** Every choice above, including the stopping step and the checkpoint, is made on
+  validation data. The test set is used once, at the end.

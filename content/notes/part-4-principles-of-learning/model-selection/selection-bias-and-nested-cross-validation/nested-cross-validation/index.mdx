@@ -1,0 +1,191 @@
+---
+title: 'Nested cross-validation'
+kind: technique
+summary: 'Nested cross-validation repeats the whole model search, with its own inner cross-validation, inside each training set of an outer cross-validation. The outer folds never inform the search, so their mean estimates the tuned procedure''s error without selection optimism.'
+tags: [model-selection, evaluation, worked-example]
+aliases: [nested CV, double cross-validation, nested resampling]
+requires: [k-fold-cross-validation, overfitting-in-model-selection]
+related: [model-selection-and-model-assessment, variance-of-cross-validation-estimates, what-cross-validation-estimates, how-optimistic-is-the-best-cross-validation-score, selection-inside-cross-validation, cross-validating-a-pipeline, hyperparameter-search]
+references: [varma2006, cawley2010, krstajic2014, wainer2021, bates2024, hastie2009]
+status: draft
+updated: 2026-10-13
+---
+
+import { NestedFolds } from './NestedFolds'
+
+<Definition>
+Let $\mathcal{A}$ be a learning procedure that includes <NoteLink to="model-selection">model selection</NoteLink>: given
+a data set, it scores every candidate $\lambda \in \Lambda$ by an **inner**
+<NoteLink to="cross-validation">cross-validation</NoteLink> with $K_\text{in}$ folds, picks the best, and refits it on
+the whole data set. **Nested cross-validation** splits the $n$ examples into $K_\text{out}$ **outer** folds, runs
+$\mathcal{A}$ on all data except outer fold $k$, and scores the resulting model on fold $k$. The nested estimate is the
+average loss over all $n$ outer predictions,
+
+$$
+\operatorname{CV}_\text{nested} = \frac1n\sum_{i=1}^n\ell\paren{y_i, \mathcal{A}\paren{\Dcal^{-\kappa(i)}}(\xvec_i)},
+$$
+
+where $\kappa(i)$ is the outer fold of point $i$ and $\Dcal^{-k}$ is the data without outer fold $k$
+<Cite id="varma2006" />.
+</Definition>
+
+## Problem
+
+A search over hyperparameters reports the best cross-validation score among its candidates. That score is optimistic,
+because the candidate won partly through luck on the same folds that scored it (see
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). The optimism grows with the
+number of candidates and shrinks with the amount of data. On small data sets it can exceed the differences between the
+methods being compared <Cite id="cawley2010" />.
+
+An honest estimate needs examples that the search never saw. A separate test set provides them, but on a small data set
+it wastes examples and gives a noisy estimate from one split. Nested cross-validation treats the search as part of the
+learning algorithm and cross-validates the whole thing. Every example serves once as an outer test point, and no outer
+test point ever influences the choice it is used to score.
+
+## Mechanism
+
+1. **Split** the data into $K_\text{out}$ outer folds. Stratify for classification and group when records cluster, as
+   for any <NoteLink to="k-fold-cross-validation">$K$-fold cross-validation</NoteLink>.
+2. **For each outer fold $k$:**
+   1. Take the outer training set $\Dcal^{-k}$, of about $n(K_\text{out} - 1)/K_\text{out}$ examples.
+   2. Split $\Dcal^{-k}$ into $K_\text{in}$ inner folds. Score every candidate $\lambda \in \Lambda$ by inner
+      cross-validation on $\Dcal^{-k}$ only, and let $\hat\lambda_k$ be the best.
+   3. Refit candidate $\hat\lambda_k$ on all of $\Dcal^{-k}$.
+   4. Predict outer fold $k$ with the refitted model and record its losses.
+3. **Average** the losses over all $n$ outer predictions. This is the nested estimate.
+4. **Fit the final model** by running the same search once on all $n$ examples and refitting its winner.
+
+Every data-dependent step, including scaling, imputation, <NoteLink to="feature-selection">feature selection</NoteLink>
+and resampling, belongs inside step 2.2, for the reasons given in
+<NoteLink to="cross-validating-a-pipeline">cross-validating a pipeline</NoteLink>. The inner search can be a grid, a
+<NoteLink to="random-search">random search</NoteLink> or <NoteLink to="bayesian-optimisation">Bayesian
+optimisation</NoteLink>; nested cross-validation does not depend on how the candidates are proposed, only on the search
+being repeated from scratch in every outer fold.
+
+In scikit-learn, nested cross-validation is a `GridSearchCV` or `RandomizedSearchCV` object passed as the estimator to
+`cross_val_score`.
+
+## What it estimates
+
+Nested cross-validation is ordinary $K$-fold cross-validation applied to the procedure $\mathcal{A}$. Two steps show
+what that means.
+
+1. **Each outer loss is an honest hold-out loss.** The model $\mathcal{A}(\Dcal^{-k})$ depends only on $\Dcal^{-k}$:
+   its inner folds, its choice $\hat\lambda_k$ and its refit all use examples outside fold $k$. The examples of fold $k$
+   are independent of $\Dcal^{-k}$. So, conditionally on $\Dcal^{-k}$, the expected loss at an outer test point is the
+   true error of the fitted model, $\operatorname{Err}_{\Dcal^{-k}}(\mathcal{A})$.
+2. **Average over the folds and the data.** Taking expectations over $\Dcal^{-k}$ turns each term into
+   $\expect\operatorname{Err}_{\Dcal^{-k}}(\mathcal{A})$, the expected error of the procedure trained on
+   $n(K_\text{out} - 1)/K_\text{out}$ examples. So $\expect\operatorname{CV}_\text{nested}$ equals that expected error.
+
+The best inner score has no such identity. The minimum $\min_\lambda\operatorname{CV}(\lambda)$ is not the
+cross-validation estimate of any procedure fixed in advance, because the minimisation looks at the scores of every fold
+before choosing.
+
+Three consequences follow.
+- **It assesses the procedure, not one hyperparameter value.** Different outer folds can choose different
+  $\hat\lambda_k$. The nested estimate averages over these choices, including the occasions on which the search picks
+  badly.
+- **It is slightly pessimistic.** Each outer training set is smaller than $n$. If the learning curve is still falling,
+  the procedure trained on all $n$ examples does better, as for any $K$-fold estimate.
+- **It estimates an expected error, not the error of the final model.** Like every cross-validation estimate, it tracks
+  the error averaged over training sets of its size better than the error of the one model fitted to these data (see
+  <NoteLink to="what-cross-validation-estimates">what cross-validation estimates</NoteLink>).
+
+## The final model
+
+The outer loop produces $K_\text{out}$ models and up to $K_\text{out}$ different choices $\hat\lambda_k$. None of them
+is the model to deploy. The final model comes from step 4: the search run on all $n$ examples, with its winner refitted
+on all of them. The nested estimate is the reported performance of that procedure.
+
+The spread of the outer choices $\hat\lambda_1, \dots, \hat\lambda_{K_\text{out}}$ is a diagnostic. If every outer fold
+chooses the same value, the selection is stable and the final search will likely choose it too. If the choices scatter
+across the grid, the candidates are not separable at this sample size, and the
+<NoteLink to="one-standard-error-rule">one-standard-error rule</NoteLink> or averaging over candidates may serve better
+than the single winner.
+
+## Worked example
+
+The figure below at its defaults runs the problem by hand. There are $n = 60$ examples with labels that are pure noise,
+exactly 30 of each class. There are $J = 10$ candidates, each a 5-nearest-neighbour classifier on its own pair of
+standard normal features. Every candidate has true accuracy 0.5. The outer and inner loops both use stratified 5-fold
+cross-validation, so each outer test fold has 12 examples and each outer training set 48.
+
+| outer fold | candidate chosen | best inner accuracy | outer test accuracy |
+| ---: | ---: | ---: | ---: |
+| 1 | 5 | 0.627 | 0.417 (5 of 12) |
+| 2 | 2 | 0.622 | 0.583 (7 of 12) |
+| 3 | 0 | 0.591 | 0.417 (5 of 12) |
+| 4 | 9 | 0.662 | 0.583 (7 of 12) |
+| 5 | 2 | 0.664 | 0.500 (6 of 12) |
+
+1. **The inner scores are optimistic.** Every best inner accuracy is between 0.59 and 0.67, although no candidate can
+   beat 0.5 on new data. Each is the best of ten noisy scores.
+2. **The choices are unstable.** Five outer folds pick four different candidates. On noise there is no right answer, so
+   the choice follows the noise of each outer training set.
+3. **The nested estimate.** The outer predictions are right $5 + 7 + 5 + 7 + 6 = 30$ times out of 60, so
+   $\operatorname{CV}_\text{nested} = 0.500$.
+4. **The unnested estimate.** The search run once on all 60 examples picks candidate 3 with a cross-validation accuracy
+   of 0.633. This is the number a tuning run would report.
+5. **The truth.** The final model, candidate 3 refitted on all 60 examples, scores 0.505 on 4,000 fresh examples.
+
+The unnested estimate overstates the accuracy by 0.13; the nested estimate is within 0.01 of the truth here. The nested
+estimate is noisy in general: each outer score rests on 12 examples, with standard deviation about
+$\sqrt{0.25/12} = 0.14$. Over many data sets it averages close to 0.5, as
+<NoteLink to="how-optimistic-is-the-best-cross-validation-score">the example on noise labels</NoteLink> shows.
+
+<NestedFolds />
+
+## Cost
+
+A search over $\abs{\Lambda}$ candidates with $K_\text{in}$ folds costs $K_\text{in}\abs{\Lambda}$ fits plus one refit.
+Nested cross-validation runs it $K_\text{out}$ times, once per outer training set, and the final model needs one more
+run on all the data:
+
+$$
+\paren{K_\text{out} + 1}\paren{K_\text{in}\abs{\Lambda} + 1} \text{ fits}.
+$$
+
+With $K_\text{out} = K_\text{in} = 5$ and a grid of 50 values this is $6 \times 251 = 1{,}506$ fits, against 251 for the
+search alone. The worked example costs $6 \times 51 = 306$ fits. The outer folds are independent and run in parallel.
+
+Practice adjusts the cost to the data:
+- **Small data:** 5 or 10 outer folds, often repeated with fresh splits, because one partition gives a noisy estimate.
+  Krstajic and colleagues found the variation across splits large enough that they recommend repeating both the search
+  and the nested assessment <Cite id="krstajic2014" />.
+- **Large data or expensive models:** the outer loop collapses to one held-out test set, and the inner loop to one
+  validation set. This is the train, validation and test split, a nested hold-out.
+- **Fewer inner folds or a cheaper search:** 3 inner folds, a random search with a fixed budget, or
+  early stopping of poor trials cut the cost without touching the outer loop's
+  honesty.
+
+## Trade-offs
+
+- **Assessment against selection.** Nested cross-validation is needed to report an unbiased performance. It is less
+  needed to choose. Wainer and Cawley compared nested and flat cross-validation for choosing among 12 classifiers on 115
+  binary data sets: flat cross-validation chose algorithms of similar quality, when each had few hyperparameters
+  <Cite id="wainer2021" />. The flat score is still optimistic and should not be reported.
+- **Variance.** The nested estimate includes the variability of the selection itself, so it varies more across splits
+  than a cross-validation score of one fixed model. The naive <NoteLink to="standard-error">standard error</NoteLink> of
+  the outer scores is too small, as for any cross-validation estimate. Bates, Hastie and Tibshirani give a nested scheme
+  for intervals with close to nominal coverage <Cite id="bates2024" />; see
+  <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>.
+- **Bias from smaller training sets.** Each outer training set has $n(K_\text{out} - 1)/K_\text{out}$ examples and each
+  inner training set $n(K_\text{out} - 1)(K_\text{in} - 1)/(K_\text{out}K_\text{in})$, which is 32 of 50 for $5 \times
+  5$ folds. On a steep learning curve the inner search may prefer simpler models than the full data would support.
+
+## Pitfalls
+
+- **Selecting on the outer scores.** Comparing several algorithms by their nested estimates and keeping the best turns
+  the outer loop into a selection step, and the winning nested score is optimistic again. An honest assessment of that
+  choice needs another level of nesting or a held-out test set.
+- **Reporting an outer fold's model or the modal $\hat\lambda_k$.** The deployed model is the search refitted on all the
+  data. The outer models exist only to score the procedure.
+- **Preprocessing outside the outer loop.** A scaler, an encoder or a feature filter fitted on all the data leaks the
+  outer test folds into every search (<NoteLink to="selection-inside-cross-validation">selection inside
+  cross-validation</NoteLink>).
+- **Splitting levels differently.** When records cluster by patient, user or time, both the outer and the inner splits
+  must respect the clusters. Grouped outer folds with random inner folds let the inner search reward memorisation of
+  groups (see <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink>).
+- **Comparing inner and outer scores as if they measured the same thing.** The gap between them is an estimate of the
+  optimism, but it also contains the effect of the smaller inner training sets.

@@ -1,0 +1,166 @@
+---
+title: 'Model selection and model assessment'
+kind: concept
+summary: 'Model selection chooses among candidates by their estimated test error; model assessment estimates the test error of the chosen model. Doing both on the same data makes the assessment optimistic, so each needs its own data: a three-way split or nested cross-validation.'
+tags: [model-selection, evaluation, worked-example]
+aliases: [model assessment, selection and assessment, three-way split]
+requires: [overfitting-and-underfitting]
+related: [train-validation-and-test-splits, nested-cross-validation, overfitting-in-model-selection, test-set-reuse, hold-out-validation]
+references: [hastie2009, varma2006, cawley2010, dwork2015, blum2015ladder, roelofs2019]
+status: draft
+updated: 2026-10-13
+---
+
+import { SelectionAndAssessment } from './SelectionAndAssessment'
+
+<Definition>
+Let $\Mcal_1, \dots, \Mcal_J$ be candidate models: different algorithms, feature sets or hyperparameter values.
+**<NoteLink to="model-selection">Model selection</NoteLink>** estimates the test error $\operatorname{Err}_j$ of each
+candidate and chooses the one with the smallest estimate. **Model assessment** estimates the test error of the chosen
+model, the number to report and to act on <Cite id="hastie2009" />. The two need separate data, because the estimate
+that chose a model is biased low as an estimate of that model's error.
+</Definition>
+
+## Intuition
+
+Choosing the candidate with the best validation score is a fit. The fit has $J$ options instead of a continuum of
+parameters, and its data are the validation set instead of the training set. Like any fit it exploits noise: a candidate
+whose validation points happened to be easy scores better than its true error, and the selection favours exactly such
+candidates. After the choice, the winner's validation score is a training error for the selection step. Reporting it as
+the model's performance repeats, one level up, the mistake of reporting the training error of a fitted model (see
+<NoteLink to="overfitting-and-underfitting">overfitting and underfitting</NoteLink>).
+
+An honest assessment needs data that played no part in any choice. Then the chosen model is fixed before those data are
+looked at, and their average loss is an unbiased estimate of its error.
+
+## The two goals
+
+**Selection needs a ranking.** Selection succeeds when it picks a candidate whose test error is close to the smallest
+among the candidates. An estimator with a constant bias, such as one that overstates every error by $0.02$, ranks the
+candidates correctly and selects well. Cross-validation trained on $(K - 1)n/K$ points has such a bias, and it still
+selects well when the bias is similar across candidates.
+
+**Assessment needs a number.** Assessment succeeds when its estimate is close to the chosen model's error, with a
+<NoteLink to="standard-error">standard error</NoteLink> small enough to act on. A constant bias that is harmless for
+selection is a direct error in the assessment.
+
+**Selecting on an estimate makes it optimistic.** Let $\widehat{\operatorname{Err}}_j$ be an unbiased estimate of
+$\operatorname{Err}_j$, such as the mean loss on a validation set that the candidates were not trained on, and let
+$\hat\jmath = \argmin_j \widehat{\operatorname{Err}}_j$ be the selected candidate. Three steps give the direction of
+the bias.
+
+1. $\widehat{\operatorname{Err}}_{\hat\jmath} \le \widehat{\operatorname{Err}}_j$ for every $j$, on every validation
+   set, because $\hat\jmath$ minimises the estimate.
+2. Taking expectations, $\expect[\widehat{\operatorname{Err}}_{\hat\jmath}] \le \expect[\widehat{\operatorname{Err}}_j]
+   = \operatorname{Err}_j$ for every $j$, so $\expect[\widehat{\operatorname{Err}}_{\hat\jmath}] \le \min_j
+   \operatorname{Err}_j$.
+3. $\min_j \operatorname{Err}_j \le \operatorname{Err}_{\hat\jmath}$ on every validation set, because the chosen
+   candidate is one of the $J$.
+
+Joining the steps,
+
+$$
+\expect\brack{\widehat{\operatorname{Err}}_{\hat\jmath}} \le \min_j \operatorname{Err}_j \le
+\expect\brack{\operatorname{Err}_{\hat\jmath}}.
+$$
+
+The selected score understates even the best candidate's error, and the best candidate's error understates the error
+of the candidate actually chosen. The gap grows with the number of candidates and with the noise in each estimate. For
+$J$ independent Gaussian estimates with a common standard deviation $\sigma$, it is at most about
+$\sigma\sqrt{2\ln J}$ (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+## The three-way split
+
+With enough data, the standard protocol splits the examples at random into three disjoint parts
+<Cite id="hastie2009" />:
+
+- a **training set**, on which every candidate is fitted;
+- a **validation set**, on which each fitted candidate is scored, and the best is chosen;
+- a **test set**, used once, to score the chosen model.
+
+Hastie, Tibshirani and Friedman suggest 50% for training and 25% each for validation and test as a typical split
+<Cite id="hastie2009" />. The test estimate is unbiased because, given the training and validation sets, the chosen
+model is fixed, and the test losses are $n_\text{test}$ independent draws whose mean is its test error. For
+<NoteLink to="surrogate-losses">0–1 loss</NoteLink> and a true <NoteLink to="accuracy-and-balanced-accuracy">error
+rate</NoteLink> $e$, the test estimate has standard error $\sqrt{e(1 - e)/n_\text{test}}$. The split itself, and how to
+make it mimic deployment (by group, by time, by place), are covered in
+<NoteLink to="train-validation-and-test-splits">train, validation and test splits</NoteLink>.
+
+After assessment, the chosen model is usually refitted on the training and validation sets together, or on all the
+data, before deployment. The refitted model has seen more data, so its error is at most a little above the test
+estimate when the learning curve is still falling. The test estimate is then slightly conservative for the deployed
+model.
+
+<SelectionAndAssessment />
+
+The figure runs the protocol on many replicate problems. With 40 training points, polynomial candidates of degree 0 to
+8, 10 validation points and 100 test points, the average over 150 replicates is:
+
+| Quantity | Mean over replicates |
+| --- | --- |
+| Validation error of the winner | 0.095 |
+| Test error of the winner | 0.123 |
+| True error of the winner | 0.122 |
+| True error of the best candidate | 0.104 |
+
+The validation error understates the winner's error by $0.027$, about 22%. The test error matches the true error to
+within $0.001$ on average. The winner's true error is $0.018$ above the best candidate's, because a 10-point validation
+set often ranks the candidates wrongly. With 1000 validation and 1000 test points, the four numbers become $0.1038$,
+$0.1042$, $0.1042$ and $0.1040$.
+
+## When data are scarce
+
+A three-way split wastes data when $n$ is small. A quarter of the data scores the candidates and another quarter sits
+in the test set, and each estimate is noisy. Two protocols reuse the data instead.
+
+- **Cross-validation for selection, a test set for assessment.** $K$-fold
+  <NoteLink to="cross-validation">cross-validation</NoteLink> on the non-test data replaces the single validation set,
+  so every non-test point serves for both fitting and scoring. The test set remains untouched until the end.
+- **Nested cross-validation for both.** An inner cross-validation selects within each training set of an outer one, and
+  the outer test folds score the selected models <Cite id="varma2006" />. No outer fold informs the selection that it
+  scores. The outer average estimates the error of the whole procedure, "select by inner cross-validation, then refit",
+  rather than of one fitted model (see <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>).
+
+Cawley and Talbot showed that, with many hyperparameters and few examples, the optimism of the best cross-validation
+score can exceed the differences between the learning algorithms being compared <Cite id="cawley2010" />. The best
+cross-validation score is a selection statistic, not an assessment.
+
+## Worked example
+
+Twenty classifiers are scored on a validation set of $n_\text{val} = 100$ examples. Suppose all twenty have the same
+true error rate $e = 0.30$, and that their validation errors are independent.
+
+1. **The noise in one estimate.** Each validation error is a proportion over 100 examples, with standard deviation
+   $\sigma = \sqrt{0.30 \times 0.70/100} = 0.0458$. A normal approximation is adequate at this size.
+2. **The winner's score.** The smallest of 20 independent normal draws lies on average $1.87$ standard deviations below
+   their common mean. The winner's expected validation error is therefore $0.30 - 1.87 \times 0.0458 = 0.214$.
+3. **The bound.** The maximal-inequality bound $\sigma\sqrt{2\ln J}$ gives $0.0458 \times \sqrt{2\ln 20} = 0.0458 \times
+   2.45 = 0.112$, against the exact $0.086$.
+4. **The truth.** Every candidate has error $0.30$, so the winner has error $0.30$. The selection gained nothing, and
+   its reported score of $0.21$ overstates the accuracy by 8.6 percentage points.
+5. **The assessment.** A test set of $n_\text{test} = 1000$ examples scores the winner with standard error
+   $\sqrt{0.30 \times 0.70/1000} = 0.0145$. Its estimate falls within $0.30 \pm 0.028$ with probability about 0.95.
+
+Correlated candidates, such as one model at neighbouring hyperparameter values, have correlated validation errors, and
+the optimism is smaller than for independent ones. Genuinely different true errors also shrink it, because the
+selection then picks the better candidates for real reasons.
+
+## Pitfalls
+
+- **Reporting the selection score.** The best validation or cross-validation score among many candidates is biased low.
+  Report a test score, or a nested cross-validation estimate.
+- **Choosing on the test set.** Every decision made after looking at test scores, such as keeping one feature set over
+  another or stopping training at the best test epoch, turns the test set into a validation set. Repeated queries
+  overfit a test set in the same way <Cite id="dwork2015" />. Competition leaderboards limit this with submission
+  budgets and with mechanisms such as the Ladder <Cite id="blum2015ladder" />. A study of over a hundred Kaggle
+  competitions found little overfitting of the public leaderboards in practice <Cite id="roelofs2019" />. See
+  <NoteLink to="test-set-reuse">test-set reuse</NoteLink> and <NoteLink to="reusable-holdout">reusable
+  holdout</NoteLink>.
+- **Selection hidden in preprocessing.** <NoteLink to="feature-selection">Feature selection</NoteLink>, imputation or
+  scaling fitted on all the data before the split is selection on the test data. Every data-dependent step belongs
+  inside the training part (see <NoteLink to="data-leakage">data leakage</NoteLink>).
+- **A test set too small to assess.** With 100 test examples and an error near 0.3, the standard error is 0.046. Two
+  models 3 points apart cannot be told apart on such a test set.
+- **Assessing a different model from the one deployed.** The test set scores the model fitted on the training data.
+  Nested cross-validation scores the procedure. Either is a proxy for the refitted model that is finally deployed, and
+  the report should say which it is.

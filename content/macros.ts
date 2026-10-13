@@ -126,6 +126,7 @@ export const macroGroups: MacroGroup[] = [
       '\\indicator': '\\mathbb{I}',
       '\\iid': '\\mathrel{\\overset{\\text{iid}}{\\sim}}',
       '\\eqdef': '\\stackrel{\\mathrm{def}}{=}',
+      '\\Rad': '\\mathfrak{R}',
     },
   },
   {
@@ -134,6 +135,7 @@ export const macroGroups: MacroGroup[] = [
     macros: {
       '\\argmin': '\\operatorname*{arg\\,min}',
       '\\argmax': '\\operatorname*{arg\\,max}',
+      '\\VCdim': '\\operatorname{VC}',
       '\\prox': '\\operatorname{prox}',
       '\\trace': '\\operatorname{tr}',
       '\\diag': '\\operatorname{diag}',

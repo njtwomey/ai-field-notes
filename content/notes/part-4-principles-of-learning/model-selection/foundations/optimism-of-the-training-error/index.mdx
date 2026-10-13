@@ -1,0 +1,216 @@
+---
+title: 'Optimism of the training error'
+kind: concept
+summary: 'The optimism of a fit is its in-sample prediction error, on fresh targets at the training inputs, minus its training error. For squared error its expectation is $\frac{2}{n}\sum_i \cov(\hat y_i, y_i)$, which is $2p\sigma^2/n$ for least squares with $p$ coefficients.'
+tags: [model-selection, generalisation, worked-example]
+aliases: [optimism, expected optimism, in-sample prediction error, in-sample error, apparent error rate]
+requires: [overfitting-and-underfitting, variance-and-covariance, linear-regression]
+related: [effective-degrees-of-freedom, mallows-cp-and-covariance-penalties, akaike-information-criterion, steins-unbiased-risk-estimate, generalisation-gap]
+references: [efron1986, efron2004covariance, hastie2009, mallows1973, ye1998, rosset2020]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+Let $y_i = f(\xvec_i) + \varepsilon_i$ for $i = 1, \dots, n$, with the inputs $\xvec_i$ fixed and the noise
+$\varepsilon_i$ independent with mean 0 and variance $\sigma^2$. Fit a model to the sample $\Dcal$ and let $\hat y_i$ be
+its fitted value at $\xvec_i$. Let $y_i^0$ be a fresh target at the same input, independent of $\Dcal$. The **in-sample
+error** is $\operatorname{Err}_\text{in} = \frac1n\sum_i \expect_{y^0}\brack{\ell(y_i^0, \hat y_i)}$, the **training
+error** is $\overline{\operatorname{err}} = \frac1n\sum_i \ell(y_i, \hat y_i)$, and the **optimism** is their difference
+$\operatorname{op} = \operatorname{Err}_\text{in} - \overline{\operatorname{err}}$. For squared error its expectation
+over the training targets is
+
+$$
+\omega = \expect_\yvec[\operatorname{op}] = \frac{2}{n}\sum_{i=1}^n \cov(\hat y_i, y_i)
+$$
+
+<Cite id="efron1986" /> <Cite id="hastie2009" />.
+</Definition>
+
+## Intuition
+
+Each training target $y_i$ is used twice. It helps build the fit, and then it scores the fit. When it helps build the
+fit, it pulls $\hat y_i$ towards itself, noise included. When it scores the fit, part of its noise has already been
+absorbed, so the residual $y_i - \hat y_i$ is smaller than the error the fit makes on a fresh target at the same input.
+The optimism is the average size of that head start.
+
+The covariance $\cov(\hat y_i, y_i)$ measures the pull directly. Over repeated samples with the same inputs, a fit that
+follows its own targets closely moves $\hat y_i$ up whenever $y_i$ is high, and the covariance is large. A rigid fit
+barely notices any single target, and the covariance is small. The optimism adds the pulls over all points. It is the
+reason the training error cannot choose the flexibility of a model (see
+<NoteLink to="overfitting-and-underfitting">overfitting and underfitting</NoteLink>), and it is what Mallows' $C_p$, the
+Akaike information criterion and Stein's unbiased risk estimate add back.
+
+## In-sample and extra-sample error
+
+Two kinds of new data can score a fit.
+
+- **In-sample error** keeps the training inputs and draws fresh targets at them. It isolates the effect of fitting the
+  noise, and it is the quantity the covariance formula describes exactly. It answers a fixed-design question, such as
+  predicting the outcome of a repeated experiment at the same settings.
+- **Extra-sample error** $\operatorname{Err}$ draws a new input as well as a new target, from the distribution that
+  produced the data. It is the test error in the usual sense, and it is what a held-out set and cross-validation
+  estimate.
+
+Extra-sample error is usually the larger of the two, because new inputs fall between and beyond the training inputs,
+where the fit is less certain <Cite id="rosset2020" />. For least squares with a correct linear model, the next section
+gives $\operatorname{Err}_\text{in} = \sigma^2(1 + p/n)$. For Gaussian inputs with mean zero, no intercept and
+$n > p + 1$, the extra-sample error is $\sigma^2(1 + p/(n - p - 1))$. With $n = 50$ and $p = 10$ these are
+$1.20\sigma^2$ and $1.26\sigma^2$. Analytic corrections such as $C_p$ target the in-sample error. They rank models well
+for selection even though they understate the extra-sample error <Cite id="hastie2009" />.
+
+<Derivation title="Extra-sample error of least squares with Gaussian inputs">
+Let the rows of the $n \times p$ design $\Xmat$ and a new input $\xvec$ be independent draws from $\Gauss(\zeros,
+\Sigmamat)$, and let $y = \xvec^\top\betavec + \varepsilon$ with independent noise of variance $\sigma^2$. Least squares
+gives $\hat\betavec - \betavec = (\Xmat^\top\Xmat)^{-1}\Xmat^\top\epsilonb$. Conditional on $\Xmat$, this has mean zero
+and covariance $\sigma^2(\Xmat^\top\Xmat)^{-1}$.
+
+The new error is $y - \xvec^\top\hat\betavec = \varepsilon - \xvec^\top(\hat\betavec - \betavec)$. The two terms are
+uncorrelated, so its expected square is
+$\sigma^2 + \sigma^2\expect\brack{\xvec^\top(\Xmat^\top\Xmat)^{-1}\xvec}$. The new input is independent of $\Xmat$ with
+$\expect[\xvec\xvec^\top] = \Sigmamat$, so the second term is
+$\sigma^2\trace\paren{\Sigmamat\,\expect[(\Xmat^\top\Xmat)^{-1}]}$.
+
+The matrix $\Xmat^\top\Xmat$ has a <NoteLink to="wishart-distribution">Wishart distribution</NoteLink> with $n$ degrees
+of freedom and scale $\Sigmamat$, whose inverse has mean $\Sigmamat^{-1}/(n - p - 1)$ for $n > p + 1$. The trace is then
+$\trace\eye_p/(n - p - 1) = p/(n - p - 1)$, and
+
+$$
+\operatorname{Err} = \sigma^2\paren{1 + \frac{p}{n - p - 1}}.
+$$
+</Derivation>
+
+## The covariance formula
+
+Fix $i$ and write $f_i = f(\xvec_i)$. The fresh target is $y_i^0 = f_i + \varepsilon_i^0$, and the training target is
+$y_i = f_i + \varepsilon_i$. Expand both squared errors around $f_i$.
+
+**The fresh target.** The fresh noise $\varepsilon_i^0$ has mean zero and is independent of $\hat y_i$, so the cross
+term vanishes:
+
+$$
+\expect\brack{(y_i^0 - \hat y_i)^2} = \expect\brack{(\varepsilon_i^0)^2} + \expect\brack{(f_i - \hat y_i)^2} = \sigma^2 +
+\expect\brack{(f_i - \hat y_i)^2}.
+$$
+
+**The training target.** The training noise $\varepsilon_i$ is not independent of $\hat y_i$, because $y_i$ was used to
+compute $\hat y_i$. The cross term remains:
+
+$$
+\expect\brack{(y_i - \hat y_i)^2} = \sigma^2 + \expect\brack{(f_i - \hat y_i)^2} + 2\expect\brack{\varepsilon_i(f_i -
+\hat y_i)}.
+$$
+
+**The cross term is a covariance.** $f_i$ is a constant and $\expect[\varepsilon_i] = 0$, so
+$\expect[\varepsilon_i f_i] = 0$ and the cross term is $-2\expect[\varepsilon_i\hat y_i]$. Since
+$\varepsilon_i = y_i - \expect[y_i]$, the product $\expect[\varepsilon_i\hat y_i]$ is $\cov(y_i, \hat y_i)$.
+
+**Subtract.** The difference between the two expected errors at point $i$ is $2\cov(\hat y_i, y_i)$. Averaging over the
+$n$ points gives
+
+$$
+\omega = \expect\brack{\operatorname{Err}_\text{in}} - \expect\brack{\overline{\operatorname{err}}} = \frac{2}{n}\sum_{i=1}^n
+\cov(\hat y_i, y_i).
+$$
+
+The identity needs no assumption about $f$ or about how the fit was made. It holds for a polynomial, a tree, a neural
+network or a procedure that searches over models, provided the inputs are fixed and the noise is independent with
+common variance. Efron extended covariance penalties beyond squared error, to a class of error measures that includes
+the deviance of exponential families <Cite id="efron2004covariance" />.
+
+## Least squares
+
+For a linear smoother, $\hat\yvec = \Smat\yvec$ with $\Smat$ independent of $\yvec$. Then
+$\hat y_i = \sum_j S_{ij}y_j$, and since the targets are independent only the $j = i$ term covaries with $y_i$:
+$\cov(\hat y_i, y_i) = S_{ii}\sigma^2$. Summing,
+
+$$
+\omega = \frac{2\sigma^2}{n}\trace\Smat.
+$$
+
+Least squares with a full-rank $n \times p$ design projects onto the column space of $\Xmat$, with
+$\Smat = \Xmat(\Xmat^\top\Xmat)^{-1}\Xmat^\top$ and $\trace\Smat = p$. So
+
+$$
+\omega = \frac{2p\sigma^2}{n}, \qquad \expect\brack{\operatorname{Err}_\text{in}} = \expect\brack{\overline{\operatorname{err}}} +
+\frac{2p\sigma^2}{n}.
+$$
+
+Each coefficient adds $2\sigma^2/n$ to the optimism. The trace $\trace\Smat$ generalises the parameter count to
+<NoteLink to="ridge-regression">ridge regression</NoteLink>, <NoteLink to="smoothing-splines">smoothing
+splines</NoteLink> and $k$-nearest neighbours, where it is called the
+<NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink>. In general the effective degrees of
+freedom are defined as $\operatorname{df} = \frac{1}{\sigma^2}\sum_i\cov(\hat y_i, y_i)$, so that
+$\omega = 2\sigma^2\operatorname{df}/n$ for any fit.
+
+**Estimating the in-sample error.** Adding an estimate of $\omega$ to the training error estimates the in-sample error.
+
+- With $\hat\sigma^2$ from a low-bias model, $\overline{\operatorname{err}} + 2\hat\sigma^2 p/n$ is Mallows' $C_p$
+  <Cite id="mallows1973" />. With $\trace\Smat$ in place of $p$, it covers linear smoothers. See
+  <NoteLink to="mallows-cp-and-covariance-penalties">Mallows' Cp and covariance penalties</NoteLink>.
+- For Gaussian noise, the log-likelihood is the squared error up to constants, and the same correction is the
+  <NoteLink to="akaike-information-criterion">Akaike information criterion</NoteLink>.
+- For a fit that is weakly differentiable in $\yvec$, Stein's lemma turns each covariance into the expected derivative
+  $\sigma^2\expect[\partial\hat y_i/\partial y_i]$, which can be estimated from one sample (see
+  <NoteLink to="steins-unbiased-risk-estimate">Stein's unbiased risk estimate</NoteLink>).
+- For any fit, the covariances can be estimated by refitting to targets simulated from a model of the noise, a
+  parametric bootstrap <Cite id="efron2004covariance" />.
+
+Efron showed that cross-validation behaves like a randomised version of a covariance penalty. When the noise model is
+believable, the penalty estimates the in-sample error with less variance <Cite id="efron2004covariance" />.
+
+{/* figure pending engine (optimismStudy): Monte Carlo optimism on a fixed design beside 2 df sigma^2 / n, for polynomial degree, ridge penalty and nearest-neighbour fits, and for the best of M noise features */}
+
+## Worked example
+
+**Two extremes.** Take $n$ points and noise variance $\sigma^2$.
+
+1. **The mean.** The fit $\hat y_i = \bar y$ for every $i$ has $\cov(\bar y, y_i) = \sigma^2/n$. The sum over $i$ is
+   $\sigma^2$, so $\operatorname{df} = 1$ and $\omega = 2\sigma^2/n$. One parameter, one unit of optimism.
+2. **An interpolator.** One-nearest-neighbour regression at a training point returns that point's own target, so
+   $\hat y_i = y_i$ and $\cov(\hat y_i, y_i) = \sigma^2$. Then $\operatorname{df} = n$ and $\omega = 2\sigma^2$. The
+   training error is zero, and the in-sample error is $\expect(y_i^0 - y_i)^2 = 2\sigma^2$, the variance of the
+   difference of two independent noises.
+
+**Least squares with ten coefficients.** Let $n = 50$, $p = 10$, $\sigma^2 = 1$ and a correct linear model.
+
+1. The expected training error is $\sigma^2(n - p)/n = 0.80$, since the residual vector lies in an $(n - p)$-dimensional
+   space.
+2. The optimism is $2p\sigma^2/n = 0.40$, so the expected in-sample error is $0.80 + 0.40 = 1.20$.
+3. With Gaussian inputs, the expected extra-sample error is $1 + 10/39 = 1.26$. The in-sample correction recovers most,
+   but not all, of the gap to new inputs.
+
+**Selection adds optimism.** Let the target be pure noise, $\yvec = \epsilonb$ with $\sigma^2 = 1$ and $n = 100$, and
+let $\xvec_1, \dots, \xvec_M$ be $M = 100$ orthonormal candidate features. The procedure picks the single feature most
+correlated with $\yvec$ and fits its coefficient by least squares. Ye called the covariance-based count of such a
+procedure its generalised degrees of freedom <Cite id="ye1998" />.
+
+1. **The fit.** Write $z_j = \xvec_j^\top\yvec$. The $z_j$ are independent $\Gauss(0, 1)$, because the features are
+   orthonormal. The procedure picks $\hat\jmath$ with the largest $z_j^2$ and fits $\hat\yvec = z_{\hat\jmath}\,
+   \xvec_{\hat\jmath}$.
+2. **Its degrees of freedom.** With $f = 0$, $\sum_i\cov(\hat y_i, y_i) = \expect[\hat\yvec^\top\epsilonb] =
+   \expect[z_{\hat\jmath}\,\xvec_{\hat\jmath}^\top\epsilonb] = \expect[z_{\hat\jmath}^2] = \expect[\max_j z_j^2]$. The
+   largest of 100 independent $\chi^2_1$ variables has mean $7.71$, by <NoteLink to="numerical-integration">numerical
+   integration</NoteLink> of its tail. So $\operatorname{df} = 7.71$, not 1.
+3. **The errors.** The expected training error is $(n - 7.71)/n = 0.923$. The expected in-sample error is
+   $1 + \expect\norm{\hat\yvec}^2/n = 1.077$. The optimism is $0.154 = 2 \times 7.71/100$.
+4. **The wrong correction.** Counting one parameter gives $C_p = 0.923 + 0.02 = 0.943$. The empty model $\hat\yvec = 0$
+   has $C_p = 1.00$. The naive count prefers the noise feature. The honest count, $0.923 + 0.154 = 1.077$, rejects it.
+
+## Pitfalls
+
+- **Counting parameters after a search.** Selection, stepwise regression, <NoteLink to="early-stopping">early
+  stopping</NoteLink> and tuning all use $\yvec$ to decide the model. Their optimism exceeds $2p\sigma^2/n$ for the $p$
+  coefficients finally fitted, as the worked example shows. The covariance definition counts the search; a parameter
+  count does not.
+- **Estimating $\sigma^2$ from the same flexible fit.** A model that overfits has a small residual variance, which
+  shrinks the correction exactly when it is needed. Estimate $\sigma^2$ from a low-bias model with few degrees of
+  freedom relative to $n$, or from replicates.
+- **Reading in-sample error as test error.** The optimism corrects for fitting noise at the training inputs. It does not
+  account for new inputs, which raise the error further, especially for flexible fits that extrapolate. Use a held-out
+  set or <NoteLink to="cross-validation">cross-validation</NoteLink> when the inputs at deployment are new.
+- **The optimism is an expectation.** On one sample the realised gap $\operatorname{op}$ can be larger, smaller or even
+  negative. The correction is unbiased on average, not exact.
+- **Optimism one level up.** The validation score of a model chosen from many candidates is optimistic for the same
+  reason the training error is: the score helped make the choice (see
+  <NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>).

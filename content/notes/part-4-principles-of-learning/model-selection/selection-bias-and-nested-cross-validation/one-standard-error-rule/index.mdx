@@ -1,0 +1,155 @@
+---
+title: 'One-standard-error rule'
+kind: technique
+summary: 'The one-standard-error rule picks the simplest candidate whose cross-validation error is within one standard error of the minimum. It gives up a difference that the folds cannot resolve in exchange for a model chosen less by noise.'
+tags: [model-selection, regularisation, worked-example]
+aliases: [1-SE rule, one standard error rule, one-SE rule, lambda.1se]
+requires: [k-fold-cross-validation, overfitting-in-model-selection, standard-error]
+related: [validation-curves, choosing-the-regularisation-strength, cross-validating-a-ridge-penalty, nested-cross-validation, lasso, decision-tree]
+references: [breiman1984, hastie2009, chen2021onese, bengio2004]
+status: draft
+updated: 2026-10-13
+---
+
+import { OneStandardErrorCurve } from './OneStandardErrorCurve'
+
+<Definition>
+Let the candidates $\lambda_1, \dots, \lambda_J$ be ordered from the most complex to the simplest, for example by an
+increasing penalty. Let $\operatorname{CV}(\lambda)$ be the $K$-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink> error of candidate $\lambda$, and
+$\operatorname{SE}(\lambda)$ its <NoteLink to="standard-error">standard error</NoteLink>, the standard deviation of the
+$K$ fold errors divided by $\sqrt K$. Let $\hat\lambda_\text{min}$ minimise $\operatorname{CV}$. The
+**one-standard-error rule** selects the simplest candidate whose error is within one standard error of the minimum
+<Cite id="breiman1984" /> <Cite id="hastie2009" />:
+
+$$
+\hat\lambda_\text{1SE} = \text{the simplest } \lambda \text{ with } \operatorname{CV}(\lambda) \le
+\operatorname{CV}(\hat\lambda_\text{min}) + \operatorname{SE}(\hat\lambda_\text{min}).
+$$
+</Definition>
+
+## Problem
+
+A cross-validation curve is often flat near its minimum. Several candidates have errors that differ by less than the
+noise in the estimates, and which of them comes out lowest depends on the particular split into folds. The minimiser
+$\hat\lambda_\text{min}$ then moves from one split to the next, and its score is biased low because it won a contest
+decided partly by noise (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+
+Complexity is not free when the data cannot tell the candidates apart. A simpler model has fewer effective parameters,
+varies less from sample to sample, is easier to interpret and, for the <NoteLink to="lasso">lasso</NoteLink>, uses fewer
+features. The one-standard-error rule accepts extra complexity only when it buys an improvement larger than the
+estimate's own uncertainty. It answers the select question of <NoteLink to="model-selection">model selection</NoteLink>,
+not the assess question: it chooses a candidate and says nothing unbiased about its error.
+
+## Mechanism
+
+1. **Cross-validate every candidate on the same folds.** Keep the fold errors $e_k(\lambda)$, the mean loss of the model
+   fitted without fold $k$ on fold $k$, for $k = 1, \dots, K$.
+2. **Compute the mean and its standard error** for each candidate:
+
+   $$
+   \operatorname{CV}(\lambda) = \frac1K\sum_{k=1}^K e_k(\lambda), \qquad
+   \operatorname{SE}(\lambda) = \frac{1}{\sqrt K}\sqrt{\frac{1}{K - 1}\sum_{k=1}^K\paren{e_k(\lambda) - \operatorname{CV}(\lambda)}^2}.
+   $$
+
+3. **Find the minimum** $\hat\lambda_\text{min}$ and set the threshold
+   $t = \operatorname{CV}(\hat\lambda_\text{min}) + \operatorname{SE}(\hat\lambda_\text{min})$.
+4. **Select the simplest candidate** with $\operatorname{CV}(\lambda) \le t$. Refit it on all the data.
+
+The rule needs an order of simplicity. For a penalty, larger $\lambda$ is simpler. For a
+<NoteLink to="decision-tree">decision tree</NoteLink>, fewer leaves are simpler; the rule comes from the pruning of
+classification and regression trees <Cite id="breiman1984" />. For $k$-nearest neighbours, larger $k$ is simpler. For
+polynomial regression, lower degree is simpler. The glmnet package reports both choices for the lasso and the
+<NoteLink to="elastic-net">elastic net</NoteLink>, as `lambda.min` and `lambda.1se`.
+
+## Why one standard error
+
+The rule treats the standard error as the resolution of the curve. Two candidates whose estimates differ by less than
+the noise of either estimate are not separated by the data. The minimum is also biased low by an amount of the order of
+its standard error: with $J$ roughly independent, roughly equal candidates, the expected bias is about
+$\operatorname{SE}\sqrt{2\ln J}$ (see <NoteLink to="maximal-inequalities">maximal inequalities</NoteLink>). Moving up by
+one standard error partly undoes this bias before candidates are compared against the minimum.
+
+The rule is a heuristic, not a test. Three things make the comparison rough.
+- **The standard error is too small.** The fold errors share training data and are correlated, and no unbiased
+  estimator of the variance of $K$-fold cross-validation exists <Cite id="bengio2004" />. The usual standard error
+  understates the uncertainty (see <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation
+  estimates</NoteLink>).
+- **It ignores the pairing.** The candidates are scored on the same folds, so their errors are positively correlated.
+  The difference between two candidates is less noisy than either score. A test on the paired fold differences would
+  resolve smaller gaps than one standard error of a single score.
+- **The factor 1 is a convention.** No argument makes one standard error optimal; a multiple $c$ of the standard error
+  gives a family of rules that trade estimated error for simplicity.
+
+## Worked example
+
+The data are $n = 60$ rows of $d = 30$ inputs $\xvec \sim \Gauss(\boldsymbol 0, \eye_{30})$, with target
+$y = \xvec^\top\betavec + \varepsilon$, $\beta_j = 0.85^{j - 1}$ and $\varepsilon \sim \Gauss(0, 1)$.
+<NoteLink to="ridge-regression">Ridge regression</NoteLink> is cross-validated with 10 folds over eleven penalties,
+half a decade apart from 0.01 to 1000. The numbers are those of the figure below at its defaults (seed 1). The fold
+errors of the best penalty, $\lambda = 3.16$, are 3.981, 1.285, 1.322, 0.473, 1.050, 1.537, 0.372, 1.376, 1.044 and
+1.214.
+
+1. **Mean.** The ten fold errors sum to 13.65, so $\operatorname{CV}(3.16) = 1.365$.
+2. **Spread.** The squared deviations from 1.365 sum to 8.886. Dividing by $K - 1 = 9$ gives a variance of 0.987 and a
+   standard deviation of 0.994. One fold, with error 3.981, contributes 6.84 of the 8.886.
+3. **Standard error.** $\operatorname{SE}(3.16) = 0.994/\sqrt{10} = 0.314$.
+4. **Threshold.** $t = 1.365 + 0.314 = 1.680$.
+5. **Scan the candidates.** The full curve, from the most complex candidate to the simplest, with the true error of each
+   ridge fit to all 60 rows, measured on 20 000 fresh rows:
+
+| penalty $\lambda$ | $\operatorname{CV}(\lambda)$ | within $t = 1.680$? | true error |
+| ---: | ---: | --- | ---: |
+| 0.01 | 1.639 | yes | 1.852 |
+| 0.0316 | 1.633 | yes | 1.846 |
+| 0.1 | 1.615 | yes | 1.827 |
+| 0.316 | 1.568 | yes | 1.774 |
+| 1 | 1.468 | yes | 1.660 |
+| 3.16 | **1.365** | yes | 1.553 |
+| 10 | 1.454 | yes | 1.695 |
+| 31.6 | 1.927 | no | 2.263 |
+| 100 | 2.645 | no | 3.191 |
+| 316 | 3.246 | no | 4.054 |
+| 1000 | 3.564 | no | 4.546 |
+
+6. **Select.** The simplest candidate below the threshold is $\lambda = 10$, with $\operatorname{CV}(10) = 1.454$. The
+   rule gives up an estimated 0.088 of error, less than the standard error of 0.314, for about three times more
+   shrinkage.
+7. **Against the truth.** The true error is smallest at $\lambda = 3.16$, the cross-validation minimum, where it is
+   1.553. The rule's choice has true error 1.695, worse by 0.142. Here the simpler model costs more than its estimated
+   0.088.
+
+The standard error is so wide that every candidate from $\lambda = 0.01$ to $\lambda = 10$ lies within it. The folds
+cannot tell those seven penalties apart, and the rule resolves the tie in favour of the simplest.
+
+<OneStandardErrorCurve />
+
+## Cost
+
+The rule costs nothing beyond the cross-validation it reads, provided the fold errors are kept rather than only their
+means.
+
+## Trade-offs
+
+- **Prediction against sparsity.** Chen and Yang studied the rule for the lasso. It often selected the true variables
+  more reliably than the minimum, but for estimating the regression function or for prediction it often did worse. They
+  also found that the standard error it uses is often a poor estimate of the standard deviation of the cross-validation
+  error <Cite id="chen2021onese" />. The rule suits a goal of a simple or sparse model more than a goal of minimum
+  prediction error.
+- **Stability.** Because the threshold sits above a flat region, the selected candidate moves less across splits than
+  the minimiser does, as long as the curve rises steeply on the simple side.
+- **Bias toward underfitting.** On a curve that rises slowly on the simple side, the rule can move far from the minimum
+  and choose a model that is clearly too simple once more data arrive.
+
+## Pitfalls
+
+- **Reading the selected score as an assessment.** The 1-SE choice was selected using the same folds; its score is not
+  an honest estimate of its error. <NoteLink to="nested-cross-validation">Nested cross-validation</NoteLink> with the
+  rule inside the inner loop assesses the procedure.
+- **Using the wrong standard error.** The rule uses the standard error at the minimiser, not at each candidate, and the
+  standard error of the mean of the fold errors, not their standard deviation. Dividing by $\sqrt K$ matters: with 10
+  folds, the standard deviation is about three times the standard error.
+- **No order of simplicity.** The rule needs candidates ordered by complexity. Across unrelated model families, such as
+  a forest against a <Gloss name="svm">support vector machine</Gloss>, "simplest" is undefined.
+- **Too few folds.** With $K = 3$ or 5, the standard error rests on three or five numbers and is itself very noisy.
+  Repeating the cross-validation with fresh splits and averaging the fold errors gives a steadier curve and threshold.

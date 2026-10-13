@@ -1,0 +1,160 @@
+---
+title: 'Uniform convergence'
+kind: concept
+summary: 'A class has the uniform convergence property if the largest gap between true and empirical risk over all its hypotheses, $\sup_h\abs{R(h) - \hat R_S(h)}$, shrinks to zero as the sample grows, at a rate that holds for every distribution. Uniform convergence makes ERM succeed.'
+tags: [learning-theory, generalisation, capacity, worked-example]
+aliases: [uniform convergence property, uniform deviation, ε-representative sample, uniform law of large numbers, Glivenko–Cantelli class, uniform Glivenko–Cantelli class]
+requires: [empirical-risk-minimisation, law-of-large-numbers, hoeffdings-inequality]
+related: [glivenko-cantelli-theorem-and-dkw-inequality, symmetrisation, growth-function-and-sauer-shelah-lemma, vapnik-chervonenkis-dimension, rademacher-complexity, fundamental-theorem-of-statistical-learning, limits-of-uniform-convergence, realisable-and-agnostic-learning]
+references: [vapnik1971, shalevshwartz2014, shalevshwartz2010, bousquet2004, mohri2018]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\Hcal$ be a class of hypotheses, $\ell$ a loss, $R(h)$ the true risk of $h$ under a distribution $\Dcal$, and
+$\hat R_S(h)$ its empirical risk on a sample $S$ of $m$ independent examples from $\Dcal$. The **uniform deviation** of
+$\Hcal$ on $S$ is
+
+$$
+\sup_{h \in \Hcal}\abs{R(h) - \hat R_S(h)}.
+$$
+
+$\Hcal$ has the **uniform convergence property** if there is a function $m_\Hcal(\epsilon, \delta)$ such that, for
+every $\epsilon, \delta \in (0, 1)$, every distribution $\Dcal$ and every $m \ge m_\Hcal(\epsilon, \delta)$, the uniform
+deviation is at most $\epsilon$ with probability at least $1 - \delta$ over $S$ <Cite id="shalevshwartz2014" />. A
+sample on which it is at most $\epsilon$ is called **$\epsilon$-representative**.
+</Definition>
+
+## Intuition
+
+For one fixed hypothesis $h$, the empirical risk $\hat R_S(h)$ is an average of $m$ independent losses. The
+<NoteLink to="law-of-large-numbers" /> makes it converge to $R(h)$, and <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink> bounds the deviation at $\sqrt{\ln(2/\delta)/(2m)}$ for losses in $[0, 1]$. That is the guarantee
+of a held-out test set.
+
+A learning algorithm does not evaluate a fixed hypothesis. It looks at the sample and picks the hypothesis that does
+best on it. The chosen hypothesis depends on $S$, and the empirical risk of a hypothesis chosen for having small
+empirical risk is biased downwards. Hoeffding's inequality for each fixed $h$ says nothing about $h$ chosen this way.
+
+The fix is to ask for more: a sample on which every hypothesis in the class has empirical risk close to its true risk
+at the same time. Then it no longer matters which one the algorithm picks. That demand is uniform convergence. It is
+harder to satisfy than pointwise convergence, and whether it holds depends on the size, or **capacity**, of the class.
+
+## Definition
+
+Two strengths of the property appear in the literature.
+
+- **Glivenko–Cantelli class** for a fixed distribution: the uniform deviation tends to zero almost surely as
+  $m \to \infty$. The name comes from the <NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality" />, which proves
+  it for the class of half-lines.
+- **Uniform Glivenko–Cantelli class**: the convergence holds at a rate that is the same for every distribution. This
+  is the uniform convergence property of the definition, the one learning theory uses, because the distribution is
+  unknown.
+
+The function $m_\Hcal(\epsilon, \delta)$ is the **sample complexity of uniform convergence**. For a finite class with a
+loss in $[0, 1]$, Hoeffding's inequality and the <NoteLink to="union-bound" /> give
+
+$$
+m_\Hcal(\epsilon, \delta) \le \left\lceil\frac{\ln(2\abs{\Hcal}/\delta)}{2\epsilon^2}\right\rceil.
+$$
+
+Uniformity over a finite class adds $\ln\abs{\Hcal}$ to $\ln(2/\delta)$.
+
+## Why ERM needs it
+
+**Uniform convergence is sufficient.** Let $\hat h$ minimise the empirical risk over $\Hcal$
+(<Gloss name="erm" />), and let $h^*$ be a hypothesis with $R(h^*) = \inf_{h \in \Hcal}R(h)$. Write
+$\Delta = \sup_{h}\abs{R(h) - \hat R_S(h)}$. Then
+
+$$
+R(\hat h) \le \hat R_S(\hat h) + \Delta \le \hat R_S(h^*) + \Delta \le R(h^*) + 2\Delta.
+$$
+
+The first and last steps use the definition of $\Delta$, each for one hypothesis. The middle step uses that $\hat h$
+minimises the empirical risk. On an $\epsilon/2$-representative sample, ERM is within $\epsilon$ of the best in the
+class. The uniform convergence property therefore makes ERM an agnostic PAC learner with sample complexity at most
+$m_\Hcal(\epsilon/2, \delta)$ <Cite id="shalevshwartz2014" />. The same three-term argument is the decomposition step of
+the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>; see
+<NoteLink to="empirical-risk-minimisation" />.
+
+**Only one side of the argument needs uniformity.** The last step concerns the fixed hypothesis $h^*$, for which
+Hoeffding's inequality suffices. The first step concerns $\hat h$, which depends on the data, and needs the one-sided
+uniform bound $\sup_h(R(h) - \hat R_S(h))$.
+
+**Pointwise convergence is not enough.** Let $x$ be uniform on $[0, 1]$, let every label be $y = 1$, and let $\Hcal$
+contain, for every finite set $A \subset [0, 1]$, the classifier $h_A(x) = \indicator[x \in A]$ together with the
+constant classifier $h_1(x) = 1$. Each $h_A$ predicts 0 almost everywhere, so $R(h_A) = 1$, and for each fixed $A$ the
+empirical risk converges to 1. Uniform convergence fails: for $A = \set{x_1, \dots, x_m}$, the classifier $h_A$ has
+empirical risk 0, so $\Delta = 1$ for every $m$. An ERM that breaks ties towards $h_A$ memorises the sample and has
+true risk 1, while $h_1$ has risk 0. The class can fit any labelling of any finite sample: its
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> is infinite.
+
+**For binary classification, it is also necessary.** The
+<NoteLink to="fundamental-theorem-of-statistical-learning" /> states that a binary class with the 0–1 loss has the
+uniform convergence property if and only if it is PAC learnable, if and only if its VC dimension is finite
+<Cite id="shalevshwartz2014" />. In more general learning problems, learnability can hold without uniform convergence
+<Cite id="shalevshwartz2010" />.
+
+## The tools that prove it
+
+Every bound on the uniform deviation makes the third move of the recipe: it turns a deviation bound for one hypothesis
+into one for the whole class. The tools differ in how they count the class.
+
+| Tool | Class it handles | Capacity it pays | Deviation at confidence $1 - \delta$ |
+| --- | --- | --- | --- |
+| <NoteLink to="union-bound" /> | finite | $\ln\abs{\Hcal}$ | $\sqrt{\ln(2\abs{\Hcal}/\delta)/(2m)}$ |
+| <NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality">DKW inequality</NoteLink> | half-lines | none | $\sqrt{\ln(2/\delta)/(2m)}$ |
+| <NoteLink to="symmetrisation" /> with the <NoteLink to="growth-function-and-sauer-shelah-lemma">growth function</NoteLink> | binary, VC dimension $d$ | $\ln\Pi_\Hcal(2m) \le d\ln(2em/d)$ | $\sqrt{8(\ln\Pi_\Hcal(2m) + \ln(4/\delta))/m}$ |
+| <NoteLink to="rademacher-complexity" /> | real-valued, bounded | $\Rad_m(\ell \circ \Hcal)$ | $2\Rad_m + \sqrt{\ln(2/\delta)/(2m)}$ |
+| <NoteLink to="covering-numbers-and-metric-entropy">Covering numbers</NoteLink> and <NoteLink to="chaining-and-dudley-entropy-integral">chaining</NoteLink> | real-valued, metric structure | metric entropy at every scale | of order $\sqrt{d/m}$ for VC classes |
+
+The Rademacher route is completed by <NoteLink to="massarts-finite-class-lemma" />, which bounds the Rademacher
+complexity of a finite projection, and the <NoteLink to="contraction-lemma" />, which carries a bound from scores to
+Lipschitz losses. Each row is uniform over all distributions, so each is pessimistic for any particular one.
+
+{/* figure pending engine (A2 riskCurves, learningCurve): the empirical risk curve of thresholds on one sample wobbling around the true risk curve, with the supremum gap marked; and the measured uniform deviation against m beside the finite-class, DKW and VC bounds */}
+
+## Worked example
+
+**A finite class.** Let $\Hcal$ be 1,000 threshold classifiers on a grid, with the <NoteLink to="surrogate-losses">0–1
+loss</NoteLink>, $m = 1{,}000$ and $\delta = 0.05$.
+
+1. **One hypothesis.** Hoeffding's inequality gives a deviation of $\sqrt{\ln 40/2{,}000} = 0.043$.
+2. **All 1,000 at once.** The union bound gives $\sqrt{\ln(2{,}000/0.05)/2{,}000} = \sqrt{10.60/2{,}000} = 0.073$.
+   Uniformity over 1,000 hypotheses costs a factor 1.7.
+3. **ERM.** The excess risk of ERM over the best grid threshold is at most $2 \times 0.073 = 0.146$.
+4. **Sample size.** An excess risk of at most $0.05$ needs $\Delta \le 0.025$, so
+   $m \ge \ln(40{,}000)/(2 \times 0.025^2) = 8{,}478$. A single held-out evaluation to the same accuracy needs
+   $\ln 40/(2 \times 0.025^2) = 2{,}952$.
+
+**All thresholds.** The class of all thresholds on the line is infinite. The DKW route of
+<NoteLink to="glivenko-cantelli-theorem-and-dkw-inequality" /> bounds its uniform deviation at $m = 1{,}000$ by
+$0.094$. The general route through symmetrisation and the growth function $\Pi(2m) = 2{,}001$ gives $0.310$. Neither
+is vacuous, and they differ by a factor 3.3 on the same class. The general tools trade sharpness for generality.
+
+**The exact answer.** For the class of half-line indicators $\indicator[x \le t]$ the law of the uniform deviation is
+known exactly: it is the Kolmogorov–Smirnov statistic. At $m = 1{,}000$ its 95% quantile is $0.043$, equal to the DKW
+value to two digits and seven times below the symmetrisation bound for the same class (see
+<NoteLink to="symmetrisation" />).
+
+## Assumptions
+
+- **Independent, identically distributed examples.** Every tool above uses independence. Dependent data need mixing
+  conditions or other arguments.
+- **Bounded losses.** The deviation bounds use losses in a bounded range. Unbounded losses need truncation or
+  moment conditions.
+- **A class fixed before the data.** The supremum is over a class chosen in advance. A class chosen after looking at
+  the sample, such as a ball around the trained weights, needs a union bound over the possible choices.
+
+## Pitfalls
+
+- **Uniform convergence is a worst case.** It bounds the deviation of every hypothesis, including those the algorithm
+  would never choose. <NoteLink to="algorithm-dependent-bounds">Algorithm-dependent bounds</NoteLink>, such as
+  <NoteLink to="algorithmic-stability" />, can be much tighter. For overparameterised models, bounds through uniform
+  convergence can be provably vacuous even when the algorithm generalises; see
+  <NoteLink to="limits-of-uniform-convergence" />.
+
+- **Uniform over distributions is not uniform over the class only.** A class can be Glivenko–Cantelli for one
+  distribution and fail to have the uniform convergence property; learning theory needs the version that holds for
+  every distribution.

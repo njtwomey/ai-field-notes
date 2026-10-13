@@ -1,0 +1,196 @@
+---
+title: 'Benign overfitting'
+kind: concept
+summary: 'Overfitting is benign when a predictor fits noisy training data exactly yet its excess risk tends to zero. For minimum-norm linear regression this needs a covariance with a few large directions for the signal and many small ones that absorb the noise.'
+tags: [learning-theory, generalisation, interpolation, worked-example]
+aliases: [harmless interpolation, effective rank, tempered overfitting, catastrophic overfitting]
+requires: [double-descent, pseudoinverse, bias-variance-decomposition]
+related: [implicit-regularisation, ridge-regression, neural-tangent-kernel, limits-of-uniform-convergence, kernel-ridge-regression, principal-component-analysis]
+references: [bartlett2020, tsigler2023, muthukumar2020, mallinar2022, bartlett2021, belkin2021, hastie2022]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+A predictor **interpolates** when it fits every training example exactly, noise included. Its overfitting is **benign**
+when its <NoteLink to="empirical-risk-minimisation">excess risk</NoteLink> over the best predictor nevertheless tends to
+zero as the sample size $n$ grows. For the minimum-norm interpolant in <NoteLink to="linear-regression">linear
+regression</NoteLink> with covariance $\Sigmamat$, eigenvalues $\lambda_1 \ge \lambda_2 \ge \cdots$, Bartlett, Long,
+Lugosi and Tsigler characterised benign overfitting through two **effective ranks**
+
+$$
+r_k(\Sigmamat) = \frac{\sum_{i > k}\lambda_i}{\lambda_{k+1}}, \qquad
+R_k(\Sigmamat) = \frac{\paren{\sum_{i > k}\lambda_i}^2}{\sum_{i > k}\lambda_i^2}.
+$$
+
+With $k^* = \min\set{k \ge 0 : r_k(\Sigmamat) \ge bn}$ for a constant $b > 1$, overfitting is benign when $r_0/n$,
+$k^*/n$ and $n/R_{k^*}$ all tend to zero <Cite id="bartlett2020" />.
+</Definition>
+
+## Intuition
+
+The classical argument against interpolation is that a function passing through every noisy target must bend to fit
+the noise, and the bending shows up as error on new inputs. The <NoteLink to="double-descent">double descent</NoteLink>
+curve already shows that this need not happen when the model has many more parameters than examples. Benign
+overfitting asks when the error of the interpolant goes all the way down to the noise level.
+
+The answer for linear regression is a division of labour among the directions of the input space. A few directions with
+large variance carry the signal, and the interpolant estimates them roughly as least squares would. Very many
+directions with tiny variance carry almost no signal. The interpolant uses them to fit the noise: each noisy residual
+is absorbed by a small coefficient spread over thousands of these directions. Because each of those directions has
+tiny variance, the part of the fit that absorbs the noise contributes little to the prediction at a new input.
+
+Two things can go wrong. With too few small directions, the noise cannot be spread thinly enough and the variance stays
+large. With too much total variance in the small directions, they also absorb the signal, and the estimate of the large
+directions is shrunk towards zero. The effective ranks measure exactly these two failures.
+
+## The minimum-norm interpolant
+
+Let $\xvec \in \reals^p$ (or a Hilbert space) have mean zero and covariance $\Sigmamat$, and let
+$y = \xvec^\top\thetavec^* + \varepsilon$ with noise of variance $\sigma^2$, independent of $\xvec$. Stack $n$ training
+inputs as the rows of $\Xmat$, with $p > n$ and $\Xmat$ of full row rank. The minimum-norm interpolant is
+
+$$
+\hat\thetavec = \Xmat^\top(\Xmat\Xmat^\top)^{-1}\yvec,
+$$
+
+the solution that <NoteLink to="implicit-regularisation">gradient descent from zero</NoteLink> finds. Its excess risk is
+$R(\hat\thetavec) = \expect[(y - \xvec^\top\hat\thetavec)^2] - \sigma^2 =
+(\hat\thetavec - \thetavec^*)^\top\Sigmamat(\hat\thetavec - \thetavec^*)$.
+
+Write $\Pmat = \Xmat^\top(\Xmat\Xmat^\top)^{-1}\Xmat$ for the projection onto the row space and substitute
+$\yvec = \Xmat\thetavec^* + \varepsilonvec$, where $\varepsilonvec$ holds the $n$ noise terms:
+
+$$
+\hat\thetavec - \thetavec^* = -(\eye - \Pmat)\thetavec^* + \Xmat^\top(\Xmat\Xmat^\top)^{-1}\varepsilonvec.
+$$
+
+The first term is the part of $\thetavec^*$ the data cannot see; the second is the fitted noise. Averaging over the
+noise, the cross term vanishes and the excess risk splits into a bias and a variance, as in the
+<NoteLink to="bias-variance-decomposition">bias–variance decomposition</NoteLink>:
+
+$$
+B = \thetavec^{*\top}(\eye - \Pmat)\Sigmamat(\eye - \Pmat)\thetavec^*, \qquad
+V = \sigma^2\trace\paren{(\Xmat\Xmat^\top)^{-2}\Xmat\Sigmamat\Xmat^\top}.
+$$
+
+## How the tail acts as a ridge
+
+The mechanism becomes visible when the coordinates are split at an index $k$, in the eigenbasis of $\Sigmamat$. Write
+$\Xmat = [\Xmat_{\le k}, \Xmat_{> k}]$ for the first $k$ coordinates and the rest. Then
+
+$$
+\Xmat\Xmat^\top = \Xmat_{\le k}\Xmat_{\le k}^\top + \Xmat_{> k}\Xmat_{> k}^\top.
+$$
+
+1. **The tail Gram matrix is nearly a multiple of the identity.** Entry $(i, j)$ of $\Xmat_{> k}\Xmat_{> k}^\top$ is a
+   sum over the tail coordinates of $x_{il}x_{jl}$. On the diagonal its mean is $\sum_{l > k}\lambda_l$. Off the
+   diagonal its mean is zero. When the tail has many coordinates of comparable size, both concentrate, and
+   $\Xmat_{> k}\Xmat_{> k}^\top \approx \lambda_{\text{eff}}\eye_n$ with $\lambda_{\text{eff}} = \sum_{l > k}\lambda_l$.
+   The condition $r_k \ge bn$ says that the tail has enough effective dimensions, compared with $n$, for this to hold.
+2. **The head is fitted by ridge regression.** The first $k$ coordinates of $\hat\thetavec$ are $\Xmat_{\le k}^\top(\Xmat\Xmat^\top)^{-1}\yvec \approx \Xmat_{\le k}^\top(\Xmat_{\le k}\Xmat_{\le k}^\top +
+   \lambda_{\text{eff}}\eye)^{-1}\yvec$, which is <NoteLink to="ridge-regression">ridge regression</NoteLink> on the
+   head with penalty $\lambda_{\text{eff}}$. Its variance is about $\sigma^2 k/n$, as for least squares with $k$
+   parameters. Its bias is small when $\lambda_{\text{eff}}$ is small compared with $n\lambda_i$ for the directions $i$
+   that carry the signal; $r_0 \ll n$ guarantees this for the largest one.
+3. **The tail absorbs the noise.** The tail coordinates of $\hat\thetavec$ are about
+   $\Xmat_{> k}^\top\yvec/\lambda_{\text{eff}}$. Their contribution to the variance is about
+   $\sigma^2\trace(\Xmat_{> k}\Sigmamat_{> k}\Xmat_{> k}^\top)/\lambda_{\text{eff}}^2 =
+   \sigma^2 n\sum_{l > k}\lambda_l^2/(\sum_{l > k}\lambda_l)^2 = \sigma^2 n/R_k$. It is small when $R_k \gg n$: many
+   tail directions of similar size.
+
+The tail does two jobs at once. It interpolates the noise at a variance cost of $n/R_k$, and it regularises the head
+like a ridge penalty of size $\lambda_{\text{eff}}$. This is the heuristic behind the theorem; the proof makes each
+approximation precise.
+
+## When overfitting is benign
+
+**Theorem** <Cite id="bartlett2020" />. Under sub-Gaussian assumptions on $\xvec$ and the noise, there are constants
+$b, c > 1$ such that, for $\delta < 1$ with $\ln(1/\delta) < n/c$: if $k^* \ge n/c$ then
+$\expect R(\hat\thetavec) \ge \sigma^2/c$; otherwise, with probability at least $1 - \delta$,
+
+$$
+R(\hat\thetavec) \le c\norm{\thetavec^*}^2\norm{\Sigmamat}\max\set{\sqrt{\frac{r_0}{n}}, \frac{r_0}{n},
+\sqrt{\frac{\ln(1/\delta)}{n}}} + c\ln(1/\delta)\,\sigma_y^2\paren{\frac{k^*}{n} + \frac{n}{R_{k^*}}},
+$$
+
+and $\expect R(\hat\thetavec) \ge \frac{\sigma^2}{c}\paren{\frac{k^*}{n} + \frac{n}{R_{k^*}}}$, where $\sigma_y^2$ is
+the sub-Gaussian parameter of the noise. The variance term is sharp up to constants.
+
+The three ratios read directly from the mechanism. $r_0/n$ small means the total variance is small compared with $n$
+times the largest eigenvalue, so the ridge implied by the tail does not swamp the head. $k^*/n$ small means only a few
+directions need to be estimated as in least squares. $n/R_{k^*}$ small means the tail has many more effective
+dimensions than there are examples.
+
+Two families of spectra show how narrow the condition is <Cite id="bartlett2020" />:
+
+- **Infinite dimension, fixed covariance.** For $\lambda_k = k^{-\alpha}\ln^{-\beta}(k + 1)$, overfitting is benign if
+  and only if $\alpha = 1$ and $\beta > 1$: the eigenvalues must decay just fast enough to have a finite sum.
+- **Finite dimension with an isotropic floor.** For $\lambda_k = \gamma_k + \varepsilon_n$ on $p_n$ coordinates, with
+  $\gamma_k$ decaying exponentially, overfitting is benign if and only if $p_n$ grows faster than $n$ and the total
+  floor $\varepsilon_n p_n$ is $o(n)$ but not exponentially small. High dimension with a small, flat tail is the generic
+  benign case.
+
+## Worked example
+
+Take $n = 100$ examples, noise $\sigma = 1$, and a signal $\thetavec^*$ of norm 1 spread over five directions of
+variance 1. Predicting zero has excess risk $\thetavec^{*\top}\Sigmamat\thetavec^* = 1$. Least squares on the five true
+directions alone, an oracle that knows where the signal is, has excess risk about $\sigma^2 \cdot 5/(100 - 5 - 1) =
+0.053$. The tail varies across four cases, and the excess risks are averages over 40 simulated training sets.
+
+| Tail | $r_0$ | $r_5$ | $R_5$ | Excess risk | Bias | Variance |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10,000 directions of variance 0.001 | 15 | 10,000 | 10,000 | **0.071** | 0.009 | 0.065 |
+| 200 directions of variance 0.05 | 15 | 200 | 200 | 0.98 | 0.005 | 0.98 |
+| 10,000 directions of variance 0.1 | 1,005 | 10,000 | 10,000 | 0.84 | 0.83 | 0.010 |
+| isotropic: all 2,000 directions variance 1 | 2,000 | 1,995 | 1,995 | 1.00 | 0.95 | 0.053 |
+
+1. **The benign case.** The first tail has total variance $\lambda_{\text{eff}} = 10$. The three ratios are
+   $r_0/n = 0.15$, $k^*/n = 0.05$ (with $k^* = 5$ for any $b$ between 1 and 100) and $n/R_5 = 0.01$. The interpolant
+   fits all 100 noisy targets exactly, and its excess risk, 0.071, is close to the oracle's 0.053. The bias matches step
+   2 of the mechanism: a ridge of 10 on the head shrinks it by a factor $100/110$, and $(1 - 100/110)^2 = 0.008$.
+2. **Too few tail directions.** The second tail has the same total variance but only $R_5 = 200 = 2n$ effective
+   dimensions. The noise cannot be spread thinly, and the variance, 0.98, is as large as the signal. The approximation
+   of step 1 also fails here, so the measured variance exceeds the heuristic $n/R_5 = 0.5$.
+3. **Too heavy a tail.** The third tail has total variance 1,000, so $r_0/n \approx 10$. Its implied ridge of 1,000
+   shrinks the head by $100/1{,}100$, and the bias is $(1 - 0.091)^2 = 0.83$, as measured. The noise is absorbed well,
+   variance 0.010, but the signal is absorbed too.
+4. **Isotropic features.** With every direction alike, the interpolant cannot tell signal from tail. It recovers a
+   fraction $n/p = 0.05$ of $\thetavec^*$ and its bias is about $1 - n/p = 0.95$, as the
+   <NoteLink to="double-descent">double descent</NoteLink> formula predicts.
+
+The theorem's constants $b$ and $c$ are not given explicitly, so the bound cannot be evaluated to a number. It decides
+which cases are benign as $n$ grows, and the table shows the same ordering at $n = 100$.
+
+{/* figure pending engine (benign-overfitting study, see lt-complexity log): excess risk, bias and variance of the
+minimum-norm interpolant against the number and the variance of the tail directions, beside the three ratios of the theorem,
+with the oracle least-squares risk as a reference */}
+
+## Beyond linear regression
+
+- **Ridge and kernels.** Tsigler and Bartlett removed the independence assumption, gave sharp bounds on the bias, and
+  covered ridge regression and kernel regression. They found conditions under which the optimal ridge penalty is
+  negative: the tail already over-regularises the head, and a negative penalty undoes some of it
+  <Cite id="tsigler2023" />.
+- **Harmless interpolation.** Muthukumar, Vodrahalli, Subramanian and Sahai showed that the error of fitting pure noise
+  decays to zero with the number of features, and named two failure modes: signal "bleeding" into many alias features,
+  and noise overfitted by sparse feature selectors <Cite id="muthukumar2020" />.
+- **Benign, tempered, catastrophic.** Many interpolating methods are neither benign nor catastrophic. Kernels with
+  power-law spectra, including the Laplace kernel and the <Gloss name="relu" /> <Gloss name="ntk">neural tangent
+  kernel</Gloss>, overfit in a **tempered** way: noise in the training set causes a bounded but nonzero excess risk.
+  Deep networks trained to interpolation behave the same way empirically, while those stopped early are closer to benign
+  <Cite id="mallinar2022" />.
+
+## Pitfalls
+
+- **Benign is not optimal.** In the worked example the interpolant's 0.071 is worse than the oracle's 0.053, and a
+  tuned ridge would be at least as good as the interpolant. Benign overfitting says that interpolation costs little,
+  not that it helps.
+- **The spectrum is the whole story.** The same estimator is benign, high-variance or high-bias depending only on the
+  covariance. Isotropic features in high dimension are not benign.
+- **Asymptotic and in high dimension.** The definition is a limit along a sequence of problems with $n \to \infty$ and
+  the covariance changing with $n$. A fixed covariance in infinite dimension is benign only for a narrow band of
+  eigenvalue decay.
+- **<NoteLink to="uniform-convergence">Uniform convergence</NoteLink> bounds can be vacuous here.** The interpolant's
+  training error is zero and its risk is small, but bounds that hold uniformly over a class containing it can be vacuous
+  in this regime (see <NoteLink to="limits-of-uniform-convergence">limits of uniform convergence</NoteLink>).

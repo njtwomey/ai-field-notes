@@ -1,0 +1,172 @@
+---
+title: 'Consistency of learning algorithms'
+kind: concept
+summary: 'A learning algorithm is consistent for a distribution if its risk converges to the Bayes risk as the sample grows, and universally consistent if it does so for every distribution. Universal consistency is possible; a rate of convergence that holds for every distribution is not.'
+tags: [learning-theory, consistency, risk, worked-example]
+aliases: [consistency, universal consistency, universally consistent, strong consistency, Stone's theorem, slow rates of convergence]
+requires: [empirical-risk-minimisation, law-of-large-numbers]
+related: [nearest-neighbour-consistency, no-free-lunch-theorem, k-nearest-neighbours, rates-and-consistency, minimax-rates-for-nonparametric-regression, fundamental-theorem-of-statistical-learning, structural-risk-minimisation, uniform-convergence]
+references: [devroye1996, stone1977, cover1967, vapnik1998, tsybakov2009]
+status: draft
+updated: 2026-10-12
+---
+
+import { NeighbourConsistency } from './NeighbourConsistency'
+
+<Definition>
+A learning rule maps each sample $S$ of $m$ independent draws from a distribution $\Dcal$ to a predictor $h_m$. Its risk
+$R(h_m)$ is a <NoteLink to="random-variable">random variable</NoteLink> through $S$. The rule is **consistent** for
+$\Dcal$ if $\expect[R(h_m)] \to R^*$ as $m \to \infty$, where $R^*$ is the <NoteLink to="bayes-decision-rule">Bayes
+risk</NoteLink> of $\Dcal$, and **strongly consistent** if $R(h_m) \to R^*$ with probability one. It is **universally
+consistent** if it is consistent for every distribution $\Dcal$ <Cite id="devroye1996" />. Universally consistent rules
+exist, but none has a rate of convergence that holds for every distribution.
+</Definition>
+
+## Intuition
+
+Consistency asks the weakest question one can ask of a learner: given unlimited data, does it eventually do as well as
+anything could? A rule that fails this test has an error floor that no amount of data removes. A rule that passes it
+may still be slow.
+
+Two things can stop a learner from reaching the Bayes risk. Its class may be too small, which leaves an approximation
+error at every sample size. Or its estimates may stay noisy, which leaves an estimation error that never averages away.
+A universally consistent rule must avoid both on every distribution at once. It must let its class grow with the
+sample, so that the approximation error vanishes, and grow it slowly enough that the estimation error vanishes too.
+<NoteLink to="k-nearest-neighbours">$k$-nearest neighbours</NoteLink> with $k \to \infty$ and $k/m \to 0$ is the
+standard example: neighbourhoods shrink, so the rule becomes local enough to follow any target, and the number of
+neighbours grows, so their average label settles down.
+
+## Definitions
+
+Let $\Dcal$ be a distribution on $\Xcal \times \Ycal$, $\ell$ a loss, $R(h)$ the risk of a predictor, and
+$R^* = \inf_h R(h)$ the Bayes risk over all measurable predictors. A learning rule is a sequence of maps
+$(h_m)_{m \ge 1}$ from samples of size $m$ to predictors.
+
+- **Consistent for $\Dcal$:** $\expect[R(h_m)] \to R^*$. Since $R(h_m) \ge R^*$, this is the same as $R(h_m) \to R^*$ in
+  probability.
+- **Strongly consistent for $\Dcal$:** $R(h_m) \to R^*$ almost surely.
+- **Universally (strongly) consistent:** (strongly) consistent for every $\Dcal$ on $\Xcal \times \Ycal$.
+
+A different notion compares with a class rather than with the Bayes risk. <Gloss name="erm" /> over a class $\Hcal$ is
+**consistent for $\Hcal$** if $R(\hat h_m) \to \inf_{h \in \Hcal} R(h)$ for every $\Dcal$. For binary classification
+this holds exactly when $\Hcal$ has finite <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink>, so that
+<NoteLink to="uniform-convergence">uniform convergence</NoteLink> holds over the class <Cite id="vapnik1998" />. The
+statement is part of the <NoteLink to="fundamental-theorem-of-statistical-learning">fundamental theorem of statistical
+learning</NoteLink>. On an infinite domain, ERM over a fixed class with finite VC dimension is not universally
+consistent: for some distribution the class contains no Bayes predictor, and the approximation error stays at every
+sample size.
+
+Universal consistency is therefore a property of rules whose class grows with $m$: local averaging rules,
+<NoteLink to="structural-risk-minimisation">structural risk minimisation</NoteLink> over a sequence of nested classes,
+and sieve estimators <Cite id="devroye1996" />.
+
+## Stone's theorem
+
+Stone's theorem gives conditions under which a local averaging rule is universally consistent
+<Cite id="stone1977" />. Such a rule estimates the regression function $\eta(x) = \expect[y \mid x]$ by a weighted
+average of the training labels,
+
+$$
+\hat\eta_m(x) = \sum_{i=1}^m W_{m,i}(x)\,y_i,
+$$
+
+with non-negative weights $W_{m,i}(x)$ that depend on $x$ and the training inputs and sum to 1. For classification with
+labels in $\set{0, 1}$, the rule predicts 1 when $\hat\eta_m(x) > \frac12$. Write $X$ for a new input drawn from the
+marginal of $\Dcal$, independent of the sample. The theorem's three conditions are, for every distribution of $X$
+<Cite id="devroye1996" />:
+
+1. **No point dominates in aggregate.** There is a constant $c$ such that
+   $\expect\brack{\sum_i W_{m,i}(X) f(X_i)} \le c\,\expect[f(X)]$ for every non-negative $f$ with
+   $\expect[f(X)] < \infty$.
+2. **The weights become local.** For every $a > 0$,
+   $\expect\brack{\sum_i W_{m,i}(X)\,\indicator[\norm{X_i - X} > a]} \to 0$.
+3. **No single weight stays large.** $\expect\brack{\max_i W_{m,i}(X)} \to 0$.
+
+Under these conditions the classification rule is universally consistent, and the regression estimate satisfies
+$\expect[(\hat\eta_m(X) - \eta(X))^2] \to 0$ whenever $\expect[y^2] < \infty$.
+
+The second condition controls the bias: the estimate at $x$ uses labels from points that are ever closer to $x$, so it
+averages values of $\eta$ near $\eta(x)$. The third condition controls the variance: no single noisy label carries a
+fixed share of the estimate, so the noise averages out. The first is a technical regularity that rules out weights that
+concentrate on a few points for some input distributions.
+
+**$k$-nearest neighbours.** The $k$-NN rule gives weight $1/k$ to each of the $k$ nearest training inputs and 0 to the
+rest. The largest weight is $1/k$, so the third condition holds when $k \to \infty$. The $k$
+<NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> lie within a radius that tends to zero when $k/m \to 0$,
+which gives the second condition. The first holds with a constant that depends only on the dimension. Hence
+<Cite id="devroye1996" />:
+
+> If $k \to \infty$ and $k/m \to 0$, the $k$-nearest-neighbour rule is universally consistent.
+
+The choice $k = \lceil\sqrt m\,\rceil$ satisfies both conditions. Histogram rules with cells of side $h_m \to 0$ and
+$mh_m^d \to \infty$, and kernel rules with the same bandwidth conditions, are universally consistent by the same
+theorem. The details for nearest neighbours are in <NoteLink to="nearest-neighbour-consistency">nearest-neighbour
+consistency</NoteLink>.
+
+**When $k$ stays fixed.** Each of the two conditions on $k$ is necessary for some distribution. With $k = 1$ in binary
+classification, the risk of the nearest-neighbour rule converges to $\expect[2\eta(X)(1 - \eta(X))]$, which lies between
+$R^*$ and $2R^*(1 - R^*)$ <Cite id="cover1967" />. It equals $R^*$ only when $\eta(X)$ takes no values other than $0$,
+$\frac12$ and $1$. The nearest neighbour comes ever closer to $x$, but its label is still a single noisy draw.
+
+<NeighbourConsistency />
+
+## No uniform rate
+
+Universal consistency says the risk converges for every distribution. It says nothing about how fast, and no
+statement about speed can hold for every distribution.
+
+**Theorem (arbitrarily slow rates).** Let $a_1 \ge a_2 \ge \dots$ be positive numbers converging to zero, with
+$a_1 \le \frac1{16}$. For every sequence of classification rules there is a distribution with $R^* = 0$ such that
+$\expect[R(h_m)] \ge a_m$ for every $m$ <Cite id="devroye1996" />.
+
+The sequence $a_m$ can be chosen to decrease as slowly as desired. Every rule, including every universally consistent
+one, is that slow on some problem. A finite-sample version is starker: for every rule, every sample size $m$ and every
+$\epsilon > 0$, some distribution with $R^* = 0$ gives $\expect[R(h_m)] \ge \frac12 - \epsilon$
+<Cite id="devroye1996" />. The construction puts the input mass on many more points than $m$, with labels set by a
+target the rule cannot guess from the few points it has seen. It is the argument of the
+<NoteLink to="no-free-lunch-theorem">no free lunch theorem</NoteLink> in a form that applies to one rule at a time.
+
+**Rates need assumptions.** Every rate in <NoteLink to="statistical-learning-theory">learning theory</NoteLink> comes
+with a restriction on the distribution:
+
+- **A restricted class.** Relative to a class of VC dimension $d$, ERM's excess risk over the best in class falls like
+  $\sqrt{d/m}$, for every distribution. The price is the approximation error, which this rate ignores.
+- **Smoothness.** If $\eta$ is Lipschitz on $[0, 1]^p$, the best achievable rate for the squared error of a regression
+  estimate is $m^{-2/(2 + p)}$ <Cite id="tsybakov2009" />. See
+  <NoteLink to="minimax-rates-for-nonparametric-regression">minimax rates for nonparametric regression</NoteLink>.
+- **Low noise.** Margin and noise conditions on $\eta$ near the decision boundary give rates faster than
+  $1/\sqrt m$ (see <NoteLink to="rates-and-consistency">excess risk and rates</NoteLink>).
+
+## Worked example
+
+**Fixed $k$ against growing $k$.** In the figure, the labels are $y = \sin(\pi x) + \sigma\varepsilon$ with
+$\sigma = 0.5$, so the Bayes risk for <NoteLink to="regression-losses">squared loss</NoteLink> is $\sigma^2 = 0.25$.
+
+1. **$k = 1$.** The prediction at $x$ is one noisy label from a point near $x$. Its error on a fresh noisy target is the
+   sum of two independent noise variances, so the risk tends to $2\sigma^2 = 0.5$. At $m = 320$ it is about $0.49$. The
+   excess risk stays near $0.25$, the whole Bayes risk again.
+2. **$k = 10$.** The average of 10 noisy labels has noise variance $\sigma^2/10$, so the risk tends to
+   $\sigma^2(1 + 1/10) = 0.275$, which is about what the figure shows at $m = 320$. The excess risk stays at $0.025$.
+3. **$k = \sqrt m$.** At $m = 320$, $k = 18$ and the risk is about $0.266$. The noise term $\sigma^2/k$ keeps falling as
+   $k$ grows, and the neighbourhoods keep shrinking because $k/m = 1/\sqrt m \to 0$. Only this rule's excess risk tends
+   to zero.
+
+**The cost of dimension.** Under the Lipschitz assumption, halving the excess risk multiplies the required sample size
+by $2^{(2 + p)/2}$. In one dimension that factor is $2.8$. In ten dimensions it is $2^6 = 64$. Consistency holds in
+every dimension; the sample sizes at which it becomes visible do not.
+
+**Classification.** Suppose $\eta(x)$ is $0.1$ or $0.9$ everywhere, so $R^* = 0.1$. The 1-NN risk tends to
+$2 \times 0.1 \times 0.9 = 0.18$, nearly twice the Bayes risk, whatever the sample size. A $k$-NN rule with
+$k = \lceil\sqrt m\,\rceil$ tends to $0.1$.
+
+## Pitfalls
+
+- **Consistency is asymptotic.** A consistent rule can have a large error at every sample size anyone will collect, and
+  an inconsistent rule, such as 1-NN, is often competitive in practice when the noise is small.
+- **Consistency for one class is not consistency.** ERM over a fixed class converges to the best in the class, not to
+  the Bayes risk. The two meet only when the class contains a Bayes predictor.
+- **A rate holds only under an assumption on the distribution.** "Converges at rate $1/\sqrt m$" always means "for
+  distributions satisfying a stated condition". The slow-rates theorem shows that some condition is unavoidable.
+- **Consistency of the surrogate is not consistency of the classifier.** Minimising a
+  <NoteLink to="surrogate-losses">convex surrogate</NoteLink> loss consistently gives a consistent classifier only for
+  <NoteLink to="classification-calibrated-losses">classification-calibrated losses</NoteLink>.

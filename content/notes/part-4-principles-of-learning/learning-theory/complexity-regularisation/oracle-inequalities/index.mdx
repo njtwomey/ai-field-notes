@@ -1,0 +1,171 @@
+---
+title: 'Oracle inequalities'
+kind: concept
+summary: 'An oracle inequality bounds the risk of a data-driven choice by that of the best choice an oracle knowing the distribution would make, plus a remainder: $R(\hat h) \le C\min_k[R(h_k) + \mathrm{pen}_k] + r$. It is the standard guarantee for model selection and aggregation.'
+tags: [learning-theory, model-selection, worked-example]
+aliases: [oracle inequality, sharp oracle inequality, model selection aggregation, aggregation of estimators, convex aggregation]
+requires: [structural-risk-minimisation, test-set-bounds, union-bound]
+related: [cross-validation, hedge-and-exponential-weights, online-to-batch-conversion, local-rademacher-complexity, fast-rates-and-noise-conditions, minimax-lower-bounds, adaptive-data-analysis, stacking, lasso]
+references: [donoho1994, bartlett2002model, massart2007, tsybakov2003, juditsky2008, koltchinskii2011, gyorfi2002, arlot2010]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $h_1, \dots, h_M$ be candidate predictors, or the outputs of $M$ candidate procedures, and let $\hat h$ be chosen
+or built from them using a sample. An **oracle** is the choice that minimises the risk, $\min_k R(h_k)$, which requires
+knowing the distribution. An **oracle inequality** states that, with probability at least $1 - \delta$ or in
+expectation,
+
+$$
+R(\hat h) - R^* \le C\min_{1 \le k \le M}\brack{R(h_k) - R^* + \operatorname{pen}_k} + r,
+$$
+
+where $R^*$ is a reference risk (often the <NoteLink to="bayes-decision-rule">Bayes risk</NoteLink>), $C \ge 1$ is the
+**leading constant**, $\operatorname{pen}_k$ is the penalty of candidate $k$ and $r$ is a remainder that shrinks with
+the sample size. The inequality is **sharp** when $C = 1$ <Cite id="massart2007" /> <Cite id="koltchinskii2011" />.
+</Definition>
+
+## Intuition
+
+A model-selection rule cannot know which candidate is best: that depends on the unknown distribution. An oracle
+inequality says the rule does almost as well as if it did. The candidates may be fixed predictors, classes searched by
+<Gloss name="erm" />, or one learner at several settings of a hyperparameter. The guarantee is relative. It says nothing
+about how good the best candidate is, only that the data-driven choice loses little against it.
+
+The name comes from Donoho and Johnstone's analysis of wavelet thresholding. An oracle that knew which coefficients of
+a signal exceed the noise level would keep exactly those. Their threshold estimator, which does not know, has risk
+within a factor of $2\ln n + 1$ of that oracle's, where $n$ is the number of coefficients <Cite id="donoho1994" />. That
+is an oracle inequality with $C = 2\ln n + 1$.
+
+An oracle inequality turns approximation results into rates. If class $k$ approximates a smooth target with error
+$a_k$ and has estimation error $e_k(m)$, an oracle inequality over the classes gives a risk of order
+$\min_k (a_k + e_k(m))$ without knowing the smoothness. Estimators with this property are called **adaptive**
+<Cite id="massart2007" />.
+
+## Sharp and non-sharp inequalities
+
+With $C = 1$ the inequality bounds the excess risk over the best candidate,
+$R(\hat h) - \min_k R(h_k)$, by the penalty and the remainder. With $C > 1$ it does not. If every candidate has risk
+near 0.3 and $C = 2$, the inequality allows $R(\hat h) = 0.6$, which is worse than every candidate. Non-sharp
+inequalities still give rates when $\min_k R(h_k) - R^*$ itself tends to zero, as in nonparametric estimation where
+$R^*$ is the Bayes risk <Cite id="juditsky2008" />.
+
+The penalised selection of <NoteLink to="structural-risk-minimisation">structural risk minimisation</NoteLink> satisfies
+a sharp oracle inequality over classes. With probability at least $1 - 2\delta$,
+$R(\hat h) \le \min_k[\inf_{h \in \Hcal_k}R(h) + \operatorname{pen}_k] + \sqrt{\ln(1/\delta)/(2m)}$, where
+$\operatorname{pen}_k$ is the class's generalisation bound at confidence $\delta\pi_k$ <Cite id="bartlett2002model" />.
+
+## Hold-out selection
+
+The simplest oracle inequality is for choosing among candidates by their error on held-out data. Split the sample into
+a training part of $m - n$ examples and a validation set $V$ of $n$ examples. Fit $M$ candidates on the training part,
+compute each one's validation error $\hat R_V(h_k)$, and return $\hat h = \argmin_k \hat R_V(h_k)$. The loss takes
+values in $[0, 1]$.
+
+The derivation has three steps.
+
+1. **Freeze the candidates.** Condition on the training part. The candidates $h_1, \dots, h_M$ are then fixed
+   functions, and the validation examples are independent of them. Each $\hat R_V(h_k)$ is an average of $n$
+   independent losses with mean $R(h_k)$, which is the setting of a
+   <NoteLink to="test-set-bounds">test-set bound</NoteLink>.
+2. **Concentrate and take a union.** By <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>,
+   $\prob(\abs{\hat R_V(h_k) - R(h_k)} > \epsilon) \le 2e^{-2n\epsilon^2}$ for each $k$. The
+   <NoteLink to="union-bound">union bound</NoteLink> over the $M$ candidates, with $2Me^{-2n\epsilon^2} = \delta$,
+   gives: with probability at least $1 - \delta$, every candidate satisfies
+   $\abs{\hat R_V(h_k) - R(h_k)} \le \epsilon_n$, where
+
+   $$
+   \epsilon_n = \sqrt{\frac{\ln(2M/\delta)}{2n}}.
+   $$
+
+3. **Chain through the selection.** Let $k^*$ be the oracle's choice. On that event,
+
+   $$
+   R(\hat h) \le \hat R_V(\hat h) + \epsilon_n \le \hat R_V(h_{k^*}) + \epsilon_n \le R(h_{k^*}) + 2\epsilon_n.
+   $$
+
+   The middle inequality holds because $\hat h$ minimises the validation error.
+
+The result is a sharp oracle inequality with no penalty and remainder $2\epsilon_n$:
+
+$$
+R(\hat h) \le \min_{1 \le k \le M} R(h_k) + 2\sqrt{\frac{\ln(2M/\delta)}{2n}}.
+$$
+
+The remainder grows with $\ln M$, so hold-out selection can choose among many candidates cheaply. It does not depend on
+the capacity of the candidates. Capacity enters only through the training part: if candidate $k$ is ERM over $\Hcal_k$
+on $m - n$ examples, its risk is at most $\inf_{\Hcal_k}R$ plus the estimation error of $\Hcal_k$ at sample size
+$m - n$. Combining the two bounds gives an oracle inequality over classes, like that of structural risk minimisation, in
+which the penalties are the estimation errors at $m - n$ examples <Cite id="bartlett2002model" />
+<Cite id="gyorfi2002" />.
+
+## Worked example
+
+Choose among $M = 20$ models (polynomial degrees, say, or settings of a
+<NoteLink to="regularisation">regularisation</NoteLink> strength) with a validation set of $n = 1{,}000$ examples, at
+$\delta = 0.05$.
+
+1. **The deviation.** $\ln(2M/\delta) = \ln 800 = 6.68$, so $\epsilon_n = \sqrt{6.68/2{,}000} = 0.058$.
+2. **The remainder.** The chosen model's risk is at most the best model's risk plus $2\epsilon_n = 0.116$.
+3. **More candidates.** With $M = 1{,}000$ candidates, $\ln(2M/\delta) = 10.6$ and the remainder is 0.146. Fifty times
+   more candidates raise the remainder by 0.03.
+4. **More validation data.** With $n = 5{,}000$ and $M = 20$, the remainder is 0.052.
+5. **Sample size.** For a remainder of 0.02 at $M = 20$, the validation set needs
+   $n = \ln 800/(2 \times 0.01^2) = 33{,}423$ examples.
+6. **Reading the number.** The bound is not vacuous, but it is pessimistic. Most of the $2\epsilon_n$ comes from a
+   worst case in which the best model's validation error is unluckily high and a worse model's unluckily low at the
+   same time. A refined argument uses the union bound only for the upper deviations of the $M$ candidates and a single
+   Hoeffding bound for the lower deviation of $h_{k^*}$, which is fixed: at $\delta/2$ each, the remainder is
+   $0.058 + 0.043 = 0.101$.
+
+{/* figure pending engine (hold-out selection simulator, see lt-complexity log): the risk of the hold-out choice
+against the oracle's risk over many splits, beside the bound min_k R(h_k) + 2ε_n, against the validation size n and
+the number of candidates M */}
+
+## Aggregation
+
+Aggregation builds a new predictor from the candidates instead of picking one. For regression with
+<NoteLink to="regression-losses">squared loss</NoteLink>, Tsybakov distinguished three targets, each with its own
+optimal remainder <Cite id="tsybakov2003" />:
+
+| Problem | Competes with | Optimal remainder |
+| --- | --- | --- |
+| Model-selection aggregation | the best single candidate | $(\ln M)/n$ |
+| Convex aggregation | the best convex combination of candidates | $M/n$ if $M \le \sqrt n$; $\sqrt{\ln(M/\sqrt n + 1)/n}$ otherwise |
+| Linear aggregation | the best linear combination | $M/n$ |
+
+Selection is not optimal for model-selection aggregation. Any rule that returns one of the
+candidates, ERM on the validation set included, has a remainder of order $\sqrt{(\ln M)/n}$ in the worst case. A
+mixture of the candidates achieves $(\ln M)/n$ <Cite id="juditsky2008" />.
+
+The reason is the curvature of the squared loss. For any two predictors $f_1$ and $f_2$ with squared-loss risks
+$R(f_1)$ and $R(f_2)$,
+
+$$
+R\paren{\tfrac12 f_1 + \tfrac12 f_2} = \tfrac12 R(f_1) + \tfrac12 R(f_2) - \tfrac14\expect\brack{(f_1(\xvec) - f_2(\xvec))^2},
+$$
+
+which follows by expanding the square. When two candidates have nearly equal risks, a selector can pick the wrong one
+and lose the whole gap. The average loses at most half of it, minus a term that grows with how different the
+candidates are.
+
+Exponentially weighted averages exploit the curvature of the squared loss. Each candidate gets weight proportional to
+$\exp(-\beta\,n\hat R(h_k))$, as in <NoteLink to="hedge-and-exponential-weights">exponential weights</NoteLink>, and
+the mirror-averaging aggregate of Juditsky, Rigollet and Tsybakov averages these weights over the sample, one example at
+a time. It satisfies a sharp oracle inequality with remainder $C(\ln M)/n$ <Cite id="juditsky2008" />. The averaging
+over the sample is an <NoteLink to="online-to-batch-conversion">online-to-batch conversion</NoteLink>.
+
+## Pitfalls
+
+- **The oracle is only as good as the candidates.** An oracle inequality compares the choice with the best candidate.
+  If every candidate is poor, so is the choice.
+- **A leading constant above 1 is not an excess-risk bound.** Check $C$ before reading an oracle inequality as "nearly
+  as good as the best".
+- **The validation error of the chosen model is biased.** It is the minimum of $M$ noisy estimates, so it is lower than
+  the chosen model's risk on average. Reporting it as the final error overstates performance. A separate test set, used
+  once, gives an unbiased estimate (see <NoteLink to="adaptive-data-analysis">adaptive data analysis</NoteLink>).
+- **The hold-out argument does not cover cross-validation.** The folds of
+  <NoteLink to="cross-validation">cross-validation</NoteLink> share examples, so the candidates are not independent of
+  the data they are evaluated on. Oracle inequalities for V-fold cross-validation exist under extra assumptions
+  <Cite id="arlot2010" />.

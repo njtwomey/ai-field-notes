@@ -1,0 +1,189 @@
+---
+title: 'Widely applicable information criterion'
+kind: concept
+summary: 'WAIC estimates a Bayesian model''s expected log predictive density on new data from posterior draws: the log pointwise predictive density minus the summed posterior variance of each point''s log-likelihood. It matches Bayesian leave-one-out asymptotically.'
+tags: [model-selection, bayesian, information-criteria, worked-example]
+aliases: [WAIC, Watanabe–Akaike information criterion, widely applicable Bayesian information criterion, WBIC, expected log predictive density, elpd, log pointwise predictive density, lppd]
+requires: [bayesian-inference, akaike-information-criterion]
+related: [pareto-smoothed-importance-sampling-leave-one-out, deviance-information-criterion, leave-one-out-cross-validation, bayes-factors-and-model-comparison, marginal-likelihood-and-bayesian-occams-razor, optimism-of-the-training-error]
+references: [watanabe2010, watanabe2013, gelman2014predictive, vehtari2017]
+status: draft
+updated: 2026-10-13
+---
+
+import { WaicAgainstTruth } from './WaicAgainstTruth'
+
+<Definition>
+Let a model have pointwise likelihood $p(y_i \mid \thetavec)$ for observations $y_1, \dots, y_n$ that are independent
+given $\thetavec$, and let $\thetavec^{(1)}, \dots, \thetavec^{(S)}$ be draws from the posterior
+$p(\thetavec \mid \Dcal)$. The **log pointwise predictive density** and the
+**<NoteLink to="effective-degrees-of-freedom">effective number of parameters</NoteLink>** are
+
+$$
+\operatorname{lppd} = \sum_{i=1}^n \log\paren{\frac1S\sum_{s=1}^S p(y_i \mid \thetavec^{(s)})}, \qquad
+p_{\text{WAIC}} = \sum_{i=1}^n \var_{s}\brack{\log p(y_i \mid \thetavec^{(s)})},
+$$
+
+where $\var_s$ is the sample variance over the $S$ draws. The **widely applicable information criterion** estimates the
+expected log predictive density of new data by
+$\widehat{\operatorname{elpd}}_{\text{WAIC}} = \operatorname{lppd} - p_{\text{WAIC}}$, or on the deviance scale
+$\operatorname{WAIC} = -2\,\widehat{\operatorname{elpd}}_{\text{WAIC}}$ <Cite id="watanabe2010" />
+<Cite id="gelman2014predictive" />. Larger elpd, or smaller WAIC, is better.
+</Definition>
+
+## Intuition
+
+A Bayesian model predicts with its <NoteLink to="bayesian-inference">posterior predictive distribution</NoteLink>, which
+averages the likelihood over the posterior. The natural score for that prediction is the log density it gives to new
+observations. The data that formed the posterior are the only data at hand, and scoring the posterior predictive on them
+is optimistic: each point pulled the posterior towards itself before being scored. This is the optimism of the training
+error (<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>), now for a predictive
+distribution instead of a point estimate.
+
+WAIC subtracts an estimate of that optimism, as AIC does for a maximum-likelihood fit
+(<NoteLink to="akaike-information-criterion">Akaike information criterion</NoteLink>). AIC's correction counts
+parameters. WAIC's correction measures how much each point's log-likelihood moves across the posterior. A point whose
+fit is stable across posterior draws contributes nothing. A point whose fit depends on parameters that only it
+constrains contributes a lot, because removing it would change its prediction most. The sum over points behaves like a
+parameter count when the prior is weak and the model is regular, and it is smaller when the prior constrains the
+parameters.
+
+WAIC answers the first question of <NoteLink to="model-selection">model selection</NoteLink>, how well a candidate
+predicts, for a Bayesian model. It needs one posterior fit per candidate and no held-out data.
+
+## Details
+
+### The target
+
+Let $\tilde y_i$ be a new observation from the same distribution as $y_i$, at the same covariates when there are any.
+The **expected log pointwise predictive density** of the fitted model is
+
+$$
+\operatorname{elpd} = \sum_{i=1}^n \expect_{\tilde y_i}\brack{\log p(\tilde y_i \mid \Dcal)}, \qquad
+p(\tilde y_i \mid \Dcal) = \int p(\tilde y_i \mid \thetavec)\, p(\thetavec \mid \Dcal)\, d\thetavec.
+$$
+
+It is $n$ times the negative expected <NoteLink to="log-loss-and-brier-score">log loss</NoteLink> of the posterior
+predictive on fresh data, and the difference between two models' elpd is a difference in their expected
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> from the truth, as for AIC. The lppd
+is the same sum with each $\tilde y_i$ replaced by the observed $y_i$, and with the posterior predictive estimated by
+the average over draws.
+
+### The correction
+
+The derivation for a model where everything is Gaussian shows where the correction comes from. Let
+$y_i \sim \Gauss(\mu_0, \sigma^2)$ with $\sigma^2$ known, and give $\mu$ a flat prior. The posterior is
+$\mu \mid \Dcal \sim \Gauss(\bar y, v)$ with $v = \sigma^2/n$, and the posterior predictive is
+$\Gauss(\bar y, \sigma^2 + v)$. Write $d_i = y_i - \bar y$ and $c = \sigma^2 + v$.
+
+1. **The lppd.** With exact posterior averages, $\operatorname{lppd} = \sum_i \log\Gauss(y_i \mid \bar y, c) =
+   -\frac n2\log(2\pi c) - \frac{1}{2c}\sum_i d_i^2$.
+2. **The elpd.** A new $\tilde y_i \sim \Gauss(\mu_0, \sigma^2)$ is independent of $\bar y$, so
+   $\expect(\tilde y_i - \bar y)^2 = \sigma^2 + (\bar y - \mu_0)^2$ given the data. Then
+   $\operatorname{elpd} = -\frac n2\log(2\pi c) - \frac{n}{2c}\paren{\sigma^2 + (\bar y - \mu_0)^2}$.
+3. **The optimism.** Over data sets, $\expect\sum_i d_i^2 = (n - 1)\sigma^2$ and
+   $\expect(\bar y - \mu_0)^2 = \sigma^2/n$. The expected difference is $\expect[\operatorname{lppd} - \operatorname{elpd}] = \frac{1}{2c}\paren{n\sigma^2 + \sigma^2 - (n - 1)\sigma^2} =
+   \frac{\sigma^2}{c} = \frac{n}{n + 1}$.
+4. **The posterior variance of each log-likelihood.** Under the posterior, $\mu = \bar y + e$ with
+   $e \sim \Gauss(0, v)$, and $\log p(y_i \mid \mu) = -(d_i - e)^2/(2\sigma^2)$ plus a constant. Since $e$ is Gaussian
+   with mean zero, $\var[(d_i - e)^2] = 4d_i^2 v + 2v^2$, so the variance of the log-likelihood is
+   $d_i^2 v/\sigma^4 + v^2/(2\sigma^4)$.
+5. **Its sum.** $\expect[p_{\text{WAIC}}] = (n - 1)\sigma^2 \cdot \frac{v}{\sigma^4} + \frac{nv^2}{2\sigma^4} = \frac{n -
+   1}{n} + \frac{1}{2n} = 1 - \frac{1}{2n}$.
+
+The optimism of the lppd is $n/(n + 1)$ and $p_{\text{WAIC}}$ estimates it by $1 - 1/(2n)$. Both tend to $1$, the
+number of parameters, and AIC's penalty is recovered. The variance does the counting: it is large exactly for the
+points with large residuals $d_i$, whose fit the parameter can trade against the others.
+
+### Equivalence with leave-one-out
+
+Bayesian leave-one-out cross-validation estimates the elpd by
+$\operatorname{elpd}_{\text{loo}} = \sum_i \log p(y_i \mid \Dcal_{-i})$, where $\Dcal_{-i}$ is the data without point
+$i$. Watanabe proved that WAIC and Bayesian leave-one-out are asymptotically equivalent as random variables, in regular
+and in singular models <Cite id="watanabe2010" />. Vehtari, Gelman and Gabry show how close the two are by expanding
+both in the cumulants of the pointwise log-likelihood $\log p(y_i \mid \thetavec)$ under the posterior
+<Cite id="vehtari2017" />. The log of the posterior predictive density, $\log p(y_i \mid \Dcal)$, is the posterior mean
+of the log-likelihood plus half its posterior variance plus terms in the higher cumulants. Subtracting the variance,
+WAIC's term is the mean minus half the variance plus those same higher terms. The leave-one-out term has the same first
+three terms of the expansion and different higher terms. WAIC is therefore a truncated approximation of leave-one-out.
+When the higher cumulants are not negligible, which happens when one point moves the posterior a lot, WAIC is biased
+towards the lppd, that is, towards optimism.
+
+### Singular models
+
+AIC and <Gloss name="bic" /> assume a regular model: the <Gloss name="fisher-information">Fisher information</Gloss> is
+invertible and the posterior is near Gaussian for large $n$. Mixtures, hidden-unit models, neural networks and
+reduced-rank regressions are **singular**: different parameter values give the same distribution, the Fisher information
+is degenerate, and the parameter count does not measure complexity. Watanabe derived WAIC from singular
+learning theory, and it remains an asymptotically unbiased
+estimate of the predictive loss in that setting <Cite id="watanabe2010" />. In a singular model $p_{\text{WAIC}}$ is
+usually smaller than the number of parameters.
+
+### WBIC
+
+Watanabe also gave a singular-model replacement for BIC. The **widely applicable Bayesian information criterion** is the
+posterior mean of the negative log-likelihood $-\log p(\Dcal \mid \thetavec)$ under a tempered posterior, proportional
+to $p(\Dcal \mid \thetavec)^{\beta}p(\thetavec)$ with inverse temperature $\beta = 1/\log n$. It has the same asymptotic
+expansion as the negative log marginal likelihood, in regular and singular models alike <Cite id="watanabe2013" />. WBIC
+estimates the evidence and WAIC estimates predictive accuracy. They target different quantities, as BIC and AIC do (see
+<NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink>).
+
+## Worked example
+
+Five observations from $\Gauss(\mu, 1)$ are $y = (-0.5, 0.4, 0.8, 1.2, 2.6)$, with mean $\bar y = 0.9$. The prior on
+$\mu$ is flat, so the posterior is $\Gauss(0.9, 0.2)$ and the posterior predictive is $\Gauss(0.9, 1.2)$. The table uses
+the exact posterior averages of steps 1 and 4 above, the limit of infinitely many draws.
+
+| $y_i$ | $d_i$ | $\log p(y_i \mid \Dcal)$ | $p_{\text{WAIC}, i}$ | elpd$_{\text{WAIC},i}$ | elpd$_{\text{loo},i}$ |
+| --- | --- | --- | --- | --- | --- |
+| −0.5 | −1.4 | −1.827 | 0.412 | −2.239 | −2.256 |
+| 0.4 | −0.5 | −1.114 | 0.070 | −1.184 | −1.187 |
+| 0.8 | −0.1 | −1.014 | 0.022 | −1.036 | −1.037 |
+| 1.2 | 0.3 | −1.048 | 0.038 | −1.086 | −1.087 |
+| 2.6 | 1.7 | −2.214 | 0.598 | −2.812 | −2.837 |
+| sum | | −7.217 | 1.140 | −8.357 | −8.403 |
+
+1. **The variance term.** For the first point, $p_{\text{WAIC},1} = d_1^2 v + v^2/2 = 1.96 \times 0.2 + 0.02 = 0.412$.
+2. **The criterion.** $\widehat{\operatorname{elpd}}_{\text{WAIC}} = -7.217 - 1.140 = -8.357$, and
+   $\operatorname{WAIC} = 16.71$.
+3. **Leave-one-out.** Exact leave-one-out predicts $y_i$ from $\Gauss(\bar y_{-i}, 1 + 1/4)$, with $\bar y_{-i}$ the
+   mean of the other four. It gives $-8.403$, within $0.05$ of WAIC. The two extreme points carry most of the
+   correction, and WAIC's error is largest there.
+4. **Against the truth.** If the true mean is $\mu = 1$, the elpd of this posterior predictive on new data is $-7.155$.
+   Both estimates are about $1.2$ too low on this data set, whose points are more spread out than unit-variance noise
+   usually makes them. The <NoteLink to="standard-error">standard error</NoteLink> of
+   $\widehat{\operatorname{elpd}}_{\text{WAIC}}$, $\sqrt{n}$ times the standard deviation of the pointwise terms, is
+   $1.8$, so the miss is within one standard error.
+
+Two of the five points have $p_{\text{WAIC},i} > 0.4$, the level above which Vehtari, Gelman and Gabry found WAIC
+unreliable in simulation <Cite id="vehtari2017" />. With five points and a flat prior, each extreme point really does
+move the posterior.
+
+The figure computes WAIC and PSIS-LOO from posterior draws for polynomial regressions of increasing degree, beside the
+elpd measured on a large fresh sample.
+
+<WaicAgainstTruth />
+
+## Pitfalls
+
+- **Weak priors and influential points.** When any $p_{\text{WAIC},i}$ exceeds about $0.4$, the second-order expansion
+  is poor and WAIC is biased towards optimism. Use <NoteLink to="pareto-smoothed-importance-sampling-leave-one-out">PSIS
+  leave-one-out</NoteLink>, which has a diagnostic for exactly this case, or exact refits.
+- **What a point is.** WAIC needs a factorised likelihood, and the factorisation decides what "new data" means. In a
+  hierarchical model, a point can be one observation (predicting a new observation in a known group) or one group
+  (predicting a new group). The two give different answers to different questions. Choose the unit that matches the
+  prediction task, as <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink> does.
+- **Dependent data.** For <NoteLink to="time-series">time series</NoteLink>, leave-one-out and WAIC score predictions of
+  past points from future ones. Use leave-future-out evaluation (see
+  <NoteLink to="time-series-cross-validation">time-series cross-validation</NoteLink>).
+- **Differences without standard errors.** WAIC is a sum of $n$ terms. To compare two models, take the pointwise
+  differences of their elpd terms; their sum is the estimated difference, and $\sqrt n$ times their standard deviation
+  is its standard error <Cite id="vehtari2017" />. A difference below about two standard errors is weak evidence.
+- **Reading $p_{\text{WAIC}}$ as a parameter count.** It measures how much the fit varies over the posterior. Strong
+  priors, hierarchical shrinkage and singular structure all make it smaller than the number of parameters. A badly
+  misfitting model makes it larger, because the variance term $d_i^2 v$ grows with each residual $d_i$; a constant
+  fitted to a sine can have $p_{\text{WAIC}}$ of five or more. It need not be an integer.
+- **Selecting on it and then reporting it.** The WAIC of the model that won a comparison of many candidates is
+  optimistic, like the best <NoteLink to="cross-validation">cross-validation</NoteLink> score
+  (<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Assess the chosen model on
+  held-out data.

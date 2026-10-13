@@ -1,0 +1,206 @@
+---
+title: 'Pareto-smoothed importance sampling leave-one-out'
+kind: technique
+summary: 'PSIS-LOO estimates Bayesian leave-one-out predictive accuracy from one set of posterior draws, importance-weighting each draw by $1/p(y_i \mid \thetavec)$ and replacing the largest weights by a fitted generalised Pareto tail. The fitted shape $\hat k$ flags points where the estimate fails.'
+tags: [model-selection, bayesian, evaluation, worked-example]
+aliases: [PSIS-LOO, PSIS leave-one-out, Pareto smoothed importance sampling, Pareto k diagnostic, Pareto k-hat, importance sampling leave-one-out, IS-LOO, Bayesian leave-one-out cross-validation]
+requires: [leave-one-out-cross-validation, importance-sampling]
+related: [widely-applicable-information-criterion, deviance-information-criterion, bayesian-model-averaging, markov-chain-monte-carlo, extreme-value-theory-for-anomalies, hierarchical-models]
+references: [vehtari2017, vehtari2024, zhang2009, paananen2021]
+status: draft
+updated: 2026-10-13
+---
+
+import { PsisAgainstExactLoo } from './PsisAgainstExactLoo'
+
+<Definition>
+Let $\thetavec^{(1)}, \dots, \thetavec^{(S)}$ be draws from the posterior $p(\thetavec \mid \Dcal)$ of a model whose
+observations $y_1, \dots, y_n$ are independent given $\thetavec$. The Bayesian **leave-one-out** estimate of predictive
+accuracy is $\operatorname{elpd}_{\text{loo}} = \sum_{i=1}^n \log p(y_i \mid \Dcal_{-i})$, where $\Dcal_{-i}$ is the
+data without point $i$. **PSIS-LOO** estimates each term by importance sampling,
+
+$$
+p(y_i \mid \Dcal_{-i}) \approx \frac{\sum_s w_i^{(s)}\, p(y_i \mid \thetavec^{(s)})}{\sum_s w_i^{(s)}},
+$$
+
+where the weights $w_i^{(s)}$ are the raw ratios $r_i^{(s)} = 1/p(y_i \mid \thetavec^{(s)})$ with their largest values
+replaced by quantiles of a generalised Pareto distribution fitted to them. The fitted shape $\hat k_i$ diagnoses each
+point: below $0.7$ the estimate is reliable <Cite id="vehtari2017" /> <Cite id="vehtari2024" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="leave-one-out-cross-validation">Leave-one-out cross-validation</NoteLink> is the natural estimate of how
+well a model predicts, and for a Bayesian model it scores the posterior predictive density of each point given the
+others. Exact leave-one-out needs $n$ posteriors. When each posterior is an <Gloss name="mcmc" /> run of minutes or
+hours, $n$ runs are out of reach.
+
+The $n$ leave-one-out posteriors differ from the full posterior by one point each, so one set of full-posterior draws
+should be almost enough. <NoteLink to="importance-sampling">Importance sampling</NoteLink> reweights draws from one
+distribution to estimate expectations under a nearby one. The difficulty is that the weights can have infinite variance
+exactly for the points that matter most, the influential ones. PSIS-LOO stabilises the weights and reports when the
+stabilisation is not enough. It answers the first question of <NoteLink to="model-selection">model selection</NoteLink>,
+how well a candidate predicts, at the cost of one posterior fit.
+
+## Mechanism
+
+### The importance-sampling identity
+
+Since the observations are independent given $\thetavec$, the full posterior is the leave-one-out posterior times one
+more likelihood factor:
+
+$$
+p(\thetavec \mid \Dcal) = \frac{p(\thetavec \mid \Dcal_{-i})\, p(y_i \mid \thetavec)}{p(y_i \mid \Dcal_{-i})}.
+$$
+
+Divide both sides by $p(y_i \mid \thetavec)$ and integrate over $\thetavec$. The leave-one-out posterior integrates to
+one, so
+
+$$
+\expect\brack{\frac{1}{p(y_i \mid \thetavec)} \;\middle|\; \Dcal} = \frac{1}{p(y_i \mid \Dcal_{-i})}.
+$$
+
+The leave-one-out predictive density is the harmonic mean of the likelihood of point $i$ over the full posterior. In
+importance-sampling terms, the full posterior is the proposal, the leave-one-out posterior is the target, and the
+self-normalised weights are proportional to $p(\thetavec \mid \Dcal_{-i})/p(\thetavec \mid \Dcal) \propto
+1/p(y_i \mid \thetavec)$. Plugging the raw ratios $r_i^{(s)}$ into the estimator of the definition gives
+$\hat p(y_i \mid \Dcal_{-i}) = \paren{\frac1S\sum_s r_i^{(s)}}^{-1}$, the plain importance-sampling leave-one-out
+estimate (IS-LOO).
+
+### Why the raw weights fail
+
+The full posterior is narrower than the leave-one-out posterior, because it has seen one more point. A proposal
+narrower than its target is the failure case of importance sampling: the weights grow without bound in the tails, and
+their variance can be infinite. The weight $1/p(y_i \mid \thetavec)$ is largest for draws under which point $i$ is
+poorly fitted, and for an influential point those draws are exactly the ones the leave-one-out posterior wants. A few
+huge weights then dominate the average, and the estimate jumps whenever a new draw lands in the tail.
+
+### Pareto smoothing
+
+Extreme value theory says that the largest values of a sample from almost any distribution follow a generalised Pareto
+distribution, whose shape $k$ governs the tail: the distribution has finite moments of order below $1/k$ (see
+<NoteLink to="extreme-value-theory-for-anomalies">extreme value theory</NoteLink>). PSIS uses this in four steps for
+each point $i$ <Cite id="vehtari2024" />:
+
+1. Sort the $S$ raw ratios and take the $M = \lfloor\min(0.2S, 3\sqrt S)\rfloor$ largest.
+2. Fit a generalised Pareto distribution to their excesses over the largest remaining ratio, with the estimator of
+   Zhang and Stephens <Cite id="zhang2009" />. Call the fitted shape $\hat k_i$.
+3. Replace the $M$ largest ratios by the fitted quantiles at probabilities $(z - \frac12)/M$, $z = 1, \dots, M$, each
+   capped at the largest raw ratio. The quantiles approximate the expected order statistics of the tail, so they keep
+   its level and remove its noise.
+4. Compute the self-normalised estimate with the smoothed weights.
+
+### The $\hat k$ diagnostic
+
+The fitted shape says how many moments the weight distribution has. With $k < \frac12$ the weights have finite variance
+and the estimate converges at the usual $S^{-1/2}$ rate. With $\frac12 \le k < 1$ the variance is infinite but the mean
+is finite; smoothing makes the error finite, at a slower rate. With $k \ge 1$ even the mean is infinite and no amount of
+sampling helps. Vehtari and colleagues recommend trusting the estimate when $\hat k < \min(1 - 1/\log_{10} S,\, 0.7)$,
+which is $0.7$ for $S > 2000$ <Cite id="vehtari2024" />. A point with $\hat k$ above the threshold needs its
+leave-one-out posterior computed some other way: refit without it, moment
+matching <Cite id="paananen2021" />, or switch to $K$-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink> when many points fail <Cite id="vehtari2017" />.
+
+$\hat k$ is also a measure of influence. A large $\hat k_i$ means that removing point $i$ changes the posterior a lot,
+which is the Bayesian analogue of high <NoteLink to="leverage-and-influence">leverage</NoteLink>. Points with high
+$\hat k$ are worth inspecting whether or not the estimate is needed.
+
+### The output
+
+PSIS-LOO reports $\widehat{\operatorname{elpd}}_{\text{loo}} = \sum_i \log\hat p(y_i \mid \Dcal_{-i})$, its
+<NoteLink to="standard-error">standard error</NoteLink> $\sqrt n$ times the standard deviation of the pointwise terms,
+the <NoteLink to="effective-degrees-of-freedom">effective number of parameters</NoteLink>
+$p_{\text{loo}} = \operatorname{lppd} - \widehat{\operatorname{elpd}}_{\text{loo}}$ (with the lppd as in
+<NoteLink to="widely-applicable-information-criterion">WAIC</NoteLink>), and $\hat k_i$ for every point. Two models are
+compared by the sum of their pointwise differences and the standard error of that sum <Cite id="vehtari2017" />.
+
+<Derivation title="The tail shape for a Gaussian proposal and target">
+Let the proposal be $q = \Gauss(m_q, v_q)$ and the target $p = \Gauss(m_p, v_p)$ with $v_p > v_q$. Write a draw from $q$
+as $\theta = m_q + \sqrt{v_q}\, z$ with $z \sim \Gauss(0, 1)$. The log weight is
+
+$$
+\log\frac{p(\theta)}{q(\theta)} = \frac{z^2}{2} - \frac{(\sqrt{v_q}\,z + m_q - m_p)^2}{2v_p} + \text{const}
+= \frac12\paren{1 - \frac{v_q}{v_p}} z^2 + (\text{linear in } z) + \text{const}.
+$$
+
+Write $b = \frac12(1 - v_q/v_p)$. For large $t$, the weight exceeds $t$ when $b z^2 \gtrsim \log t$, so
+$P(w > t) \approx P(\abs z > \sqrt{\log t / b}) \approx \exp(-\log t/(2b)) = t^{-1/(2b)}$, up to factors that vary
+slowly in $t$. A generalised Pareto tail with shape $k$ has $P(w > t) \propto t^{-1/k}$. Matching the exponents,
+
+$$
+k = 2b = 1 - \frac{v_q}{v_p}.
+$$
+
+The shape is the fraction of the target's variance that the proposal lacks. The variance of the weights is finite when
+$k < \frac12$, that is when $v_p < 2v_q$, which is the condition for $\int p^2/q < \infty$.
+</Derivation>
+
+## Worked example
+
+Take $n$ groups with one observation each, $y_i \sim \Gauss(\theta_i, 1)$, and the prior $\theta_i \sim \Gauss(0,
+\tau^2)$ with $\tau$ known. Each $\theta_i$ is informed by its own observation only, the extreme case of an influential
+point.
+
+1. **The full posterior of $\theta_i$** is Gaussian with variance $v_q = \tau^2/(1 + \tau^2)$ and mean
+   $\tau^2 y_i/(1 + \tau^2)$, by conjugacy (see <NoteLink to="hierarchical-models">hierarchical models</NoteLink>).
+2. **The leave-one-out posterior of $\theta_i$** is the prior $\Gauss(0, \tau^2)$, because removing $y_i$ removes all
+   the information about $\theta_i$. The other parameters are independent of $\theta_i$ and drop out of the weights.
+3. **The exact answer** is $p(y_i \mid \Dcal_{-i}) = \Gauss(y_i \mid 0, 1 + \tau^2)$.
+4. **The tail shape.** By the derivation above with $v_p = \tau^2$, the weights have Pareto shape
+   $k = 1 - v_q/\tau^2 = \tau^2/(1 + \tau^2)$.
+
+| prior sd $\tau$ | 0.5 | 1 | 2 | 4 |
+| --- | --- | --- | --- | --- |
+| $k$ | 0.20 | 0.50 | 0.80 | 0.94 |
+| weight variance | finite | infinite | infinite | infinite |
+
+With $\tau = 0.5$ the prior dominates, the observation moves $\theta_i$ little, and importance sampling works. The
+relative efficiency $1/\expect_q[w^2]$, computed from the <NoteLink to="gaussian-integral">Gaussian integral</NoteLink>
+of $p^2/q$, is $0.97$ for a point at $y_i = 0$ and $0.33$ for a point at $y_i = 2$: the outlying point wastes two thirds
+of the draws but still has a usable estimate. With $\tau = 2$ the observation determines $\theta_i$, $k = 0.8$ exceeds
+$0.7$, and PSIS flags every point. The model is not wrong, and the posterior is not poorly sampled. The leave-one-out
+question is simply far from the question the full posterior answers, and an exact refit or a model with fewer per-point
+parameters is needed.
+
+For a model where every point informs every parameter, such as the mean of $n$ observations, the same formula gives
+$k = 1/n$, and importance sampling is easy. The diagnostic separates these cases from the draws alone.
+
+<PsisAgainstExactLoo />
+
+## Cost
+
+- **One posterior fit**, then $O(nS)$ log-likelihood evaluations to form the $n \times S$ matrix of $\log p(y_i \mid
+  \thetavec^{(s)})$.
+- **Per point,** a sort of $S$ ratios, $O(S\log S)$, and a generalised Pareto fit to $M \le 3\sqrt S$ values. For
+  $S = 4000$ draws, $M = 189$.
+- **Against exact leave-one-out:** $n$ refits replaced by one fit and $n$ sorts. Points with $\hat k > 0.7$ need refits,
+  so the saving shrinks as the number of flagged points grows.
+
+## Trade-offs
+
+- **PSIS-LOO or WAIC.** Both use the same draws and the same $n \times S$ matrix. They agree when every point has small
+  influence. When some point is influential, WAIC is biased towards optimism without warning, while PSIS-LOO is more
+  accurate and reports $\hat k$. Vehtari, Gelman and Gabry recommend PSIS-LOO <Cite id="vehtari2017" />.
+- **PSIS-LOO or $K$-fold.** $K$-fold cross-validation refits the model $K$ times and needs no importance weights, so it
+  works when many points have high $\hat k$, and it can leave out whole groups. It scores models trained on
+  $(K - 1)n/K$ points instead of $n - 1$.
+- **Smoothing or truncation.** Truncating the weights at a fixed level (truncated importance sampling) also bounds the
+  variance but biases the estimate; Pareto smoothing has lower bias and a diagnostic.
+
+## Pitfalls
+
+- **Ignoring $\hat k$.** The estimate is computed whatever $\hat k$ is, and for $\hat k > 0.7$ it can be badly biased.
+  Report the number of points above the threshold with every PSIS-LOO value.
+- **High $\hat k$ is about the model as much as the sampler.** Increasing $S$ does not cure a large $k$; it is a
+  property of the weight distribution, as the worked example shows. Many high values often mean a flexible model with
+  parameters that individual points determine, or a misspecified likelihood under which some points are surprising.
+- **The unit of leaving out.** The leave-one-out question must match the prediction task. Leaving out one observation of
+  a group predicts within groups; predicting a new group needs leave-one-group-out, for which importance sampling is
+  harder and $K$-fold over groups is usual (see <NoteLink to="grouped-cross-validation">grouped
+  cross-validation</NoteLink>).
+- **<NoteLink to="time-series">Time series</NoteLink>.** Leave-one-out uses future observations to predict past ones.
+  Use leave-future-out evaluation (see <NoteLink to="time-series-cross-validation">time-series
+  cross-validation</NoteLink>).
+- **Comparing many models.** The model with the best $\widehat{\operatorname{elpd}}_{\text{loo}}$ among many is
+  optimistic, as any selected estimate is (<NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>). Differences smaller than a few standard errors of the difference do not separate the models.

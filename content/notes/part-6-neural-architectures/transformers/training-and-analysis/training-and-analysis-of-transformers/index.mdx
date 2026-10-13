@@ -1,0 +1,67 @@
+---
+title: 'Training and analysis of transformers'
+kind: overview
+summary: 'Training transformers at scale and looking inside them: the causes of loss spikes and divergence and their fixes, maximal update parameterisation for transferring hyperparameters across widths, attention head analysis, and the residual stream view of mechanistic interpretability.'
+tags: [transformer, training, interpretability, overview]
+aliases: [transformer training and interpretability]
+requires: [transformer, adam, layer-normalisation]
+related: [modern-decoder-block, attention-variants, training-deep-networks]
+references: [wortsman2023, elhage2021]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+This topic covers two questions about a transformer once its architecture is fixed. The first is how to train it
+reliably as it grows, and how to choose its hyperparameters without tuning each size afresh. The second is what a
+trained transformer computes internally: what its <NoteLink to="multi-head-attention">attention heads</NoteLink> do and
+how information moves between its layers <Cite id="elhage2021" />.
+</Definition>
+
+## What it is for
+
+A training run for a large model is too expensive to repeat. Settings that train a small transformer well can make a
+large one diverge or suffer loss spikes, and a <Gloss name="learning-rate">learning rate</Gloss> tuned at one width is
+wrong at another <Cite id="wortsman2023" />. The training notes explain why, and give the fixes now standard in
+<Gloss name="llm">large language models</Gloss>.
+
+The analysis notes serve interpretability. They give the vocabulary used to describe circuits inside
+<Gloss name="language-model">language models</Gloss>, such as heads that copy earlier tokens, and show why looking at
+attention weights alone explains little. These tools support debugging, auditing and the study of
+<Gloss name="icl">in-context learning</Gloss>.
+
+## Main ideas
+
+**Instability has identifiable causes.** <NoteLink to="training-stability-at-scale" /> traces divergence and spikes to
+three mechanisms: attention logits that grow until the softmax saturates, output logits drifting under the
+shift-invariant softmax, and Adam updates that vanish when gradients fall towards $\epsilon$. The fixes are
+QK normalisation, an auxiliary z-loss on the output logits, warmup and gradient clipping.
+
+**Scale initialisation and learning rate with width.** In the standard parameterisation the best learning rate shifts
+as a model widens. <NoteLink to="maximal-update-parameterisation" /> scales each layer's initialisation and learning
+rate with width so that its features move by a width-independent amount per step. Hyperparameters tuned on a narrow
+proxy model then transfer to the full-size model.
+
+**Heads specialise, but weights mislead.** <NoteLink to="attention-head-analysis" /> reviews what individual heads
+attend to, such as fixed offsets, syntactic relations and coreference, and finds that most heads can be pruned with
+little loss. A head's effect on the output depends on the values it moves as well as on its attention weights, so the
+weights alone are a weak explanation.
+
+**The residual stream is a shared workspace.** The <NoteLink to="residual-stream-view" /> treats each attention head
+and feed-forward layer as reading from and adding to one vector per token. A head factors into a QK matrix, which
+decides where it looks, and an OV matrix, which decides what it writes. The output of an attention-only model expands
+into a sum over paths through the heads, which makes circuits such as induction heads visible.
+
+## How the notes fit together
+
+The topic has two independent pairs. For training, read <NoteLink to="training-stability-at-scale" /> and then
+<NoteLink to="maximal-update-parameterisation" />. For analysis, read <NoteLink to="attention-head-analysis" /> and
+then the <NoteLink to="residual-stream-view" />, which supplies the algebra the first lacks.
+
+## Prerequisites and next steps
+
+The notes assume the <NoteLink to="transformer">original transformer</NoteLink>, <NoteLink to="adam" /> and
+<NoteLink to="layer-normalisation" />. Logit control at the level of the attention layer is in
+<NoteLink to="query-key-normalisation-and-logit-soft-capping" />, and the general background on training deep networks
+is in <NoteLink to="training-deep-networks" />. Interpretability methods for models of every kind are surveyed in
+<NoteLink to="interpretability" />.

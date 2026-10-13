@@ -1,0 +1,164 @@
+---
+title: 'High-dimensional Bayesian optimisation'
+kind: concept
+summary: 'A Gaussian-process surrogate needs evaluations that grow exponentially with the number of hyperparameters. High-dimensional Bayesian optimisation assumes structure: a low-dimensional subspace searched by random embedding, an additive objective, or a local trust region.'
+tags: [model-selection, optimisation, bayesian, hyperparameters, worked-example]
+aliases: [REMBO, random embedding Bayesian optimisation, TuRBO, trust-region Bayesian optimisation, additive Bayesian optimisation, SAASBO, effective dimensionality]
+requires: [bayesian-optimisation, automatic-relevance-determination]
+related: [random-search, random-projections, gaussian-process-upper-confidence-bound, thompson-sampling, trust-region-methods, evolution-strategies-and-covariance-matrix-adaptation, generalised-additive-model, curse-of-dimensionality-for-neighbours, hyperparameter-importance]
+references: [wang2016rembo, letham2020alebo, kandasamy2015, eriksson2019turbo, eriksson2021saasbo, hvarfner2024, bergstra2012, frazier2018, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { RandomEmbedding } from './RandomEmbedding'
+
+<Definition>
+**High-dimensional Bayesian optimisation** is <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> of
+an objective $f(\lambdavec)$ over $D$ hyperparameters, with $D$ in the tens to thousands, under an assumption that
+makes the surrogate learnable from few evaluations. The common assumptions are that $f$ varies only within a
+low-dimensional subspace, searched through a random linear embedding (REMBO) <Cite id="wang2016rembo" />; that $f$ is a
+sum of functions of small groups of hyperparameters <Cite id="kandasamy2015" />; or that a local model is enough, kept
+inside a trust region that moves with the incumbent (TuRBO) <Cite id="eriksson2019turbo" />.
+</Definition>
+
+## Intuition
+
+A <Gloss name="gp">Gaussian process</Gloss> predicts well only near its evaluations, within about one length-scale in
+each coordinate. With length-scale 0.2 on the unit cube, a lattice with one point per length-scale needs $5^D$ points:
+25 in two dimensions and about 9.8 million in ten. A budget of a few hundred evaluations therefore leaves almost every
+candidate far from the data, where the posterior mean is the prior mean and the spread is the prior spread.
+<NoteLink to="expected-improvement">Expected improvement</NoteLink> then rewards candidates for being far from the data,
+and in many dimensions almost every candidate is. Most of the volume of a cube is also near its boundary: in 20
+dimensions $1 - 0.9^{20} = 88\%$ of $[0, 1]^{20}$ lies within 0.05 of a face. A search led by uncertainty spends its
+budget on corners and faces <Cite id="hvarfner2024" />.
+
+Machine learning problems rarely use all $D$ directions equally. Bergstra and Bengio found that the validation error of
+neural networks depended strongly on only a few of their hyperparameters, and which few varied by dataset
+<Cite id="bergstra2012" />. That low effective dimensionality is why <NoteLink to="random-search">random
+search</NoteLink> beats a grid, and the methods below use it, or a weaker structure, to make a surrogate learnable.
+
+## Details
+
+### Low effective dimensionality and random embeddings
+
+A function $f : \reals^D \to \reals$ has **effective dimensionality** $d_e$ if there is a subspace $\Tcal$ of
+dimension $d_e$ such that $f(\xvec_\top + \xvec_\perp) = f(\xvec_\top)$ for every $\xvec_\top \in \Tcal$ and every
+$\xvec_\perp$ orthogonal to $\Tcal$, and no smaller subspace has this property <Cite id="wang2016rembo" />. The
+hyperparameters that do not matter, or combinations of them, span the directions orthogonal to $\Tcal$.
+
+Random embedding Bayesian optimisation (REMBO) draws a matrix $\Amat \in \reals^{D \times d}$ with independent standard
+normal entries, $d \ge d_e$, and optimises the $d$-dimensional function $g(\yvec) = f(\Amat\yvec)$ by ordinary Bayesian
+optimisation <Cite id="wang2016rembo" />. The search never needs to know $\Tcal$.
+
+**Why the embedding contains an optimiser.** Let the columns of $\Phimat \in \reals^{D \times d_e}$ be an orthonormal
+basis of $\Tcal$. Every point splits as $\xvec = \Phimat\Phimat\transpose\xvec + \xvec_\perp$, so
+$f(\xvec) = f(\Phimat\Phimat\transpose\xvec)$: only the coordinates $\Phimat\transpose\xvec$ matter. Given any $\xvec$,
+a point $\yvec$ with $f(\Amat\yvec) = f(\xvec)$ exists if $\Phimat\transpose\Amat\yvec = \Phimat\transpose\xvec$ has a
+solution. The matrix $\Phimat\transpose\Amat$ is $d_e \times d$. Its entries are independent standard normals, because
+each column of $\Amat$ is an isotropic Gaussian vector and $\Phimat$ has orthonormal columns. A $d_e \times d$ Gaussian
+matrix with $d \ge d_e$ has rank $d_e$ with probability 1, so its range is all of $\reals^{d_e}$ and the equation has a
+solution. Applied to a minimiser $\xvec^\star$, this gives a $\yvec^\star$ with $g(\yvec^\star) = f(\xvec^\star)$. The
+argument does not involve $D$: an objective in a billion dimensions with $d_e = 2$ is a two-dimensional problem for
+REMBO, and Wang et al. ran it on exactly that case <Cite id="wang2016rembo" />.
+
+**The box.** Hyperparameters live in a box $\Xcal$, usually rescaled to $[-1, 1]^D$, and $\Amat\yvec$ may fall
+outside it. REMBO evaluates the nearest point of the box instead, $g(\yvec) = f(p_\Xcal(\Amat\yvec))$, where
+$p_\Xcal$ clips each coordinate. It searches $\yvec$ over $\Ycal = [-\sqrt{d}, \sqrt{d}]^d$, a choice made from
+simulations rather than from the theorem <Cite id="wang2016rembo" />. The clipping bends the embedding along the faces
+of the box, makes $g$ harder to model, and can exclude the optimiser. Letham et al. analyse these failures and restrict
+the search to the part of the embedding that maps inside the box <Cite id="letham2020alebo" />.
+
+<RandomEmbedding />
+
+### Additive structure
+
+An additive model assumes that $f$ splits over disjoint groups of hyperparameters,
+
+$$
+f(\lambdavec) = \sum_{m=1}^{M} f_m\paren{\lambdavec^{(m)}},
+$$
+
+where $\lambdavec^{(m)}$ holds the hyperparameters of group $m$, each of size $p$ <Cite id="kandasamy2015" />. Placing
+an independent Gaussian process on each term gives a Gaussian process for $f$ whose kernel is the sum of the groups'
+kernels. Each term is learned from all evaluations, as a <NoteLink to="generalised-additive-model">generalised additive
+model</NoteLink> learns its smooth terms. The acquisition also splits: an <Gloss name="ucb">upper confidence
+bound</Gloss> that is a sum over groups is maximised group by group, so the inner search costs $M$ problems of dimension
+$p$ instead of one of dimension $D$. Kandasamy, Schneider and Póczos prove a regret bound that depends on $D$ only
+linearly when $p$ is fixed <Cite id="kandasamy2015" />. The grouping is unknown in practice and is chosen by the
+<NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> among random partitions.
+
+### Trust regions
+
+TuRBO gives up a global model <Cite id="eriksson2019turbo" />. It fits a Gaussian process with
+<NoteLink to="automatic-relevance-determination">one length-scale per hyperparameter</NoteLink> to the evaluations of
+the current run and proposes points only inside a box, the **trust region**, centred on the incumbent. The box has base
+side $L$ on the unit cube, stretched per coordinate in proportion to the fitted length-scales $\ell_i$ with the volume
+kept at $L^D$: $L_i = \ell_i L / (\prod_j \ell_j)^{1/D}$. Candidates inside it are chosen by
+<NoteLink to="thompson-sampling">Thompson sampling</NoteLink>.
+
+The side length adapts as in classical <NoteLink to="trust-region-methods">trust-region methods</NoteLink>. A proposal
+that improves on the incumbent is a success; one that does not is a failure. After $\tau_\text{succ}$ consecutive
+successes the side doubles, up to $L_\text{max}$; after $\tau_\text{fail}$ consecutive failures it halves. When $L$
+falls below $L_\text{min}$ the region is discarded and a new run starts with side $L_\text{init}$. The published
+settings are $L_\text{init} = 0.8$, $L_\text{max} = 1.6$, $L_\text{min} = 2^{-7}$, $\tau_\text{succ} = 3$ and
+$\tau_\text{fail} = \lceil D/q \rceil$ for batches of $q$ proposals <Cite id="eriksson2019turbo" />. Several trust
+regions can run at once, with Thompson sampling across them deciding which region gets the next evaluation. The local
+model is accurate because it is local, and the search stays global through restarts.
+
+### Priors that make the plain loop work
+
+Two recent results keep the ordinary global loop and change the Gaussian process's hyperparameter priors. SAASBO puts
+a sparsity-inducing prior on the inverse length-scales, so that every hyperparameter is irrelevant unless the data show
+otherwise, which is <NoteLink to="automatic-relevance-determination">automatic relevance determination</NoteLink> with
+a strong preference for few relevant inputs <Cite id="eriksson2021saasbo" />. Hvarfner, Hellsten and Nardi trace many
+failures of plain Bayesian optimisation in high dimensions to length-scales that are too short for the dimension, and
+fix them by scaling the length-scale prior with $D$ <Cite id="hvarfner2024" />. Longer length-scales make the surrogate
+smoother and less complex, which reduces the uncertainty-driven exploration of corners.
+
+## Worked example
+
+The figure's objective is the Forrester function <Cite id="forrester2008" /> of $x_1$ alone on the box $[-1, 1]^2$, so
+$D = 2$ and $d_e = 1$. Its minimisers are the line $x_1 = x_1^\star = 2 \times 0.7572 - 1 = 0.514$. REMBO with $d = 1$
+draws $\Amat = (a_1, a_2)\transpose$ and searches $y \in [-1, 1]$.
+
+1. **Where the embedding goes.** The point $\Amat y$ has first coordinate $a_1 y$. Clipping to the box changes a
+   coordinate only when it leaves $[-1, 1]$, and the second coordinate does not affect $f$. So $g(y) = f(a_1 y)$ while
+   $\abs{a_1 y} \le 1$.
+2. **When it contains the minimiser.** Some $y \in [-1, 1]$ gives $a_1 y = 0.514$ exactly when $\abs{a_1} \ge 0.514$.
+   With the figure's default $\Amat = (0.9, 1.2)\transpose$ that holds, at $y = 0.571$.
+3. **How often.** With $a_1 \sim \Gauss(0, 1)$, $\prob(\abs{a_1} \ge 0.514) = 2(1 - \Phi(0.514)) = 0.607$. The theorem
+   promises a minimiser of $f$ on the unbounded line $\Amat y$. The bounded search region $\Ycal$ loses it 39% of the
+   time here.
+4. **Repairs.** Independent embeddings fail independently: with three of them, the chance that all miss is
+   $0.393^3 = 0.061$. A larger $\Ycal$ or $d > d_e$ also raises the success probability, at the cost of a larger
+   <NoteLink to="hyperparameter-search-spaces">search space</NoteLink>.
+
+**The trust region in twenty dimensions.** With $D = 20$ and one proposal at a time, TuRBO halves the region after
+$\tau_\text{fail} = 20$ consecutive failures. Its initial region of side $0.8$ covers $0.8^{20} = 1.2\%$ of the unit
+cube's volume. Seven halvings take $L$ from $0.8$ to $0.00625 < 2^{-7}$, so a region is abandoned after at least 140
+failures.
+
+## Assumptions
+
+- **REMBO** needs low effective dimensionality, along any directions, and a guess of $d \ge d_e$. If every
+  hyperparameter matters, the embedding discards real structure.
+- **Additive models** need the interactions between groups to be weak. A <Gloss name="learning-rate">learning
+  rate</Gloss> and a batch size that interact strongly must share a group.
+- **Trust regions** assume that good configurations can be reached by local improvement from some restart. They give up
+  the global model's ability to jump between distant basins in one step.
+
+## Pitfalls
+
+- **Clipping artefacts.** Points of a random embedding often fall outside the box, and many of them clip to the same
+  face, so $g$ has flat regions and kinks that a stationary kernel models badly <Cite id="letham2020alebo" />.
+- **Categorical hyperparameters.** Random linear embeddings, additive Gaussian processes and length-scale priors assume
+  continuous coordinates. Mixed spaces need encodings or tree-based surrogates such as
+  <NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink>.
+- **Too few evaluations for any surrogate.** Below a few multiples of $D$ evaluations, a surrogate in $D$ dimensions has
+  little to learn from. <NoteLink to="random-search">Random search</NoteLink> or
+  <NoteLink to="evolution-strategies-and-covariance-matrix-adaptation">CMA-ES</NoteLink> are strong baselines there, and
+  a method that does not beat them on the problem at hand has not shown its structure assumption holds.
+- **Finding the important hyperparameters first.** <NoteLink to="hyperparameter-importance">Hyperparameter
+  importance</NoteLink> analysis of earlier runs, or ARD length-scales, often shows a few hyperparameters that matter.
+  Searching those and fixing the rest is the simplest form of dimension reduction.

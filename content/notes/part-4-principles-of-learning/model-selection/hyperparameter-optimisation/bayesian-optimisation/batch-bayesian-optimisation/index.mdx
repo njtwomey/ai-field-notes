@@ -1,0 +1,204 @@
+---
+title: 'Batch Bayesian optimisation'
+kind: technique
+summary: 'Batch Bayesian optimisation proposes $q$ configurations at once for parallel workers. Multi-point expected improvement scores a batch by its best member; the kriging believer and constant liar build a batch by pretending pending points returned a guessed value.'
+tags: [model-selection, optimisation, bayesian, hyperparameters, worked-example]
+aliases: [parallel Bayesian optimisation, q-EI, multi-point expected improvement, kriging believer, constant liar, local penalisation, asynchronous Bayesian optimisation]
+requires: [bayesian-optimisation, expected-improvement]
+related: [acquisition-functions, thompson-sampling, asynchronous-successive-halving, random-search, gaussian-process-upper-confidence-bound, monte-carlo-integration, multivariate-normal-distribution]
+references: [ginsbourger2010, gonzalez2016, kandasamy2018, snoek2012, balandat2020, frazier2018, garnett2023, forrester2008, li2020asha]
+status: draft
+updated: 2026-10-13
+---
+
+import { BatchByFantasies } from './BatchByFantasies'
+
+<Definition>
+**Batch Bayesian optimisation** chooses $q$ configurations $\lambdavec_{t+1}, \dots, \lambdavec_{t+q}$ to evaluate at
+the same time, one per parallel worker, from the surrogate fitted to the $t$ evaluations so far. The natural score of a
+batch is the **multi-point expected improvement** (q-EI), the posterior mean of the gain of the batch's best member
+over the incumbent $f^\star_t$:
+
+$$
+\operatorname{qEI}_t(\lambdavec_{t+1}, \dots, \lambdavec_{t+q}) =
+\expect\brack{\max\paren{f^\star_t - \min_{j \le q} f(\lambdavec_{t+j}),\ 0} \mid \Dcal_t}.
+$$
+
+Heuristics such as the **constant liar** build a batch one point at a time by pretending that each chosen point has
+already returned a value <Cite id="ginsbourger2010" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> is sequential: it fits the surrogate, chooses one
+configuration, waits for its validation loss, and only then chooses the next. A cluster with $q$ workers then runs one
+training at a time and leaves $q - 1$ idle. Running the same acquisition on every worker does not help.
+<NoteLink to="expected-improvement">Expected improvement</NoteLink> is a deterministic function of the posterior, so
+every worker computes the same maximiser and trains the same configuration $q$ times.
+
+A batch method has to choose $q$ different configurations whose results are jointly informative, before any of them
+returns. It trades information against wall-clock time. A batch of $q$ points chosen at once is worth less than $q$
+points chosen one after another, since later points cannot use earlier results, but it finishes about $q$ times sooner.
+<NoteLink to="random-search">Random search</NoteLink> parallelises perfectly and learns nothing; batch Bayesian
+optimisation sits between the two.
+
+## Mechanism
+
+### The value of a batch
+
+The improvement of a batch is the improvement of its best member. For $q$ outcomes $f_1, \dots, f_q$ with improvements
+$I_j = \max(f^\star_t - f_j, 0)$,
+
+$$
+\max_{j}\, I_j = \max\paren{f^\star_t - \min_j f_j,\ 0},
+$$
+
+because the largest gain comes from the smallest value, and the gain is zero only when every value is at least
+$f^\star_t$. Taking the posterior expectation gives q-EI as defined above <Cite id="ginsbourger2010" />. Two bounds
+follow from $I_k \le \max_j I_j \le \sum_j I_j$ for every $k$, since all $I_j \ge 0$:
+
+$$
+\max_j \operatorname{EI}_t(\lambdavec_{t+j}) \le \operatorname{qEI}_t \le \sum_j \operatorname{EI}_t(\lambdavec_{t+j}).
+$$
+
+The lower bound is attained when the batch repeats one point: if $\lambdavec_{t+2} = \lambdavec_{t+1}$ then
+$f_2 = f_1$ and the second evaluation adds nothing. The upper bound is approached when at most one member can improve
+at a time. q-EI is large for batches whose members are good and whose outcomes are not strongly correlated, so it
+rewards diversity without a separate diversity term.
+
+q-EI depends on the joint posterior of $(f_1, \dots, f_q)$, a
+<NoteLink to="multivariate-normal-distribution">multivariate normal</NoteLink> for a <Gloss name="gp">Gaussian
+process</Gloss>. It has a closed form for $q = 2$ and needs $q$-dimensional normal probabilities beyond that. In
+practice it is estimated by <NoteLink to="monte-carlo-integration">Monte Carlo</NoteLink>: draw joint samples of the $q$
+outcomes, compute the improvement of each sample's minimum, and average <Cite id="ginsbourger2010" />. Writing each
+sample as $\mu + \Lmat\zvec$, with $\Lmat$ the Cholesky factor of the posterior covariance and $\zvec$ fixed standard
+normals, makes the estimate differentiable in the batch's locations, and BoTorch maximises it by gradient ascent that
+way <Cite id="balandat2020" />. The search is over $q\,d$ coordinates at once, which grows hard as $q$ grows.
+
+### Pretending: the kriging believer and the constant liar
+
+Ginsbourger, Le Riche and Carraro replace the joint search by $q$ ordinary EI searches <Cite id="ginsbourger2010" />.
+
+1. Choose $\lambdavec_{t+1}$ by maximising EI.
+2. Pretend it has returned a value $L$, the **lie**, add $(\lambdavec_{t+1}, L)$ to the data, and recompute the
+   posterior with the same kernel hyperparameters.
+3. Choose $\lambdavec_{t+2}$ by maximising EI under the new posterior, and repeat until $q$ points are chosen.
+
+The lie changes the posterior where it matters. In a noise-free model the posterior standard deviation at
+$\lambdavec_{t+1}$ drops to zero, so its EI becomes $\max(f^\star - L, 0)$, which is zero whenever $L \ge f^\star$. The
+spread also shrinks nearby, so EI falls around the pending point, and the next maximiser lies elsewhere. The choice of
+lie sets how far elsewhere.
+
+- **Kriging believer:** $L = \mu_t(\lambdavec_{t+1})$, the posterior mean. Conditioning a Gaussian process on its own
+  mean leaves the mean unchanged and only shrinks the variance. A mean below the incumbent also lowers $f^\star$ for
+  later points.
+- **Constant liar:** one constant for every pending point, usually the minimum, mean or maximum of the observed values.
+  A larger lie raises the posterior mean around each pending point and pushes the next point further away. Ginsbourger
+  et al. found $L = \min y$ the best of the variants on the Branin function, with $L = \max y$ more exploratory
+  <Cite id="ginsbourger2010" />.
+
+Both cost $q$ posterior updates and $q$ ordinary EI searches. Snoek, Larochelle and Adams average EI over many
+simulated outcomes of the pending points instead of a single lie, which is the expectation the lie approximates
+<Cite id="snoek2012" />.
+
+<BatchByFantasies />
+
+With seed 4, five evaluations and $q = 4$, the incumbent is the evaluation at $\lambda = 0.740$, and all strategies
+start at $0.725$, near the global minimum of the Forrester function at $0.757$ <Cite id="forrester2008" />. The constant
+liar with $L = \min y$ adds $0.765$, $0.755$ and $0.705$, a tight cluster in the same well. With $L = \max y$ it adds
+$0.755$, then leaves the well for $0.325$ and $0.250$, either side of the evaluation at $0.284$. The kriging believer
+adds $0.760$, $0.685$ and $0.325$. Without a fantasy all four points are $0.725$.
+
+### Local penalisation
+
+González, Dai, Hennig and Lawrence avoid refitting the model at all <Cite id="gonzalez2016" />. Suppose $f$ is
+Lipschitz with constant $K$: $\abs{f(\lambdavec) - f(\lambdavec')} \le K\norm{\lambdavec - \lambdavec'}$. Let $M$ be the
+minimum of $f$. Every point within distance $r_j = (f(\lambdavec_j) - M)/K$ of a pending point $\lambdavec_j$ then has
+value above $M$, so the minimiser is not in that ball. The value $f(\lambdavec_j)$ is unknown, with posterior
+$\Gauss(\mu_t(\lambdavec_j), \sigma_t^2(\lambdavec_j))$. The probability that a candidate $\lambdavec$ lies outside the
+ball is
+
+$$
+\varphi_j(\lambdavec) = \prob\paren{f(\lambdavec_j) < M + K\norm{\lambdavec - \lambdavec_j}}
+= \Phi\paren{\frac{M + K\norm{\lambdavec - \lambdavec_j} - \mu_t(\lambdavec_j)}{\sigma_t(\lambdavec_j)}}.
+$$
+
+The next point maximises the acquisition multiplied by these penalisers, $\alpha_t(\lambdavec)\prod_j
+\varphi_j(\lambdavec)$. Each penaliser is near 0 close to its pending point, equals 0.5 at the distance
+$(\mu_t(\lambdavec_j) - M)/K$, and approaches 1 beyond it. In practice $M$ is estimated by the best observed value and
+$K$ by the largest gradient norm of the posterior mean <Cite id="gonzalez2016" />.
+
+### Parallel Thompson sampling
+
+<Gloss name="thompson-sampling">Thompson sampling</Gloss> chooses a point by minimising one draw from the posterior.
+Each worker draws its own sample, so $q$ workers choose $q$ different points with no coordination. Kandasamy et al. show
+that synchronous and asynchronous parallel Thompson sampling keep regret bounds close to the sequential ones
+<Cite id="kandasamy2018" />.
+
+### Asynchronous workers
+
+Trainings finish at different times. An asynchronous scheme proposes a new configuration as soon as one worker is free,
+treating the configurations still running as pending points: they receive lies, penalisers or fantasised samples. No
+worker waits for a whole batch. <NoteLink to="asynchronous-successive-halving">Asynchronous successive
+halving</NoteLink> applies the same idea to <NoteLink to="early-stopping">early stopping</NoteLink>
+<Cite id="li2020asha" />.
+
+## Worked example
+
+A search minimises validation error, with incumbent $f^\star = 0.20$. Two workers are free. The posterior at three
+candidates is
+
+| candidate | posterior | EI alone |
+| --- | --- | --- |
+| A | $\Gauss(0.19, 0.02^2)$ | $0.0140$ |
+| A$'$ | $\Gauss(0.19, 0.02^2)$, next to A, correlation 0.9 with A | $0.0140$ |
+| B | $\Gauss(0.20, 0.03^2)$, far from A, uncorrelated with A | $0.0120$ |
+
+**Step 1: single-point EI.** For A, $z = 0.5$ and $\operatorname{EI} = 0.01 \times 0.6915 + 0.02 \times 0.3521 =
+0.0140$. For B, $z = 0$ and $\operatorname{EI} = 0.03 \times 0.3989 = 0.0120$. Ranking by EI alone fills the batch with
+A and A$'$.
+
+**Step 2: q-EI of each pair.** Estimated from four million joint draws, $\operatorname{qEI}(A, A') = 0.0164$ and
+$\operatorname{qEI}(A, B) = 0.0214$. The near-copy adds $0.0024$ to A's EI; B adds $0.0074$. Both pairs respect the
+bounds: $0.0140 \le 0.0164 \le 0.0280$ and $0.0140 \le 0.0214 \le 0.0260$.
+
+**Step 3: the effect of correlation.** For A paired with a near-copy of correlation $\rho$, q-EI is $0.0140$ at
+$\rho = 1$, $0.0164$ at $\rho = 0.9$, $0.0195$ at $\rho = 0.5$ and $0.0220$ at $\rho = 0$. A second evaluation is worth
+more the less its outcome is predictable from the first.
+
+**Step 4: a constant liar.** Pretend A returned $L = \min y = 0.20$, the incumbent. A's EI becomes
+$\max(0.20 - 0.20, 0) = 0$. Through the correlation, A$'$'s posterior becomes $\Gauss(0.199, 0.0087^2)$ and its EI
+falls to $0.0040$. B is uncorrelated with A, keeps its EI of $0.0120$, and is chosen. The heuristic reaches the better
+pair without computing q-EI.
+
+**Local penalisation, in numbers.** On the Forrester function take $K = 50$, $M = -6.0$, and a pending point with
+$\mu_t = -5.5$ and $\sigma_t = 0.3$. At distance $0.01$ the penaliser is $\Phi((-6.0 + 0.5 + 5.5)/0.3) = \Phi(0) = 0.5$.
+At distance $0.03$ it is $\Phi(1.0/0.3) = 0.9996$. The excluded radius is about $(\mu_t - M)/K = 0.01$.
+
+## Cost
+
+A constant liar costs $q$ posterior updates and $q$ acquisition maximisations per batch, each as cheap as one sequential
+step. Local penalisation needs no updates, only $q$ maximisations of a reweighted acquisition. Monte Carlo q-EI costs a
+Cholesky factor of a $q \times q$ covariance per sample and an optimisation over $q d$ coordinates. All are negligible
+next to $q$ trainings. The saving is wall-clock time: with $q$ workers a budget of $N$ evaluations takes about $N/q$
+rounds.
+
+## Trade-offs
+
+- **Batch size against efficiency.** Each batch is chosen with less information than sequential choices would have, so
+  batch methods need more evaluations than sequential ones to reach the same loss, and fewer rounds.
+- **Lies against joint scoring.** Lies are cheap and work with any acquisition but can distort the model: a lie far
+  from the posterior mean bends a smooth Gaussian process on both sides of the pending point. q-EI scores batches
+  exactly but its optimisation scales poorly in $q$.
+- **Synchronous against asynchronous.** Waiting for a whole batch wastes workers when training times vary.
+  Asynchronous proposals keep every worker busy at the cost of always deciding with some results outstanding.
+
+## Pitfalls
+
+- **Identical proposals.** Running a sequential optimiser on $q$ workers without pending-point handling trains the same
+  configuration $q$ times. Libraries mark running trials as pending for this reason.
+- **Refitting hyperparameters on lies.** Fitting the kernel's hyperparameters to pretended values fits the model to
+  invented data. The heuristics keep the hyperparameters fitted to real evaluations.
+- **The incumbent's score.** A batch evaluates more configurations in the same time, which makes the best observed
+  score more optimistic, as for any search (see <NoteLink to="overfitting-in-model-selection">overfitting in model
+  selection</NoteLink>).

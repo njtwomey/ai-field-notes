@@ -1,0 +1,178 @@
+---
+title: 'Hyperband'
+kind: technique
+summary: 'Hyperband runs successive halving in several brackets, from many configurations stopped very early to a few trained fully, each costing about the same. It hedges against not knowing how early rankings can be trusted, at most a factor $\log_\eta R + 1$ in budget.'
+tags: [model-selection, hyperparameters, early-stopping, worked-example]
+aliases: [Hyperband brackets, infinite-horizon Hyperband]
+requires: [successive-halving]
+related: [asynchronous-successive-halving, bayesian-optimisation-and-hyperband, random-search, learning-curve-extrapolation, best-arm-identification, multi-fidelity-bayesian-optimisation]
+references: [li2018hyperband, jamieson2016, li2020asha, falkner2018bohb]
+status: draft
+updated: 2026-10-13
+---
+
+import { HyperbandBrackets } from './HyperbandBrackets'
+
+<Definition>
+**Hyperband** is a multi-fidelity <NoteLink to="hyperparameter-search">hyperparameter search</NoteLink> that runs
+<NoteLink to="successive-halving">successive halving</NoteLink> several times with different trade-offs between the
+number of configurations and the budget each starts with <Cite id="li2018hyperband" />. Given a maximum budget $R$
+per configuration and a reduction factor $\eta$, it runs $s_{\max} + 1$ **brackets**, $s_{\max} = \lfloor \log_\eta R
+\rfloor$. Bracket $s$ starts about $\eta^s$ random configurations at budget $R\eta^{-s}$. The most aggressive bracket
+judges many configurations after a tiny budget; the most conservative, $s = 0$, is random search with full training. All
+brackets cost about the same, and Hyperband returns the configuration with the lowest validation loss seen.
+</Definition>
+
+## Problem
+
+Successive halving needs the number of configurations $n$ fixed in advance. With a fixed total budget, $n$ sets the
+first budget at which configurations are judged, $r = R/n$ when one configuration is to reach $R$. A large $n$ explores
+many configurations but judges them after a tiny budget, where rankings may be wrong. A small $n$ judges reliably but
+explores little.
+
+The right choice depends on how quickly the ranking of the learning curves settles, which differs between problems
+and is not known before the search. In the language of the
+<NoteLink to="successive-halving">successive-halving analysis</NoteLink>, it depends on the envelope $\gamma(t)$ and on
+the gaps between final losses, neither of which is observed. Li et al. call this the "$n$ versus $B/n$" trade-off
+<Cite id="li2018hyperband" />.
+
+## Mechanism
+
+### The brackets
+
+Hyperband removes the choice by trying a geometric range of values of $n$. With $s_{\max} = \lfloor \log_\eta R
+\rfloor$ and minimum budget 1, bracket $s = s_{\max}, s_{\max} - 1, \dots, 0$ draws
+
+$$
+n_s = \left\lceil \frac{s_{\max} + 1}{s + 1}\,\eta^s \right\rceil
+$$
+
+configurations at random and runs successive halving on them from budget $r_s = R\eta^{-s}$. Rung $i = 0, \dots, s$
+trains $\lfloor n_s\eta^{-i} \rfloor$ configurations to budget $r_s\eta^i$, so rung $s$ reaches $R$.
+
+Hyperband returns the configuration with the smallest validation loss seen in any bracket. Bracket $s_{\max}$ is the
+most exploratory: it starts with budget 1. Bracket 0 starts $s_{\max} + 1$ configurations at $R$ and stops none, which
+is <NoteLink to="random-search">random search</NoteLink>. Each step down in $s$ divides the number of configurations by
+about $\eta$ and multiplies their first budget by $\eta$.
+
+### Every bracket costs about the same
+
+Rung $i$ of bracket $s$ trains about $n_s\eta^{-i}$ configurations to budget $r_s\eta^i$, so, ignoring the rounding,
+it costs
+
+$$
+n_s\eta^{-i} \cdot r_s\eta^i = n_s r_s \approx \frac{s_{\max} + 1}{s + 1}\,\eta^s \cdot R\eta^{-s} =
+\frac{(s_{\max} + 1)R}{s + 1}.
+$$
+
+The bracket has $s + 1$ rungs, so its cost is about
+
+$$
+B_s \approx (s + 1)\cdot\frac{(s_{\max} + 1)R}{s + 1} = (s_{\max} + 1)R.
+$$
+
+The factor $(s_{\max} + 1)/(s + 1)$ in $n_s$ is chosen for exactly this: a bracket with fewer rungs gets proportionally
+more configurations, so that every bracket spends the same budget $(s_{\max} + 1)R$. One pass through all brackets costs
+about
+
+$$
+B_{\text{HB}} \approx (s_{\max} + 1)^2 R.
+$$
+
+### The price of the hedge
+
+Suppose that, in hindsight, bracket $s^\star$ would have been the right choice for the problem. Running bracket
+$s^\star$ alone costs $(s_{\max} + 1)R$. Hyperband runs it as one of $s_{\max} + 1$ brackets of equal cost, so it
+reaches the same result after at most $s_{\max} + 1$ times that budget. The factor is $\lfloor \log_\eta R \rfloor + 1$,
+logarithmic in the ratio of the largest to the smallest budget. Li et al. prove that Hyperband needs a budget only log
+factors larger than successive halving with the best $n$, without knowing the envelope or the distribution of final
+losses <Cite id="li2018hyperband" />.
+
+The bound also limits what the hedge can gain. The most exploratory bracket evaluates $\eta^{s_{\max}} \approx R$
+configurations for a budget of $(s_{\max} + 1)R$, where random search would spend $R$ per configuration. If training
+time grows linearly with the budget, Hyperband is therefore at most about $R/(s_{\max} + 1)$ times faster than random
+search. Superlinear training costs, such as a kernel method whose cost grows quadratically with the number of training
+points, raise that ceiling <Cite id="li2018hyperband" />.
+
+### Repeating and growing
+
+A pass over the brackets has a finite budget. Li et al. recommend repeating it until the overall budget runs out
+<Cite id="li2018hyperband" />. When $R$ itself is not known, the **infinite-horizon** variant runs passes with growing
+$R$, in the style of the doubling trick of <NoteLink to="successive-halving">successive halving</NoteLink>.
+
+<HyperbandBrackets />
+
+## Worked example
+
+**The brackets for $R = 81$, $\eta = 3$.** Then $s_{\max} = \lfloor \log_3 81 \rfloor = 4$ and there are five
+brackets. The formula for $n_s$ and the halving rule give:
+
+| bracket $s$ | $n_s$ | rungs: configurations at budget | budget from scratch | budget when resuming |
+| --- | --- | --- | --- | --- |
+| 4 | 81 | 81 at 1, 27 at 3, 9 at 9, 3 at 27, 1 at 81 | 405 | 297 |
+| 3 | 34 | 34 at 3, 11 at 9, 3 at 27, 1 at 81 | 363 | 276 |
+| 2 | 15 | 15 at 9, 5 at 27, 1 at 81 | 351 | 279 |
+| 1 | 8 | 8 at 27, 2 at 81 | 378 | 324 |
+| 0 | 5 | 5 at 81 | 405 | 405 |
+
+1. **Bracket 3 step by step.** $n_3 = \lceil 5 \cdot 27/4 \rceil = \lceil 33.75 \rceil = 34$ and $r_3 = 81/27 = 3$.
+   The rungs keep $\lfloor 34/3 \rfloor = 11$, then $\lfloor 11/3 \rfloor = 3$, then 1. The cost from scratch is
+   $34 \cdot 3 + 11 \cdot 9 + 3 \cdot 27 + 1 \cdot 81 = 102 + 99 + 81 + 81 = 363$.
+2. **Equal costs.** The five brackets cost 405, 363, 351, 378 and 405 epochs, all close to
+   $(s_{\max} + 1)R = 5 \times 81 = 405$. The rounding in $n_s$ and $\lfloor\cdot\rfloor$ causes the differences.
+3. **The whole pass.** It starts $81 + 34 + 15 + 8 + 5 = 143$ configurations for 1,902 epochs from scratch, or 1,581
+   when promoted configurations resume. The approximation $(s_{\max} + 1)^2 R = 25 \times 81 = 2{,}025$ is close.
+   Random search with 1,902 epochs trains 23 configurations to 81 epochs.
+
+The table printed in Li et al. (2018) lists 27, 9 and 6 configurations for brackets 3, 2 and 1. The formula of their
+Algorithm 1, which BOHB also uses, gives 34, 15 and 8, as above <Cite id="li2018hyperband" />
+<Cite id="falkner2018bohb" />.
+
+**What the hedge buys.** The figure runs each bracket of $R = 27$, $\eta = 3$ on its own, repeated $s_{\max} + 1 = 4$
+times so that it costs about as much as one pass of Hyperband, on seeded learning curves with noise of standard
+deviation $0.01$. Averaged over 20 seeds, the mean final loss of the returned configuration is:
+
+| crossing $\kappa$ | bracket 3 | bracket 2 | bracket 1 | bracket 0 (random search) | Hyperband |
+| --- | --- | --- | --- | --- | --- |
+| 0 | **0.079** | 0.083 | 0.097 | 0.105 | 0.084 |
+| 0.4 | **0.085** | 0.088 | 0.103 | 0.109 | 0.095 |
+| 0.8 | 0.110 | **0.091** | 0.105 | 0.113 | 0.103 |
+| 1 | 0.218 | **0.095** | 0.108 | 0.116 | 0.105 |
+
+When early rankings hold ($\kappa$ small), the most aggressive bracket is best. When curves cross ($\kappa$ near 1), it
+is worst by far, because it keeps the configurations that start fast and end badly. Hyperband is never the best column,
+because it spends three quarters of its budget on brackets that are not the best one. It is never the worst either, and
+it beats random search at every $\kappa$. That is the hedge.
+
+## Cost
+
+One pass of Hyperband costs about $(s_{\max} + 1)^2R$ budget units, the cost of $(s_{\max} + 1)^2$ full trainings.
+Within a pass, the brackets are independent and can run in parallel; within a bracket, each rung waits for its slowest
+configuration. Hyperband adds no modelling cost. The returned configuration is the one with the lowest loss seen, which
+may come from a lower budget than $R$ when the curves are noisy.
+
+## Trade-offs
+
+- **Hedge against commitment.** When the rankings settle early on a family of problems, the most aggressive bracket
+  alone is cheaper. Li et al. found that bracket the most effective in many of their experiments, and ASHA runs only
+  one bracket for that reason <Cite id="li2020asha" />.
+- **Choosing $R$ and the minimum budget.** These set $s_{\max}$ and therefore everything else. The minimum budget must
+  still carry information: one epoch on a tiny subset may rank configurations at random.
+- **Random sampling.** Hyperband draws configurations independently and learns nothing from earlier brackets.
+  <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> keeps the brackets and draws configurations from a
+  model of the results so far.
+- **Synchronous rungs.** <NoteLink to="asynchronous-successive-halving">Asynchronous successive halving</NoteLink>
+  promotes without waiting for a rung to fill, and loops over brackets the same way for an asynchronous Hyperband.
+
+## Pitfalls
+
+- **Reading the table's best column as the method.** The most aggressive bracket wins on many benchmarks. Running only
+  that bracket gives up the protection against crossing curves, which is the reason Hyperband exists.
+- **Budget units that do not scale.** The cost argument assumes that training to budget $t$ costs $t$. A fixed overhead
+  per configuration, such as loading data or compiling a model, makes the many small runs of the aggressive brackets
+  more expensive than the formulas say.
+- **Hyperparameters that depend on the budget.** A learning-rate schedule defined over $R$ epochs, or a regularisation
+  strength tuned for the full data set, behaves differently at a small budget. The rankings at low budget then measure
+  the wrong thing.
+- **The incumbent's loss.** Hyperband reports the minimum of many noisy validation losses, which is biased low (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

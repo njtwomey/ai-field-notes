@@ -1,0 +1,208 @@
+---
+title: 'Noise injection as regularisation'
+kind: concept
+summary: 'Training on inputs perturbed by noise of variance $\sigma^2$ regularises. For a linear model with squared error it is exactly ridge regression with $\lambda = n\sigma^2$; for a nonlinear model it adds, to order $\sigma^2$, a penalty on the input gradient. Dropout is an adaptive $L^2$ penalty.'
+tags: [model-selection, regularisation, neural-networks, worked-example]
+aliases: [input noise injection, Gaussian noise injection, dropout as adaptive regularisation, Tikhonov regularisation by noise]
+requires: [tikhonov-regularisation, ridge-regression, taylor-series]
+related: [dropout, data-augmentation, implicit-regularisation, measurement-error-and-proxies, logistic-regression, generalised-linear-model, flat-minima-and-sharpness, iterative-regularisation]
+references: [bishop1995, an1996, holmstrom1992, wager2013, srivastava2014]
+status: draft
+updated: 2026-10-13
+---
+
+import { NoisyInputFits } from './NoisyInputFits'
+
+<Definition>
+**Noise injection** trains a model $f$ on randomly perturbed inputs: each time an example $(\xvec_i, y_i)$ is used, the
+input is replaced by $\xvec_i + \epsilonvec$ with a fresh draw of noise $\epsilonvec$ of mean $\zeros$ and covariance
+$\sigma^2\eye$. Training then minimises the expected loss
+
+$$
+\tilde L(f) = \sum_{i=1}^n \expect_{\epsilonvec}\brack{\ell\paren{f(\xvec_i + \epsilonvec), y_i}}.
+$$
+
+For squared error, $\tilde L$ equals the training loss plus $\sigma^2$ times a Tikhonov penalty on the gradient
+$\nabla_\xvec f$, up to terms of order $\sigma^4$ that do not change the minimiser to order $\sigma^2$
+<Cite id="bishop1995" />. **Dropout** is multiplicative noise of the same kind <Cite id="srivastava2014" />.
+</Definition>
+
+## Intuition
+
+A model trained on jittered copies of each input sees, around every training point, a small cloud of inputs that share
+one target. It can fit all of them only by predicting nearly the same value across the cloud. A model whose output
+changes steeply with its input pays for the steepness on every noisy copy. Noise injection therefore penalises the
+model's sensitivity to its input, the same quantity that a smoothness penalty on
+$\nabla_\xvec f$ penalises, and the noise variance $\sigma^2$ plays the part of the penalty strength.
+
+The noise also enlarges the training set. Each epoch sees different inputs, so the model cannot memorise the exact
+training points. Noise injection is the simplest form of <NoteLink to="data-augmentation">data augmentation</NoteLink>,
+the one that encodes no invariance beyond "nearby inputs have nearby outputs".
+
+## Linear models: exactly ridge
+
+Let $f(\xvec) = \wvec^\top\xvec$ and the loss be squared error. For one example, the residual on the noisy input is
+$(y_i - \wvec^\top\xvec_i) - \wvec^\top\epsilonvec$. Squaring and taking the expectation over $\epsilonvec$, the cross
+term vanishes because $\expect\epsilonvec = \zeros$, and $\expect(\wvec^\top\epsilonvec)^2 =
+\wvec^\top\expect[\epsilonvec\epsilonvec^\top]\wvec = \sigma^2\norm{\wvec}^2$. Summing over the $n$ examples,
+
+$$
+\tilde L(\wvec) = \norm{\yvec - \Xmat\wvec}^2 + n\sigma^2\norm{\wvec}^2.
+$$
+
+This is <NoteLink to="ridge-regression">ridge regression</NoteLink> with $\lambda = n\sigma^2$, exactly, for any noise
+distribution with this mean and covariance. Three consequences follow.
+
+- **The penalty grows with $n$.** Each example contributes its own $\sigma^2\norm{\wvec}^2$, so for a fixed noise level
+  the <NoteLink to="regularisation">regularisation</NoteLink> keeps pace with the data, unlike a fixed $\lambda$, whose
+  effect fades as $n$ grows.
+- **The noise shape is the penalty shape.** Noise with covariance $\Sigmamat$ gives the generalised ridge penalty
+  $n\wvec^\top\Sigmamat\wvec$. Noise proportional to each feature's standard deviation is ridge on standardised
+  features.
+- **It is regression dilution.** Least squares on inputs measured with error shrinks the slope towards zero by the same
+  factor. The attenuation that is a bias in <NoteLink to="measurement-error-and-proxies">measurement-error</NoteLink>
+  problems is the shrinkage that noise injection buys deliberately.
+
+## Nonlinear models: a penalty on the gradient
+
+For a nonlinear $f$, expand around $\xvec$ to second order in the noise, with $\gvec = \nabla_\xvec f(\xvec)$ the
+gradient and $\Hmat$ the <NoteLink to="hessian">Hessian</NoteLink> of $f$ in $\xvec$:
+
+$$
+f(\xvec + \epsilonvec) = f(\xvec) + \epsilonvec^\top\gvec + \tfrac12\epsilonvec^\top\Hmat\epsilonvec + O(\norm{\epsilonvec}^3).
+$$
+
+Write $r = f(\xvec) - y$ for the residual. Then
+
+$$
+\paren{f(\xvec + \epsilonvec) - y}^2 = r^2 + 2r\,\epsilonvec^\top\gvec + (\epsilonvec^\top\gvec)^2
++ r\,\epsilonvec^\top\Hmat\epsilonvec + O(\norm{\epsilonvec}^3).
+$$
+
+Take the expectation term by term. The term linear in $\epsilonvec$ vanishes. $\expect(\epsilonvec^\top\gvec)^2 =
+\sigma^2\norm{\gvec}^2$ and $\expect[\epsilonvec^\top\Hmat\epsilonvec] = \sigma^2\trace\Hmat$. For noise symmetric about
+zero the third-order terms vanish too, leaving
+
+$$
+\expect_{\epsilonvec}\paren{f(\xvec + \epsilonvec) - y}^2 = r^2 + \sigma^2\paren{\norm{\nabla_\xvec f}^2 +
+r\,\trace\Hmat} + O(\sigma^4).
+$$
+
+The first penalty term, $\sigma^2\norm{\nabla_\xvec f}^2$, is a Tikhonov regulariser of first order: it penalises the
+slope of the function. The second, $\sigma^2 r\trace\Hmat$, can be negative, so the expansion is not yet a penalty in
+the usual sense. Bishop's argument removes it <Cite id="bishop1995" />. Averaged over the targets at $\xvec$, the second
+term involves $f(\xvec) - \expect[y \mid \xvec]$. The minimiser of $\tilde L$ is the regression function plus a
+correction of order $\sigma^2$, so at the minimum this factor is $O(\sigma^2)$ and the whole term is $O(\sigma^4)$. To
+order $\sigma^2$, training with noise has the same minimiser as
+
+$$
+\sum_i \paren{f(\xvec_i) - y_i}^2 + n\sigma^2\,\overline{\norm{\nabla_\xvec f}^2},
+$$
+
+where the bar averages the squared gradient over the input distribution. The equivalence is between minimisers, not
+between the values of the two objectives. It needs no assumption that the individual residuals are small, because the
+average over targets does the work.
+
+The same expansion explains what other noise does <Cite id="an1996" />.
+
+- **Output noise.** Noise added to the targets changes the squared-error objective by a constant, $\sigma^2$ per
+  example, and has no effect on the minimiser.
+- **Weight noise.** Noise added to the parameters penalises $\norm{\nabla_\wvec f}^2$, the sensitivity of the output to
+  the weights, which favours flat regions of the loss (see <NoteLink to="flat-minima-and-sharpness">flat minima and
+  sharpness</NoteLink>). An found it improved generalisation on a classification task but not on a regression task.
+- **Kernel density view.** Training on noisy inputs minimises the loss under a smoothed estimate of the input
+  distribution, the training points convolved with the noise density. Holmström and Koistinen analysed
+  training with additive noise this way, which turns the choice of $\sigma$ into the choice of a kernel bandwidth
+  <Cite id="holmstrom1992" />.
+
+## Dropout as adaptive $L^2$
+
+<NoteLink to="dropout">Dropout</NoteLink> replaces feature $x_{ij}$ by $0$ with probability $\delta$ and by
+$x_{ij}/(1 - \delta)$ otherwise, so the perturbed input $\tilde\xvec_i$ is unbiased, $\expect\tilde\xvec_i = \xvec_i$,
+with independent coordinates of variance $\frac{\delta}{1 - \delta}x_{ij}^2$.
+
+Take a <NoteLink to="generalised-linear-model">generalised linear model</NoteLink> with natural parameter
+$\eta = \wvec^\top\xvec$, log-partition function $A$, and negative log-likelihood
+$A(\wvec^\top\xvec) - y\,\wvec^\top\xvec$ up to terms free of $\wvec$. <NoteLink to="logistic-regression">Logistic
+regression</NoteLink> has $A(\eta) = \ln(1 + e^\eta)$ and $A''(\eta) = p(1 - p)$, with $p$ the predicted probability.
+Least squares has $A(\eta) = \eta^2/2$ and $A'' = 1$. Under dropout the term $y\,\wvec^\top\xvec$ has the same
+expectation as without it, because the input is unbiased. The change in expected loss is all in $A$, and a second-order
+expansion of $A$ around $\eta_i = \wvec^\top\xvec_i$ gives
+
+$$
+\expect A(\wvec^\top\tilde\xvec_i) - A(\wvec^\top\xvec_i) \approx \tfrac12 A''(\eta_i)\var(\wvec^\top\tilde\xvec_i)
+= \tfrac12 A''(\eta_i)\frac{\delta}{1 - \delta}\sum_j x_{ij}^2w_j^2.
+$$
+
+Summing over examples, dropout adds the penalty
+
+$$
+R(\wvec) = \frac12\cdot\frac{\delta}{1 - \delta}\sum_j \paren{\sum_i A''(\eta_i)x_{ij}^2} w_j^2
+$$
+
+<Cite id="wager2013" />. The bracket is the $j$-th diagonal entry of the <Gloss name="fisher-information">Fisher
+information</Gloss> $\Xmat^\top\Vmat\Xmat$, with $\Vmat = \diag(A''(\eta_i))$. Dropout is therefore, to second order, an
+$L^2$ penalty applied after each feature is rescaled by the inverse square root of its Fisher information. Wager, Wang
+and Liang call it adaptive for two reasons.
+
+- **Rare features are penalised little.** A feature that is zero in most examples contributes to few terms of its
+  bracket. Ridge penalises its weight as much as any other's, while dropout barely penalises it. Rare but
+  discriminative features, common in text, keep large weights.
+- **Confident examples count little.** In logistic regression, $A'' = p(1 - p)$ is small where the model is confident.
+  A feature that appears only in confidently classified examples is penalised little.
+
+For least squares, $A'' = 1$ and the penalty is $\frac{\delta}{2(1 - \delta)}\sum_j\paren{\sum_i x_{ij}^2}w_j^2$, ridge
+scaled per feature by its energy, as in the <NoteLink to="dropout">dropout</NoteLink> note. Additive Gaussian noise of
+variance $\sigma^2$ in the same calculation gives $\frac{\sigma^2}{2}\sum_i A''(\eta_i)\norm{\wvec}^2$: one penalty
+strength for all features, weighted by the examples' curvature.
+
+## Worked example
+
+**Input noise in a linear fit.** Fit $y = wx$ through the origin to $\xvec = (1, 2, 3)$ and $\yvec = (1, 2, 2)$. The
+sums are $\sum x_i^2 = 14$ and $\sum x_iy_i = 11$.
+
+1. Least squares gives $w = 11/14 = 0.786$.
+2. Train on noisy inputs with $\sigma^2 = 0.5$. The penalty is $n\sigma^2 = 3 \times 0.5 = 1.5$, so the minimiser is
+   $w = 11/(14 + 1.5) = 0.710$, a shrinkage factor of $14/15.5 = 0.903$.
+3. Least squares on 200 000 noisy copies of each point, $\sum\tilde x y/\sum\tilde x^2$, gives 0.7097, against the
+   predicted 0.7097.
+
+**Dropout's penalty on a rare feature.** Logistic regression on $n = 100$ examples has two binary features. Feature 1 is
+1 in 50 examples, where the model predicts $p = 0.5$. Feature 2 is 1 in 5 examples, where it predicts $p = 0.95$. The
+Fisher weights are
+
+$$
+\sum_i p_i(1 - p_i)x_{i1}^2 = 50 \times 0.25 = 12.5, \qquad \sum_i p_i(1 - p_i)x_{i2}^2 = 5 \times 0.0475 = 0.2375.
+$$
+
+With $\delta = 0.5$, the penalty is $\frac12(12.5\,w_1^2 + 0.2375\,w_2^2)$. Dropout penalises the rare, confidently
+predicted feature 53 times less than the common one. Ridge, with $\lambda(w_1^2 + w_2^2)$, would penalise them equally.
+Ridge on standardised features penalises each $w_j$ in proportion to its feature's variance, 0.25 against 0.0475, a
+ratio of 5.3. Dropout's larger ratio also reflects the model's confidence on the examples where feature 2 appears.
+
+<NoisyInputFits />
+
+## Assumptions
+
+- **Small noise.** The gradient penalty is a second-order expansion. Large noise moves inputs outside the region where
+  the model's <NoteLink to="taylor-series">Taylor expansion</NoteLink> holds, and adds higher-order terms.
+- **Squared error for the gradient form.** For other losses the second-order expansion weights the gradient penalty by
+  the loss's curvature, as the generalised linear model calculation shows.
+- **Fresh noise each time.** The equivalence is with the expected loss. A fixed set of noisy copies, drawn once,
+  approximates it, with the gap shrinking as the number of copies grows.
+
+## Pitfalls
+
+- **Noise in the wrong units.** Isotropic noise on unstandardised inputs perturbs small-scale features more, relative to
+  their spread, than large-scale ones, and the implied penalty treats them unequally. Standardise first, or scale the
+  noise per feature.
+- **Equivalent minimiser, different optimisation.** Stochastic noise makes the gradient noisy, so training with noise
+  converges more slowly than minimising the explicit penalty. For a linear model, ridge is cheaper and exact.
+- **Noise level is a hyperparameter.** $\sigma$ must be chosen like any regularisation strength, by validation (see
+  <NoteLink to="choosing-the-regularisation-strength">choosing the regularisation strength</NoteLink>).
+- **Not every noise regularises.** Target noise in squared error only adds a constant. Weight noise and input noise
+  penalise different things, and An found that weight noise helped only on his classification problem
+  <Cite id="an1996" />.
+- **Train and test differ.** The model is trained on noisy inputs and evaluated on clean ones. For dropout the scaling
+  by $1/(1 - \delta)$ keeps the expected input equal in the two modes; for additive noise no correction is needed,
+  because the noise has mean zero.

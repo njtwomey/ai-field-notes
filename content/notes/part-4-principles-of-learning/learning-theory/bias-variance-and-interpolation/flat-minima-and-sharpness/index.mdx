@@ -1,0 +1,193 @@
+---
+title: 'Flat minima and sharpness'
+kind: concept
+summary: 'Sharpness measures how fast the training loss rises around a minimum: the top Hessian eigenvalue, the Hessian trace, or the worst loss in a small ball. Flat minima often generalise better, but rescaling the weights can change sharpness without changing the function.'
+tags: [learning-theory, generalisation, optimisation, worked-example]
+aliases: [flat minimum, sharp minimum, sharpness, loss landscape flatness, sharpness-aware minimisation, sharpness-aware minimization, edge of stability]
+requires: [hessian, gradient-descent]
+related: [pac-bayes-bounds, non-vacuous-generalisation-bounds, implicit-regularisation, norm-based-bounds-for-neural-networks, minimum-description-length, learning-rate-schedules, batch-normalisation]
+references: [hochreiter1997b, keskar2017, dinh2017b, foret2021, neyshabur2017, dziugaite2017, jiang2020, andriushchenko2023, cohen2021, mcallester1999, maurer2004]
+status: draft
+updated: 2026-10-12
+---
+
+<Definition>
+Let $\hat L(\thetavec)$ be the training loss and $\thetavec^*$ a minimum with <NoteLink to="hessian">Hessian</NoteLink>
+$\Hmat = \nabla^2\hat L(\thetavec^*)$. **Sharpness** measures how fast $\hat L$ rises around $\thetavec^*$. Common
+measures are the largest eigenvalue $\lambda_{\max}(\Hmat)$, the trace $\trace\Hmat$, and the worst-case rise in a ball
+of radius $\rho$,
+
+$$
+S_\rho(\thetavec^*) = \max_{\norm{\epsilonvec} \le \rho}\hat L(\thetavec^* + \epsilonvec) - \hat L(\thetavec^*).
+$$
+
+A minimum is **flat** when these are small. The flat-minima hypothesis holds that flat minima generalise better than
+sharp ones <Cite id="hochreiter1997b" /> <Cite id="keskar2017" />.
+</Definition>
+
+## Intuition
+
+A flat minimum is a wide valley: the parameters can move some distance without the training loss rising much. Three
+arguments link width to generalisation.
+
+- **Robustness to shift.** The test loss surface differs from the training loss surface. If the difference roughly
+  shifts the surface, a wide valley loses less at the training minimum than a narrow one.
+- **Description length.** A point in a wide valley can be specified with few bits, because low precision suffices.
+  Hochreiter and Schmidhuber used this <NoteLink to="minimum-description-length">minimum description length</NoteLink>
+  argument to propose flat minima <Cite id="hochreiter1997b" />.
+- **PAC-Bayes.** A wide valley admits a broad distribution of parameters with low training loss. A
+  <NoteLink to="pac-bayes-bounds">PAC-Bayes bound</NoteLink> charges such a distribution little. This is the one
+  argument that gives a bound.
+
+Keskar et al. found that training with large minibatches converged to sharper minima than small minibatches, and
+generalised worse <Cite id="keskar2017" />. In networks with <Gloss name="relu" /> units, however, sharpness depends on
+how the same function is parameterised.
+
+## Measures of sharpness
+
+At a minimum the gradient vanishes, so a second-order Taylor expansion gives
+
+$$
+\hat L(\thetavec^* + \epsilonvec) \approx \hat L(\thetavec^*) + \tfrac12\epsilonvec^\top\Hmat\epsilonvec.
+$$
+
+The measures are two summaries of the same quadratic form.
+
+1. **Worst case.** Over the ball $\norm{\epsilonvec} \le \rho$, the quadratic form is largest along the top eigenvector
+   of $\Hmat$, by the Rayleigh quotient. So $S_\rho \approx \frac12\rho^2\lambda_{\max}(\Hmat)$.
+2. **Average case.** For a random perturbation $\uvec \sim \Gauss(\zeros, \sigma^2\eye)$,
+   $\expect[\uvec^\top\Hmat\uvec] = \sigma^2\trace\Hmat$, so the expected rise is $\frac12\sigma^2\trace\Hmat$.
+
+The top eigenvalue is computed without forming the Hessian, by power iteration on Hessian–vector products, which
+<NoteLink to="automatic-differentiation">automatic differentiation</NoteLink> provides at the cost of about two
+gradients each. Keskar et al. used a relative version of $S_\rho$ over a box scaled to the size of each parameter
+<Cite id="keskar2017" />.
+
+**Step size selects flatness.** <NoteLink to="gradient-descent">Gradient descent</NoteLink> with step size $\eta$ on the
+quadratic model multiplies the component along an eigenvector with eigenvalue $\lambda$ by $1 - \eta\lambda$ at every
+step. The iteration is stable only if $\abs{1 - \eta\lambda} < 1$, that is $\lambda < 2/\eta$. Gradient descent can
+therefore settle only at minima with $\lambda_{\max} \le 2/\eta$: a larger step size admits only flatter minima. Cohen
+et al. observed that full-batch gradient descent on neural networks typically drives $\lambda_{\max}$ up to about
+$2/\eta$ and keeps it there, a regime they named the **edge of stability** <Cite id="cohen2021" />. Measured sharpness
+then reflects the step size as much as the data.
+
+## The link to PAC-Bayes
+
+A PAC-Bayes bound controls the risk of a randomised predictor that draws its parameters from a posterior $Q$. Take a
+prior $P = \Gauss(\thetavec_0, \sigma^2\eye)$ fixed before the data, such as one centred on the initialisation, and the
+posterior $Q = \Gauss(\thetavec, \sigma^2\eye)$ around the trained parameters. For a loss with values in $[0, 1]$, with
+probability at least $1 - \delta$ over a sample of size $m$, every $Q$ satisfies
+
+$$
+\expect_{\thetavec' \sim Q}R(\thetavec') \le \expect_{\thetavec' \sim Q}\hat R(\thetavec') +
+\sqrt{\frac{\KL(Q \,\|\, P) + \ln(2\sqrt m/\delta)}{2m}}
+$$
+
+<Cite id="mcallester1999" /> <Cite id="maurer2004" />. The derivation of the sharpness form has three steps.
+
+1. **The <Gloss name="kl" /> term.** For two Gaussians with the same covariance,
+   $\KL(Q \,\|\, P) = \norm{\thetavec - \thetavec_0}^2/(2\sigma^2)$. It falls as the posterior widens.
+2. **The perturbed training loss.** By the average-case measure, $\expect_Q\hat R(\thetavec') \approx \hat R(\thetavec)
+   + \frac12\sigma^2\trace\Hmat$. It rises as the posterior widens, at a rate set by the sharpness.
+3. **The trade-off.** Substituting,
+
+   $$
+   \expect_Q R \lesssim \hat R(\thetavec) + \frac{\sigma^2}{2}\trace\Hmat +
+   \sqrt{\frac{\norm{\thetavec - \thetavec_0}^2/(2\sigma^2) + \ln(2\sqrt m/\delta)}{2m}}.
+   $$
+
+   The best $\sigma$ balances the second and third terms. A flat minimum, with small $\trace\Hmat$, allows a large
+   $\sigma$, a small KL and a tight bound. A sharp minimum forces a small $\sigma$ and a large KL.
+
+The prior's $\sigma$ must not depend on the data. Choosing it from a grid of $K$ values fixed in advance, with a
+<NoteLink to="union-bound">union bound</NoteLink> over the grid, adds $\ln K$ to the numerator. Neyshabur et al.
+proposed combining expected sharpness and the norm through this bound <Cite id="neyshabur2017" />. Dziugaite and Roy
+optimised the posterior's mean and variances directly and obtained the first non-vacuous bounds for networks with more
+parameters than training examples (<NoteLink to="non-vacuous-generalisation-bounds">non-vacuous generalisation
+bounds</NoteLink>) <Cite id="dziugaite2017" />.
+
+## Worked example
+
+Take $m = 50{,}000$ training examples, $\delta = 0.05$, a training loss of 0.02 and a distance
+$\norm{\thetavec - \thetavec_0} = 2$ from the prior's centre. Then $\ln(2\sqrt m/\delta) = \ln 8{,}944 = 9.10$. The
+table minimises the bound of step 3 over $\sigma$ for three sharpness levels.
+
+| $\trace\Hmat$ | Best $\sigma$ | Sharpness term | KL (nats) | Width term | Bound | $m$ for a bound of 0.1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 | 0.076 | 0.029 | 344 | 0.060 | **0.109** | 67,531 |
+| 100 | 0.036 | 0.063 | 1,589 | 0.126 | 0.209 | 661,005 |
+| 1,000 | 0.017 | 0.136 | 7,363 | 0.272 | 0.427 | 6,593,826 |
+
+1. **The flat minimum.** With $\trace\Hmat = 10$, a posterior of width $\sigma = 0.076$ raises the training loss by
+   only $\frac12(0.076)^2 \times 10 = 0.029$. Its KL is $4/(2 \times 0.076^2) = 344$ nats, and the width term is
+   $\sqrt{(344 + 9.1)/100{,}000} = 0.060$. The bound is $0.02 + 0.029 + 0.060 = 0.109$.
+2. **Sharper minima.** Balancing the two terms gives a best $\sigma$ proportional to $(\trace\Hmat)^{-1/3}$. Each
+   tenfold increase in $\trace\Hmat$ therefore shrinks the best $\sigma$ by about $10^{1/3} = 2.2$, raises the KL by
+   about $10^{2/3} = 4.6$, and multiplies the excess of the bound over the training loss by about 2.2.
+3. **Sample size.** The sample needed for a bound of 0.1 grows nearly in proportion to $\trace\Hmat$: from 68 thousand
+   to 6.6 million examples.
+4. **Vacuity.** None of the three bounds is vacuous, but the sharpest is twenty times its training loss. The quadratic
+   approximation also needs the loss to stay quadratic over perturbations of size $\sigma\sqrt{\dim\thetavec}$, which
+   is large for a network with millions of parameters; real bounds evaluate $\expect_Q\hat R$ by sampling.
+
+{/* figure pending engine (C5 sharpness): the training loss along the top Hessian eigenvector and along a random
+direction for a small trained network, with λ_max and the ρ-ball sharpness, beside the same network after the
+function-preserving rescaling (αW₁, W₂/α) */}
+
+## The reparameterisation problem
+
+A ReLU unit is positively homogeneous: $\operatorname{relu}(\alpha z) = \alpha\operatorname{relu}(z)$ for $\alpha > 0$.
+A two-layer network $\Wmat_2\operatorname{relu}(\Wmat_1\xvec)$ therefore computes the same function as
+$(\Wmat_2/\alpha)\operatorname{relu}(\alpha\Wmat_1\xvec)$. The rescaling changes the curvature of the loss in each
+layer, in opposite directions. Dinh, Pascanu, Bengio and Bengio used such symmetries to turn any minimum into an
+arbitrarily sharp one that computes the same function and therefore generalises identically
+<Cite id="dinh2017b" />.
+
+**A two-parameter example.** Let $f(x) = w_2\operatorname{relu}(w_1x)$ with one training example $x = 1$, $y = 1$, and
+loss $\hat L = \frac12(w_1w_2 - 1)^2$ for $w_1 > 0$.
+
+1. **The minima.** Every point with $w_1w_2 = 1$ is a minimum, and every one computes $f(x) = x$ for $x > 0$.
+2. **The Hessian.** At a minimum, the gradient $(w_1w_2 - 1)(w_2, w_1)$ vanishes and the Hessian is
+   $\begin{pmatrix}w_2^2 & w_1w_2\\ w_1w_2 & w_1^2\end{pmatrix}$, the outer product of $(w_2, w_1)$ with itself.
+3. **Its eigenvalues.** They are 0, along the valley of minima, and $w_1^2 + w_2^2$ across it. At $(w_1, w_2) =
+   (\alpha, 1/\alpha)$, $\lambda_{\max} = \alpha^2 + 1/\alpha^2$.
+4. **Same function, any sharpness.** $\alpha = 1$ gives $\lambda_{\max} = 2$, $\alpha = 2$ gives 4.25 and $\alpha = 10$
+   gives 100.01. The function is the same at every $\alpha$.
+
+Sharpness alone cannot predict generalisation unless the parameterisation is pinned down. Two responses exist.
+Scale-invariant measures, such as sharpness relative to the size of each weight, remove the effect of rescaling. The
+PAC-Bayes view accepts the dependence: the isotropic perturbation $\Gauss(\zeros, \sigma^2\eye)$ produces a different
+random function at each $\alpha$, so the bound legitimately differs, and the norm term
+$\norm{\thetavec - \thetavec_0}^2$ grows with the rescaling as well.
+
+## Sharpness-aware minimisation
+
+Sharpness-aware minimisation (<NoteLink to="remote-sensing-image-metrics">SAM</NoteLink>) minimises the worst-case loss
+in a ball, $\min_{\thetavec}\max_{\norm{\epsilonvec} \le
+\rho}\hat L(\thetavec + \epsilonvec)$. A first-order expansion gives the inner maximiser
+$\hat\epsilonvec = \rho\nabla\hat L(\thetavec)/\norm{\nabla\hat L(\thetavec)}$. Each step evaluates the gradient at
+$\thetavec + \hat\epsilonvec$ and applies it at $\thetavec$, at the cost of two gradients per step. Foret et al.
+reported better generalisation on <Gloss name="cifar-10" />, CIFAR-100, <Gloss name="imagenet" /> and fine-tuning tasks,
+and robustness to <NoteLink to="label-noise">label noise</NoteLink> <Cite id="foret2021" />.
+
+## Evidence
+
+- **For.** In a study of more than 40 complexity measures over more than 10,000 trained
+  <NoteLink to="convolutional-networks">convolutional networks</NoteLink>, sharpness-based measures, the PAC-Bayes bound
+  and Keskar's sharpness, predicted generalisation best <Cite id="jiang2020" />.
+- **Against.** In modern settings, including transformers trained on ImageNet and the fine-tuning of
+  <Gloss name="clip" /> and <Gloss name="bert" />, even reparameterisation-invariant adaptive sharpness correlated
+  poorly with generalisation. It tracked training settings such as the learning rate, and in several cases sharper
+  minima had lower out-of-distribution error <Cite id="andriushchenko2023" />.
+
+## Pitfalls
+
+- **Compare within one parameterisation.** Sharpness values from networks with different scalings, normalisation
+  layers or architectures are not comparable. With <NoteLink to="batch-normalisation">batch normalisation</NoteLink>,
+  scaling the weights before a normalised layer leaves the function unchanged and rescales the Hessian.
+- **Sharpness can be a symptom.** At the edge of stability, $\lambda_{\max}$ at the end of training is set by the step
+  size. A correlation between flatness and generalisation may run through the learning rate or the batch size.
+- **Under cross-entropy on separable data, sharpness shrinks as the weights grow.** Both the loss and its Hessian
+  shrink, so a minimum looks flatter the longer it is trained. Compare sharpness at a fixed training loss.
+- **Quadratic approximations are local.** $\frac12\rho^2\lambda_{\max}$ describes small balls. In high dimension the
+  random perturbations of a PAC-Bayes posterior are long, and the loss along them is not quadratic.

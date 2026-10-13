@@ -1,0 +1,259 @@
+---
+title: 'Acquisition functions'
+kind: concept
+summary: 'An acquisition function scores candidates from the surrogate posterior to pick the next evaluation in Bayesian optimisation. Improvement scores reward beating the incumbent, confidence bounds subtract a multiple of the spread, and Thompson sampling minimises one posterior draw.'
+tags: [model-selection, optimisation, bayesian, hyperparameters, worked-example]
+aliases: [acquisition function, probability of improvement, knowledge gradient, lower confidence bound]
+requires: [bayesian-optimisation, gaussian-process]
+related: [expected-improvement, gaussian-process-upper-confidence-bound, entropy-search, tree-structured-parzen-estimator, thompson-sampling, upper-confidence-bound-algorithm, batch-bayesian-optimisation, overfitting-in-model-selection]
+references: [kushner1964, mockus1978, jones1998, srinivas2010, thompson1933, russo2014, frazier2009, frazier2018, shahriari2016, garnett2023, wang2017mes, hennig2012, snoek2012, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { AcquisitionGallery } from './AcquisitionGallery'
+import { BoWalkthrough } from '../_shared/BoWalkthrough'
+
+<Definition>
+In <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> an objective $f(\lambdavec)$, such as a
+validation loss over hyperparameters $\lambdavec \in \Lambda$, is minimised by evaluating it one point at a time. After
+$t$ evaluations a surrogate model gives a posterior for $f(\lambdavec)$ at every candidate, with mean
+$\mu_t(\lambdavec)$ and standard deviation $\sigma_t(\lambdavec)$. An **acquisition function**
+$\alpha_t : \Lambda \to \reals$ turns that posterior into a score, and the next evaluation is the candidate with the
+largest score, $\lambdavec_{t+1} = \argmax_{\lambdavec \in \Lambda} \alpha_t(\lambdavec)$. The acquisition is cheap to
+evaluate, so maximising it costs far less than one evaluation of $f$ <Cite id="shahriari2016" />
+<Cite id="frazier2018" />.
+</Definition>
+
+## Intuition
+
+An evaluation of $f$ can be useful in two ways. It can land on a good value, which helps now. Or it can land where the
+surrogate knows little, which improves later choices. A candidate with a low posterior mean promises the first. A
+candidate with a large posterior standard deviation promises the second. Choosing the low mean is **exploitation**;
+choosing the large spread is **exploration**.
+
+Pure exploitation evaluates near the best point seen and stops learning about the rest of $\Lambda$. It can sit in a
+local minimum forever, because the surrogate never sees evidence of a deeper one elsewhere. Pure exploration samples
+where the posterior is widest and spends the budget mapping regions that are plainly bad. Every acquisition function is
+a rule for trading the two. The rules differ in what they value: the chance of beating the best value so far, the
+expected size of the gain, an optimistic bound, a random plausible version of $f$, or information about the optimum.
+
+## The posterior an acquisition reads
+
+The evaluations so far are $\Dcal_t = \set{(\lambdavec_i, y_i)}_{i=1}^{t}$, where $y_i = f(\lambdavec_i) +
+\varepsilon_i$ and $\varepsilon_i$ is observation noise, such as the variation of a validation loss across random seeds.
+The **incumbent** is the best value observed,
+
+$$
+f^\star_t = \min_{i \le t} y_i.
+$$
+
+With a <NoteLink to="gaussian-process">Gaussian process</NoteLink> surrogate, the posterior of $f(\lambdavec)$ given
+$\Dcal_t$ is Gaussian at every candidate,
+
+$$
+f(\lambdavec) \mid \Dcal_t \sim \Gauss\paren{\mu_t(\lambdavec), \sigma_t^2(\lambdavec)},
+$$
+
+with $\mu_t$ and $\sigma_t$ given by the <NoteLink to="schur-complement">Gaussian conditioning formulas</NoteLink>. Most
+acquisitions read only these two numbers at each candidate. Thompson sampling and the information-based acquisitions
+also use the posterior covariance between candidates. This note minimises $f$; every acquisition below is a score to
+maximise.
+
+## Improvement-based acquisitions
+
+**Probability of improvement** (PI) scores a candidate by the posterior probability that its value beats the
+incumbent by at least a margin $\xi \ge 0$ <Cite id="kushner1964" />. Standardising $f(\lambdavec)$ under its Gaussian
+posterior gives
+
+$$
+\operatorname{PI}_t(\lambdavec) = \prob\paren{f(\lambdavec) < f^\star_t - \xi \mid \Dcal_t}
+= \prob\paren{\frac{f(\lambdavec) - \mu_t(\lambdavec)}{\sigma_t(\lambdavec)} < \frac{f^\star_t - \xi - \mu_t(\lambdavec)}{\sigma_t(\lambdavec)}}
+= \Phi\paren{z_t(\lambdavec)},
+$$
+
+where $z_t(\lambdavec) = (f^\star_t - \xi - \mu_t(\lambdavec))/\sigma_t(\lambdavec)$ and $\Phi$ is the standard normal
+distribution function. The middle expression is a standard normal variable compared with $z_t$, which gives the last
+step.
+
+PI ignores how large the improvement would be. A candidate whose mean is a hair below $f^\star_t$ and whose standard
+deviation is tiny has $z_t$ large and PI close to 1. PI therefore prefers sure, small gains, and with $\xi = 0$ it
+creeps: each evaluation lands a short step from the incumbent. The margin $\xi$ demands a gain of at least $\xi$, which
+moves PI towards uncertain candidates. Kushner proposed shrinking $\xi$ over the run, from exploration to
+exploitation.
+
+**Expected improvement** (EI) weights each possible gain by its size. The improvement of a value $f$ over the
+incumbent is $\max(f^\star_t - f, 0)$, and EI is its posterior mean <Cite id="mockus1978" /> <Cite id="jones1998" />.
+Under a Gaussian posterior it has the closed form
+
+$$
+\operatorname{EI}_t(\lambdavec) = \paren{f^\star_t - \mu_t(\lambdavec)}\Phi(z) + \sigma_t(\lambdavec)\varphi(z),
+\qquad z = \frac{f^\star_t - \mu_t(\lambdavec)}{\sigma_t(\lambdavec)},
+$$
+
+where $\varphi$ is the standard normal density. The first term rewards a low mean and the second a large spread. EI is
+the default acquisition of most Bayesian optimisation libraries. Its derivation, its margin and its failure modes are
+in <NoteLink to="expected-improvement">expected improvement</NoteLink>.
+
+## Confidence bounds
+
+A **confidence-bound** acquisition scores each candidate by an optimistic value of $f$: the lower edge of a posterior
+interval, since $f$ is minimised. With an exploration weight $\beta \ge 0$,
+
+$$
+\alpha^{\text{LCB}}_t(\lambdavec) = -\paren{\mu_t(\lambdavec) - \sqrt{\beta}\,\sigma_t(\lambdavec)}.
+$$
+
+The negation makes the score one to maximise. The bound is $\sqrt\beta$ standard deviations below the mean, so $\beta =
+0$ is pure exploitation and a large $\beta$ is close to pure exploration. A candidate can have the lowest bound because
+its mean is low or because its spread is large, which is the principle of optimism in the face of uncertainty from
+<NoteLink to="upper-confidence-bound-algorithm">UCB1</NoteLink> for bandits. With maximisation the same rule reads
+$\mu_t + \sqrt\beta\,\sigma_t$, and the method is named after that form:
+<NoteLink to="gaussian-process-upper-confidence-bound">GP-UCB</NoteLink> <Cite id="srinivas2010" />. GP-UCB grows
+$\beta$ slowly with $t$, and with that schedule its cumulative regret is proved to grow sublinearly.
+
+The confidence bound does not refer to the incumbent at all. Its preference between two candidates depends on $\beta$
+alone: the bound prefers candidate $a$ over $b$ when $\mu_a - \mu_b < \sqrt\beta\,(\sigma_a - \sigma_b)$.
+
+## Thompson sampling
+
+**Thompson sampling** draws one function $\tilde f$ from the surrogate's posterior and evaluates where the draw is
+smallest, $\lambdavec_{t+1} = \argmin_{\lambdavec} \tilde f(\lambdavec)$ <Cite id="thompson1933" />. The draw is a
+plausible version of $f$ given the evaluations so far. Where the posterior is narrow, every draw is close to the mean;
+where it is wide, a draw can dip far below the mean and win. The rule has no weight to tune: the posterior itself sets
+the exploration.
+
+Thompson sampling chooses each candidate with the posterior probability that the candidate is the minimiser. This is
+the same probability matching as <NoteLink to="thompson-sampling">Thompson sampling for bandits</NoteLink>, with
+correlated arms. Russo and Van Roy turned confidence-bound regret analyses, including GP-UCB's, into Bayesian regret
+bounds of the same order for Thompson sampling <Cite id="russo2014" />.
+
+The draw must be joint over candidates, so that nearby values agree. On a grid of $m$ candidates a joint draw needs a
+factorisation of the $m \times m$ posterior covariance, which costs $O(m^3)$. In more than two or three dimensions
+practical implementations draw from an approximate posterior, such as one built on
+<NoteLink to="random-fourier-features">random Fourier features</NoteLink> <Cite id="hernandezlobato2014" />. A random
+choice also makes Thompson sampling a natural way to propose several points at once
+(<NoteLink to="batch-bayesian-optimisation">batch Bayesian optimisation</NoteLink>).
+
+## Information-based acquisitions
+
+The acquisitions so far score the value of the next evaluation itself. Two families score what the evaluation teaches.
+
+The **knowledge gradient** (KG) values the improvement in the best posterior mean, the value one would report if the
+search stopped <Cite id="frazier2009" />:
+
+$$
+\operatorname{KG}_t(\lambdavec) = \expect\brack{\min_{\lambdavec'} \mu_t(\lambdavec') - \min_{\lambdavec'}
+\mu_{t+1}(\lambdavec') \mid \lambdavec_{t+1} = \lambdavec},
+$$
+
+where the expectation is over the unseen value $y_{t+1}$ and $\mu_{t+1}$ is the posterior mean after it. KG can value
+an evaluation at a point that will not itself be best, if it shifts the posterior mean elsewhere. It suits noisy
+objectives, where the best observed value $f^\star_t$ is a poor summary. KG has no closed form on a continuous space and
+is estimated by Monte Carlo <Cite id="frazier2018" />.
+
+**Entropy search** values the reduction in uncertainty about the minimiser $\lambdavec^\star$ or the minimum value
+$f^\star$, measured as an expected drop in entropy <Cite id="hennig2012" /> <Cite id="wang2017mes" />. It is developed
+in <NoteLink to="entropy-search">entropy search</NoteLink>.
+
+## Comparing them on one posterior
+
+The figure fixes one posterior and scores every candidate with each acquisition. The objective is the Forrester
+function $f(\lambda) = (6\lambda - 2)^2\sin(12\lambda - 4)$ on $[0, 1]$, a standard test case with a shallow local
+minimum near $\lambda = 0.14$ and the global minimum $-6.02$ at $\lambda = 0.757$ <Cite id="forrester2008" />. The
+surrogate is a Gaussian process with a Matérn 5/2 kernel, whose length-scale and variance are refitted by
+<NoteLink to="gaussian-process-hyperparameter-learning">marginal likelihood</NoteLink> to the evaluations shown.
+
+<AcquisitionGallery />
+
+The acquisitions agree where the posterior mean is low and the spread is moderate. They disagree about wide, unexplored
+intervals. PI with $\xi = 0$ stays closest to the incumbent. EI and the confidence bound with $\beta = 4$ reach into
+uncertain intervals whose means are worse. A Thompson draw lands anywhere the posterior allows, and a new draw lands
+somewhere else.
+
+The second figure runs the whole loop. Each step evaluates the point chosen by the acquisition, refits the surrogate
+and scores the candidates again.
+
+<BoWalkthrough mode="compare" />
+
+With seed 1 the initial design already contains a point at $\lambda = 0.81$, on the wall of the global minimum's well.
+PI with $\xi = 0$ then evaluates $0.810, 0.805, 0.800, \dots, 0.755$: twelve evaluations, each one grid step from the
+last. EI evaluates $0.78$, $0.74$, the end $0$ and then $0.76$, within $0.004$ of the minimum after four evaluations. It
+then tries the other end and the middle, $\lambda = 0.35$, and returns to $0.755$. The confidence bound with $\beta = 4$
+finds $0.765$ first, then evaluates both ends and the middle before it settles. Other seeds start in the shallow minimum
+near $0.14$, where the greedy acquisitions can stay.
+
+## Worked example
+
+Take the incumbent $f^\star_t = 0$ and three candidates with posterior means and standard deviations
+
+| candidate | $\mu_t$ | $\sigma_t$ |
+| --- | --- | --- |
+| A | $-0.05$ | $0.02$ |
+| B | $0.20$ | $0.40$ |
+| C | $0.05$ | $0.15$ |
+
+Candidate A is almost surely a little better than the incumbent. Candidate B is probably worse but could be much
+better. Candidate C lies between them.
+
+**Probability of improvement, $\xi = 0$.** The standardised gaps are $z_A = 0.05/0.02 = 2.5$, $z_B = -0.20/0.40 =
+-0.5$ and $z_C = -0.05/0.15 = -0.33$. So $\operatorname{PI}_A = \Phi(2.5) = 0.994$, $\operatorname{PI}_B = 0.309$ and
+$\operatorname{PI}_C = 0.369$. PI chooses A.
+
+**Expected improvement.** For A, $0.05 \times 0.994 + 0.02 \times \varphi(2.5) = 0.0497 + 0.0004 = 0.0500$. For B,
+$-0.20 \times 0.309 + 0.40 \times \varphi(-0.5) = -0.0617 + 0.1408 = 0.0791$. For C, $-0.05 \times 0.369 + 0.15
+\times \varphi(-0.33) = -0.0185 + 0.0566 = 0.0381$. EI chooses B. A's gain is nearly certain but at most about $0.05$;
+B's gain is uncertain but can be several times larger.
+
+**PI with a margin.** With $\xi = 0.1$, A must beat $-0.1$, 2.5 standard deviations below its mean, so
+$\operatorname{PI}_A = \Phi(-2.5) = 0.006$. B and C score $0.227$ and $0.159$, and PI now chooses B.
+
+**Confidence bound.** With $\beta = 4$ the lower bounds $\mu - 2\sigma$ are $-0.09$ for A, $-0.60$ for B and $-0.25$
+for C, so the bound chooses B. With $\beta = 0.25$ they are $\mu - 0.5\sigma$: $-0.06$, $0.00$ and $-0.025$, and the
+bound chooses A.
+
+**Thompson sampling.** Treat the three posteriors as independent and draw one value from each. A's draw is almost
+always within $0.04$ of $-0.05$. B's draw falls below A's with probability $\Phi(-0.25/\sqrt{0.40^2 + 0.02^2}) =
+\Phi(-0.62) = 0.27$, and C's with probability $\Phi(-0.10/\sqrt{0.15^2 + 0.02^2}) = 0.25$. Counting the draws in which
+each candidate is the smallest of the three, a simulation of 400,000 rounds gives A 0.55, B 0.25 and C 0.20. Thompson
+sampling evaluates A about half the time and spreads the rest over the uncertain candidates.
+
+The same posterior gives three different next evaluations, depending on the acquisition and its weight.
+
+## Maximising the acquisition
+
+Each step solves an inner optimisation problem: maximise $\alpha_t$ over $\Lambda$. The acquisition is cheap but
+multimodal, since it has a local maximum in almost every gap between evaluations. Libraries run a gradient method such
+as <Gloss name="l-bfgs" /> from many starting points, chosen at random or from the best of a large random sample
+<Cite id="snoek2012" /> <Cite id="garnett2023" />. On a one- or two-dimensional box, a dense grid of candidates is
+enough; the figures here use a grid of 201 points. Categorical and
+<NoteLink to="hyperparameter-search-spaces">conditional hyperparameters</NoteLink> make the inner problem combinatorial,
+which is one reason <NoteLink to="tree-structured-parzen-estimator">TPE</NoteLink> and
+<NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink> sample candidates rather than optimise.
+
+## Assumptions
+
+- **The surrogate's uncertainty is calibrated.** Every acquisition trusts $\sigma_t$. A length-scale that is too long
+  makes the posterior overconfident between evaluations, and every acquisition then exploits too early.
+- **Evaluations are sequential.** The rules choose one point given all previous results. Parallel workers need a batch
+  rule.
+- **The incumbent is meaningful.** PI and EI compare with $f^\star_t$, the best observed value. With noisy evaluations
+  the best observed value is biased low, which the next section describes.
+
+## Pitfalls
+
+- **The incumbent is a minimum of noisy values.** When $y_i$ includes noise, $f^\star_t$ is the smallest of $t$ noisy
+  numbers and is optimistic in the same way as the best <NoteLink to="cross-validation">cross-validation</NoteLink>
+  score (<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). PI and EI then
+  compare every candidate with a lucky value. Practical fixes model the noise in the surrogate and replace $f^\star_t$
+  by the smallest posterior mean at the evaluated points. The configuration finally reported needs an error estimate on
+  data the search never used, such as a test set or <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>.
+- **Greedy acquisitions stall.** PI with $\xi = 0$, and EI once the surrogate is overconfident, can evaluate the same
+  neighbourhood for many steps. A margin, a confidence bound with a larger $\beta$, or a few random evaluations break
+  the stall.
+- **Scores are not comparable across acquisitions.** PI is a probability, EI has the units of $f$, and the confidence
+  bound is a value of $f$. Only the location of each maximum matters.
+- **The acquisition inherits the surrogate's hyperparameters.** The length-scale and noise are usually refitted by
+  <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink> at every step. With few
+  evaluations the fit is unstable, and the acquisition can change sharply from one step to the next.

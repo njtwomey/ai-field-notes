@@ -1,0 +1,288 @@
+---
+title: 'Akaike information criterion'
+kind: concept
+summary: '$\AIC = -2\log\hat L + 2p$, for a model with $p$ parameters and maximised likelihood $\hat L$, estimates $-2$ times the expected log-likelihood of the fitted model on new data. AICc corrects its small-sample bias in Gaussian regression; TIC replaces $2p$ when the model is wrong.'
+tags: [model-selection, information-criteria, likelihood, worked-example]
+aliases: [AIC, Akaike's information criterion, An Information Criterion, corrected AIC, AICc, Takeuchi information criterion, TIC, Akaike weights]
+requires: [estimation, kullback-leibler-divergence]
+related: [information-criteria, bayesian-information-criterion, mallows-cp-and-covariance-penalties, optimism-of-the-training-error, consistency-and-efficiency-of-selection-criteria, leave-one-out-cross-validation, widely-applicable-information-criterion, overfitting-in-model-selection]
+references: [akaike1973, akaike1974, sugiura1978, hurvich1989, burnham2002, claeskens2008, stone1977aic, shibata1980, shibata1981]
+status: draft
+updated: 2026-10-13
+---
+
+import { AicAgainstTruth } from './AicAgainstTruth'
+
+<Definition>
+Let $y_1, \dots, y_n$ be independent draws from an unknown density $g$, and let a model be a family of densities
+$f(y \mid \thetavec)$ with $p$ free parameters $\thetavec \in \reals^p$. Write $\log L(\thetavec) = \sum_{i=1}^n
+\log f(y_i \mid \thetavec)$ for the log-likelihood, $\hat\thetavec$ for its maximiser and $\log\hat L =
+\log L(\hat\thetavec)$. The **Akaike information criterion** is
+
+$$
+\AIC = -2\log\hat L + 2p.
+$$
+
+It estimates $-2\,\expect\brack{\sum_{i=1}^n \log f(Y_i^0 \mid \hat\thetavec)}$, where $Y_1^0, \dots, Y_n^0$ is a fresh
+sample from $g$ independent of the data. Among models fitted to the same data, the one with the smallest AIC is expected
+to give new data the highest likelihood <Cite id="akaike1973" /> <Cite id="akaike1974" />.
+</Definition>
+
+## Intuition
+
+The maximised log-likelihood measures how well a fitted model describes the data that chose its parameters. Every
+observation is used twice: once to pull $\hat\thetavec$ towards itself and once to score the result. The score is
+therefore optimistic, and more so for a model with more parameters to pull. A larger model that contains a smaller one
+always has the larger $\log\hat L$, so the raw likelihood cannot choose between them.
+
+AIC subtracts the expected size of that optimism. Akaike showed that for a regular model the optimism of the
+log-likelihood is about one unit per parameter. Half of it comes from the fit being better on its own data than the best
+parameter of the model would be. The other half comes from the fitted parameter being worse on new data than that best
+parameter. The factor $-2$ is a convention that puts AIC on the scale of the deviance. The same logic for squared error
+gives Mallows' $C_p$ (see <NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>), and
+the two coincide for Gaussian errors.
+
+AIC answers the first question of <NoteLink to="model-selection">model selection</NoteLink>: how well will a candidate
+predict? It does so without holding data out, so all $n$ observations both fit and score each candidate.
+
+## What AIC estimates
+
+A fitted model predicts well when the density $f(\cdot \mid \hat\thetavec)$ is close to $g$. The
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink> measures the distance:
+
+$$
+\KL\paren{g \,\|\, f(\cdot \mid \hat\thetavec)} = \expect_g[\log g(Y)] - \expect_g[\log f(Y \mid \hat\thetavec)],
+$$
+
+where $Y \sim g$ is a new observation and $\hat\thetavec$ is held fixed. The first term is the same for every model. So
+ranking models by divergence is the same as ranking them by the **expected log-likelihood of a fresh sample**,
+
+$$
+Q(\thetavec) = n\,\expect_g[\log f(Y \mid \thetavec)],
+$$
+
+evaluated at $\thetavec = \hat\thetavec$. Larger $Q(\hat\thetavec)$ means smaller divergence. $Q(\hat\thetavec)$ depends
+on the data through $\hat\thetavec$, and the target of AIC is its average over data sets, $\expect[Q(\hat\thetavec)]$.
+
+This chapter writes $\ell$ for a loss. The log-likelihood is written $\log L$ to avoid the clash.
+
+## The derivation
+
+The plug-in estimate of $Q(\hat\thetavec)$ is $\log L(\hat\thetavec)$. Its bias is
+$b = \expect[\log L(\hat\thetavec) - Q(\hat\thetavec)]$. The derivation computes $b$ for large $n$.
+
+**The best parameter and two matrices.** Let $\thetavec_0$ maximise $Q$. It is the parameter whose density is closest to
+$g$ in Kullback–Leibler divergence, and it equals the true parameter when the model contains $g$. Write
+$\svec(y) = \nabla_{\thetavec}\log f(y \mid \thetavec_0)$ for the score of one observation. Since $\thetavec_0$
+maximises $Q$, the score has mean zero under $g$. Define two $p \times p$ matrices:
+
+$$
+\Jmat = -\expect_g\brack{\nabla^2_{\thetavec}\log f(Y \mid \thetavec_0)}, \qquad \Kmat = \expect_g\brack{\svec(Y)\svec(Y)^\top}.
+$$
+
+$\Jmat$ is the expected curvature of the log-density at $\thetavec_0$ and $\Kmat$ is the variance of the score. Assume
+$\Jmat$ is positive definite.
+
+**Step 1: the spread of the estimate.** The estimate solves $\nabla\log L(\hat\thetavec) = \zeros$. Expand the gradient
+around $\thetavec_0$ to first order:
+
+$$
+\zeros = \nabla\log L(\hat\thetavec) \approx \sum_{i=1}^n \svec(y_i) + \nabla^2\log L(\thetavec_0)\,(\hat\thetavec -
+\thetavec_0).
+$$
+
+By the <NoteLink to="law-of-large-numbers">law of large numbers</NoteLink>,
+$\nabla^2\log L(\thetavec_0) \approx -n\Jmat$. Solving,
+$\hat\thetavec - \thetavec_0 \approx \Jmat^{-1}\frac1n\sum_i \svec(y_i)$. The scores are independent with mean zero and
+covariance $\Kmat$, so by the <NoteLink to="central-limit-theorem">central limit theorem</NoteLink>
+$\sqrt n(\hat\thetavec - \thetavec_0)$ is approximately Gaussian with mean zero and covariance
+$\Jmat^{-1}\Kmat\Jmat^{-1}$.
+
+**Step 2: split the bias into three parts.** Add and subtract $\log L(\thetavec_0)$ and $Q(\thetavec_0)$:
+
+$$
+\log L(\hat\thetavec) - Q(\hat\thetavec) = \underbrace{[\log L(\hat\thetavec) - \log L(\thetavec_0)]}_{(a)} +
+\underbrace{[\log L(\thetavec_0) - Q(\thetavec_0)]}_{(b)} + \underbrace{[Q(\thetavec_0) - Q(\hat\thetavec)]}_{(c)}.
+$$
+
+Write $\uvec = \hat\thetavec - \thetavec_0$.
+
+- **(b)** has expectation zero. At the fixed parameter $\thetavec_0$, the log-likelihood of the sample is a sum of $n$
+  terms whose mean is $\expect_g\log f(Y \mid \thetavec_0)$, so it is an unbiased estimate of $Q(\thetavec_0)$.
+- **(a)** is the gain of the fitted parameter on its own data. Expand $\log L(\thetavec_0)$ in a
+  <NoteLink to="taylor-series">Taylor series</NoteLink> around $\hat\thetavec$, where the gradient is zero and the
+  Hessian is about $-n\Jmat$: $\log L(\thetavec_0) \approx \log L(\hat\thetavec) - \frac n2\uvec^\top\Jmat\uvec$. So
+  $(a) \approx \frac n2\uvec^\top\Jmat\uvec$.
+- **(c)** is the loss of the fitted parameter on new data. Expand $Q(\hat\thetavec)$ around $\thetavec_0$, where the
+  gradient of $Q$ is zero and its Hessian is exactly $-n\Jmat$: $Q(\hat\thetavec) \approx Q(\thetavec_0) -
+  \frac n2\uvec^\top\Jmat\uvec$. So $(c) \approx \frac n2\uvec^\top\Jmat\uvec$ as well.
+
+**Step 3: take the expectation.** The bias is the expectation of $(a) + (c)$, which is $n\,\uvec^\top\Jmat\uvec$. A
+scalar equals its own trace, and the trace is cyclic, so
+
+$$
+b \approx \expect\brack{n\,\uvec^\top\Jmat\uvec} = \trace\paren{\Jmat\,n\expect[\uvec\uvec^\top]} =
+\trace\paren{\Jmat\Jmat^{-1}\Kmat\Jmat^{-1}} = \trace\paren{\Kmat\Jmat^{-1}}.
+$$
+
+**Step 4: a correct model.** When the model contains $g$, the information identity holds: the variance of the score
+equals the expected negative Hessian, $\Kmat = \Jmat$, and both are the <Gloss name="fisher-information">Fisher
+information</Gloss> of one observation. Then $b \approx \trace\eye_p = p$. So $\log\hat L - p$ is an approximately
+unbiased estimate of $\expect[Q(\hat\thetavec)]$, and multiplying by $-2$ gives AIC.
+
+The two halves of the penalty are visible in Step 2. Term (a) is the optimism of the training fit and term (c) is the
+shortfall of the fitted parameter against the best one. Each is half a $\ChiSq_p$ variable when the model is correct,
+with mean $p/2$.
+
+## Misspecified models: TIC
+
+When the model does not contain $g$, $\Kmat \ne \Jmat$ and the penalty is $2\trace(\Kmat\Jmat^{-1})$. Replacing the two
+matrices by their sample versions at $\hat\thetavec$,
+
+$$
+\hat\Kmat = \frac1n\sum_{i=1}^n \nabla\log f(y_i \mid \hat\thetavec)\,\nabla\log f(y_i \mid \hat\thetavec)^\top,
+\qquad \hat\Jmat = -\frac1n\sum_{i=1}^n \nabla^2\log f(y_i \mid \hat\thetavec),
+$$
+
+gives the **Takeuchi information criterion** $\operatorname{TIC} = -2\log\hat L + 2\trace(\hat\Kmat\hat\Jmat^{-1})$
+<Cite id="burnham2002" /> <Cite id="claeskens2008" />.
+
+A one-parameter example shows the size of the correction. Fit the model $\Gauss(\mu, 1)$, whose variance is fixed at 1,
+to data whose true variance is $\tau^2$. The score is $s(y) = y - \mu_0$ and the second derivative of the log-density
+is $-1$. So $J = 1$, $K = \var(Y) = \tau^2$, and the correct penalty is $2\tau^2$ instead of $2$. With $\tau^2 = 4$ the
+fit of the mean is four times as noisy as the model believes, and its optimism is four times as large.
+
+TIC is rarely used. $\hat\Kmat$ is a noisy estimate, and its error often exceeds the error of assuming $\Kmat = \Jmat$.
+For a model close enough to $g$ to be worth choosing, $\trace(\Kmat\Jmat^{-1})$ is close to $p$
+<Cite id="burnham2002" />.
+
+## AICc for small samples
+
+The derivation drops terms that shrink as $n$ grows. For <NoteLink to="linear-regression">linear regression</NoteLink>
+with Gaussian errors the bias can be computed exactly, and the exact answer is larger than $p$ when $p$ is a sizeable
+fraction of $n$.
+
+Let $\yvec = \Xmat\betavec + \epsilonb$ with a fixed $n \times q$ design $\Xmat$ of full rank and independent noise
+$\epsilonb \sim \Gauss(\zeros, \sigma^2\eye)$. The parameters are $\betavec$ and $\sigma^2$, so $p = q + 1$. The maximum
+likelihood estimates are the least-squares $\hat\betavec$ and $\hat\sigma^2 = \operatorname{RSS}/n$, with
+$\operatorname{RSS} = \norm{\yvec - \Xmat\hat\betavec}^2$.
+
+1. **The training term.** Substituting $\hat\sigma^2$ into the Gaussian log-likelihood gives
+   $-2\log\hat L = n\log(2\pi\hat\sigma^2) + n$.
+2. **The fresh term.** Let $\yvec^0 = \Xmat\betavec + \epsilonb^0$ be fresh targets at the same inputs. Then
+   $-2\log L^0 = n\log(2\pi\hat\sigma^2) + \norm{\yvec^0 - \Xmat\hat\betavec}^2/\hat\sigma^2$. The fresh noise is
+   independent of the fit, so $\expect\norm{\yvec^0 - \Xmat\hat\betavec}^2 = n\sigma^2 + \norm{\Xmat(\hat\betavec -
+   \betavec)}^2$ given the training data.
+3. **The gap.** Subtracting, the gap is $(n\sigma^2 + \norm{\Xmat(\hat\betavec - \betavec)}^2)/\hat\sigma^2 - n$. Write
+   $W = \norm{\Xmat(\hat\betavec - \betavec)}^2/\sigma^2$ and $V = \operatorname{RSS}/\sigma^2$. Then the gap is
+   $n(n + W)/V - n$.
+4. **Two chi-squared variables.** $W \sim \ChiSq_q$ and $V \sim \ChiSq_{n-q}$, and they are independent, because the
+   fit and the residuals lie in orthogonal subspaces (see <NoteLink to="chi-squared-distribution">chi-squared
+   distribution</NoteLink>). So $\expect W = q$ and $\expect[1/V] = 1/(n - q - 2)$.
+5. **The expectation.** $\expect[\text{gap}] = n(n + q)/(n - q - 2) - n = 2n(q + 1)/(n - q - 2) = 2np/(n - p - 1)$.
+
+The exact penalty is therefore $2pn/(n - p - 1)$, and
+
+$$
+\operatorname{AICc} = -2\log\hat L + \frac{2pn}{n - p - 1} = \AIC + \frac{2p(p + 1)}{n - p - 1}
+$$
+
+<Cite id="sugiura1978" /> <Cite id="hurvich1989" />. The extra term vanishes as $n \to \infty$, so AICc and AIC agree in
+large samples. With $n = 20$ and $q = 5$ coefficients, $p = 6$ and the exact penalty is $240/13 = 18.5$, against AIC's 12.
+AIC undercharges by more than three parameters, and so it favours large models in small samples. Burnham and Anderson
+recommend AICc whenever $n/p < 40$ <Cite id="burnham2002" />. Hurvich and Tsai derived the same correction for
+<NoteLink to="autoregressive-model">autoregressive models</NoteLink>, where it is the default criterion of several
+order-selection tools <Cite id="hurvich1989" />.
+
+## Differences and Akaike weights
+
+Only differences in AIC carry meaning. The constant $\expect_g\log g(Y)$ dropped from the divergence is unknown, so an
+AIC value on its own says nothing about how good a model is. Let $\Delta_j = \AIC_j - \min_k \AIC_k$ for candidates
+$\Mcal_1, \dots, \Mcal_J$. The **Akaike weights**
+
+$$
+w_j = \frac{\exp(-\Delta_j/2)}{\sum_{k=1}^J \exp(-\Delta_k/2)}
+$$
+
+turn the differences into relative support that sums to one. A difference of 2 gives a weight ratio $e^{1} = 2.7$, and
+a difference of 10 gives $e^5 = 148$. Burnham and Anderson read $\Delta_j \le 2$ as substantial support, 4 to 7 as
+considerably less and above 10 as essentially none <Cite id="burnham2002" />. The weights also serve for averaging the
+predictions of the candidates, a frequentist analogue of <NoteLink to="bayesian-model-averaging">Bayesian model
+averaging</NoteLink>.
+
+## AIC, cross-validation and Mallows' Cp
+
+AIC is one of several estimates of the same predictive quantity.
+
+- **<NoteLink to="leave-one-out-cross-validation">Leave-one-out cross-validation</NoteLink>** of the log-likelihood
+  estimates $\expect[Q(\hat\thetavec)]$ by refitting without each point. Stone proved that it is asymptotically
+  equivalent to AIC <Cite id="stone1977aic" />. Without the assumption $\Kmat = \Jmat$ it tracks TIC.
+- **<NoteLink to="mallows-cp-and-covariance-penalties">Mallows' $C_p$</NoteLink>** is the squared-error version. For a
+  Gaussian model with known $\sigma^2$, $-2\log\hat L = \operatorname{RSS}/\sigma^2 + n\log(2\pi\sigma^2)$, so AIC is
+  $C_p$ rescaled and shifted, and the two choose the same model.
+- **<NoteLink to="widely-applicable-information-criterion">WAIC</NoteLink>** extends the idea to Bayesian posteriors and
+  to singular models such as mixtures and neural networks, where the Taylor expansion of Step 2 fails.
+
+When the true model is not among the candidates, and in particular when it has infinitely many parameters, AIC is
+**efficient**: the prediction error of the model it chooses approaches that of the best candidate as $n$ grows
+<Cite id="shibata1980" /> <Cite id="shibata1981" />. When one candidate is true, AIC keeps choosing a larger model with
+positive probability. <NoteLink to="consistency-and-efficiency-of-selection-criteria">Consistency and efficiency of
+selection criteria</NoteLink> explains why no criterion has both properties.
+
+<AicAgainstTruth />
+
+## Worked example
+
+Twenty observations are drawn from $\Gauss(0.3, 1)$. The analyst does not know the generator and compares two models.
+The data have mean $\bar y = 0.35$ and mean square $\frac1n\sum_i y_i^2 = 1.02$.
+
+- $\Mcal_1$: $\Gauss(0, \sigma^2)$, with the mean fixed at zero; $p = 1$.
+- $\Mcal_2$: $\Gauss(\mu, \sigma^2)$; $p = 2$.
+
+For a Gaussian with maximum-likelihood variance $\hat\sigma^2$, $-2\log\hat L = n\paren{\log(2\pi\hat\sigma^2) + 1}$.
+
+1. **Fit $\Mcal_1$.** The mean is fixed, so $\hat\sigma^2 = \frac1n\sum_i y_i^2 = 1.02$. Then $-2\log\hat L =
+   20(\log 6.409 + 1) = 57.15$ and $\AIC = 57.15 + 2 = 59.15$.
+2. **Fit $\Mcal_2$.** $\hat\mu = 0.35$ and $\hat\sigma^2 = 1.02 - 0.35^2 = 0.8975$. Then $-2\log\hat L = 54.60$ and
+   $\AIC = 54.60 + 4 = 58.60$.
+3. **Choose.** $\Mcal_2$ has the smaller AIC by $0.56$. Its Akaike weight is $1/(1 + e^{-0.28}) = 0.57$, weak support.
+   AICc adds $2 \cdot 1 \cdot 2/18 = 0.22$ to $\Mcal_1$ and $2 \cdot 2 \cdot 3/17 = 0.71$ to $\Mcal_2$, giving $59.38$
+   and $59.30$: the same choice by a margin of $0.08$.
+4. **The truth.** The generator is known here, so the quantity AIC estimates can be computed. For a fitted
+   $\Gauss(\hat\mu, \hat\sigma^2)$ and new data from $\Gauss(0.3, 1)$, $-2Q = n\paren{\log(2\pi\hat\sigma^2) + (1 +
+   (\hat\mu - 0.3)^2)/\hat\sigma^2}$. This gives $58.53$ for $\Mcal_1$ and $56.94$ for $\Mcal_2$. $\Mcal_2$ does predict
+   better, by $1.59$.
+5. **The optimism on this sample.** The gap between $-2Q$ and $-2\log\hat L$ is $1.37$ for $\Mcal_1$ and $2.34$ for
+   $\Mcal_2$. AIC charged 2 and 4. On one sample the gap is random, and AIC is right only on average.
+6. **The optimism on average.** $\Mcal_2$ contains the generator, and it is a regression on a constant with $q = 1$, so
+   the exact expected gap is $2np/(n - p - 1) = 80/17 = 4.71$. AIC's 4 is too small and AICc's $4 + 0.71$ is exact.
+   $\Mcal_1$ is misspecified, because its mean is wrong. A simulation of 200,000 samples puts its expected gap at about
+   $2.19$, close to AICc's $2.22$.
+
+## Assumptions
+
+- **Independent observations from a fixed distribution.** The law of large numbers and the central limit theorem in
+  Step 1 need them. For regression, the observations are pairs $(\xvec_i, y_i)$ and $f$ is the conditional density.
+- **A regular model.** $\thetavec_0$ is unique and interior, the log-density is twice differentiable and $\Jmat$ is
+  invertible. Mixtures with an unknown number of components, change points and neural networks break this.
+- **Maximum likelihood.** The penalty counts the parameters fitted by maximising the likelihood. A penalised or smoothed
+  fit needs its <NoteLink to="effective-degrees-of-freedom">effective degrees of freedom</NoteLink> in place of $p$.
+- **$p$ fixed while $n$ grows.** When $p$ grows with $n$, the neglected terms do not vanish, and AICc or
+  <NoteLink to="cross-validation">cross-validation</NoteLink> is safer.
+
+## Pitfalls
+
+- **Different data or responses.** Models are compared only on exactly the same observations of the same response. A
+  model of $\log y$ and a model of $y$ have likelihoods on different scales. Adding the Jacobian term $-\sum_i \log y_i$
+  to the log model's log-likelihood puts it on the scale of $y$. Missing values that drop different rows from different
+  models silently break the comparison.
+- **Forgetting a parameter.** The noise variance of a regression, the dispersion of a negative binomial and every free
+  mixture weight count in $p$. Software differs on whether it counts them.
+- **Selecting over many models.** AIC corrects for the reuse of data within one fit. Choosing the smallest of many AIC
+  values reuses the data a second time, so the winning AIC is biased low as an estimate of its own model's predictive
+  performance. Stepwise searches over thousands of subsets overfit in this way (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).
+- **Reading AIC as a test.** A difference in AIC is not a p-value. For two nested models that differ by one parameter,
+  AIC prefers the larger whenever the likelihood-ratio statistic exceeds 2, which happens with probability
+  $P(\ChiSq_1 > 2) = 0.157$ when the smaller model is true.
+- **Small samples.** With $n/p$ below about 40, plain AIC undercharges and favours large models. Use AICc.

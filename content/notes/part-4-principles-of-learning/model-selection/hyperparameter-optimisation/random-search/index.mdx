@@ -1,0 +1,165 @@
+---
+title: 'Random search'
+kind: technique
+summary: 'Random search draws each trial independently from a distribution over the search space and keeps the best. When few hyperparameters matter it tests far more distinct values of them than a grid, and 60 trials land in the best 5% of the space with probability 0.95.'
+tags: [model-selection, hyperparameters, worked-example]
+aliases: [random search, random hyperparameter search, randomized search, RandomizedSearchCV, low effective dimensionality]
+requires: [grid-search]
+related: [quasi-random-search, hyperparameter-search-spaces, bayesian-optimisation, successive-halving, hyperband, neural-architecture-search, overfitting-in-model-selection, tuning-budgets-in-comparisons, monte-carlo-integration]
+references: [bergstra2012, dodge2019, li2020randomnas, li2018hyperband, godbole2023, pedregosa2011]
+status: draft
+updated: 2026-10-13
+---
+
+import { RandomVersusGridBudget } from './RandomVersusGridBudget'
+
+<Definition>
+Let $p$ be a distribution over a <NoteLink to="hyperparameter-search-spaces">search space</NoteLink> $\Lambda$, usually
+uniform on each hyperparameter's scale. **Random search** draws $N$ configurations
+$\lambdavec^{(1)}, \dots, \lambdavec^{(N)}$ independently from $p$, evaluates the validation loss $L$ at each, and
+returns the configuration with the lowest loss. Bergstra and Bengio showed that it finds configurations as good as
+<NoteLink to="grid-search">grid search</NoteLink> with a fraction of the trials, because the loss usually depends on few
+of the hyperparameters <Cite id="bergstra2012" />.
+</Definition>
+
+## Problem
+
+A grid with $r$ values on each of $D$ axes costs $r^D$ trials. With five hyperparameters and five values each, that is
+3,125 trials, and each still tests only five values of every hyperparameter. A search over many hyperparameters needs a
+design whose cost can be set to any budget $N$, and whose trials are not wasted on hyperparameters that turn out not to
+matter. Which hyperparameters matter is not known in advance, and it changes from one dataset to the next
+<Cite id="bergstra2012" />.
+
+## Mechanism
+
+### Low effective dimensionality
+
+Suppose the loss depends, to a good approximation, only on a subset $S$ of $d$ of the $D$ hyperparameters:
+$L(\lambdavec) \approx g(\lambdavec_S)$, where $\lambdavec_S$ collects the coordinates in $S$. Call $d$ the
+**effective dimensionality** of the problem.
+
+- **A grid** with $r$ values per axis has $N = r^D$ points. Their projection onto the coordinates in $S$ has only
+  $r^d = N^{d/D}$ distinct points. Every other trial repeats one of those with a different setting of the
+  hyperparameters that do not matter.
+- **Random search** draws each $\lambdavec^{(i)}$ from $p$. If $p$ is a product of independent distributions, one per
+  hyperparameter, the projection of $\lambdavec^{(i)}$ onto $S$ is a draw from the marginal of $p$ on $S$. The $N$
+  projected trials are therefore $N$ independent draws on the $d$ important coordinates.
+
+The projection of a random search in $D$ dimensions is a random search in $d$ dimensions with the same $N$. Its result
+depends on $d$ and not on $D$, and it needs no knowledge of which coordinates are in $S$. With $D = 2$, $d = 1$ and
+$N = 9$, a 3 by 3 grid tests 3 values of the important hyperparameter and random search tests 9. With $D = 4$, $d = 2$
+and $N = 81$, a 3 by 3 by 3 by 3 grid tests only 9 distinct pairs of the important ones.
+
+Bergstra and Bengio fitted <Gloss name="gp">Gaussian-process</Gloss> models to the validation error of neural networks
+on several datasets. On most datasets only a few of the hyperparameters mattered, and different ones mattered on
+different datasets <Cite id="bergstra2012" />.
+
+### How many trials: the quantile argument
+
+The second argument needs no assumption about the loss at all. Let $G \subseteq \Lambda$ be any set of good
+configurations, for example the configurations whose loss lies in the best 5%, and let $q = \prob_p(\lambdavec \in G)$
+be its probability under $p$. The trials are independent, so
+
+$$
+\prob\paren{\text{no trial lands in } G} = (1 - q)^N.
+$$
+
+To land in $G$ with probability at least $1 - \delta$, it suffices that $(1 - q)^N \le \delta$, that is
+
+$$
+N \ge \frac{\ln\delta}{\ln(1 - q)} \approx \frac{\ln(1/\delta)}{q},
+$$
+
+where the approximation uses $-\ln(1 - q) \approx q$ for small $q$. For $q = 0.05$ and $\delta = 0.05$ the bound is
+$\ln 0.05/\ln 0.95 = (-2.996)/(-0.0513) = 58.4$, so 59 trials suffice, and 60 trials give
+$1 - 0.95^{60} = 0.954$. The number does not depend on $D$.
+
+The guarantee is about probability under $p$, not about the loss. A good region that is narrow in each of $d$ important
+coordinates has $q$ equal to the product of its widths, which shrinks exponentially with $d$. If the best region is 10%
+of each of three important ranges, then $q = 0.001$ and 95% confidence needs about 3,000 trials. The quantile argument
+explains why random search is reliable at finding a configuration better than most, not why it finds the best.
+
+### The expected rank of the best trial
+
+The same calculation gives the typical quality of the best trial. Let $F$ be the distribution function of the loss
+$L(\lambdavec)$ when $\lambdavec \sim p$, and assume $F$ is continuous. Each trial's quantile
+$U_i = F(L(\lambdavec^{(i)}))$ is then uniform on $[0, 1]$, and the best trial has quantile $U_{(1)} = \min_i U_i$. For
+$0 \le u \le 1$, $\prob(U_{(1)} > u) = (1 - u)^N$, so
+
+$$
+\expect U_{(1)} = \int_0^1 \prob(U_{(1)} > u)\,du = \int_0^1 (1 - u)^N\,du = \frac{1}{N + 1}.
+$$
+
+The best of 60 trials lies on average in the best $1/61 = 1.6\%$ of the space. Doubling the budget halves this
+fraction. How much loss that buys depends on how steeply $F$ rises near the minimum: on a flat-bottomed surface, a
+smaller quantile changes the loss little.
+
+### Anytime, parallel and reusable
+
+The trials are independent. They run in parallel with no coordination, failed trials can be dropped, and the search can
+stop at any time or be extended later. The first $n$ trials of a run are themselves a random search of budget $n$, so
+one run gives the whole curve of best loss against budget. Dodge et al. use this to report the expected validation
+performance of the best model as a function of the number of trials, which shows whether a comparison between two
+methods would change with more tuning <Cite id="dodge2019" />.
+
+<RandomVersusGridBudget />
+
+## Worked example
+
+The cross-validated error of an RBF SVM on two iris species is tabulated over $\log_{10}C \in [-2, 3]$ and
+$\log_{10}\gamma \in [-3, 2]$, with a lowest value of $0.040$. Random search draws both coordinates uniformly.
+
+1. **The good set.** Evaluated on a fine grid, 5% of the box has error at or below $0.0498$. Call this the best 5%,
+   so $q = 0.05$.
+2. **The guarantee.** Sixty trials land in it with probability $1 - 0.95^{60} = 0.954$. Over 2,000 runs of 60 trials on
+   the surface, 95.6% did.
+3. **The expected rank.** The best of 60 trials lies on average in the best $1/61 = 1.6\%$. On this surface the 1%
+   and 2% quantiles of the error are $0.0443$ and $0.0455$, and the average best of 60 trials over the 2,000 runs is
+   $0.0450$.
+4. **Against a grid in two dimensions.** Both hyperparameters matter here, so $d = D = 2$. A 9 by 9 grid (81 trials)
+   finds $0.046$, and 81 random trials find $0.0444$ on average. The two designs are close.
+5. **Against a grid with two irrelevant hyperparameters.** Add two hyperparameters that do not affect the error, so
+   $D = 4$ and $d = 2$. A grid of 81 trials now has 3 values per axis and only 9 distinct $(C, \gamma)$ pairs. Its best
+   is $0.059$. Random search with 81 trials still finds $0.0444$ on average, because its projection onto $(C, \gamma)$
+   is unchanged.
+
+## Cost
+
+Random search costs $N$ evaluations, each $K$ fits under $K$-fold
+<NoteLink to="cross-validation">cross-validation</NoteLink>, plus one refit: the same as a grid of $N$ points. It adds
+no cost for choosing trials. Unlike a grid, $N$ can be any number, and one more trial can be added when budget remains.
+
+## Trade-offs
+
+- **No memory.** Random search ignores the scores of earlier trials. When evaluations are expensive and the important
+  hyperparameters are few, <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> reaches a given loss in
+  fewer trials by placing later trials near good earlier ones.
+- **Uneven coverage.** Independent draws clump and leave gaps, especially for small $N$.
+  <NoteLink to="quasi-random-search">Quasi-random search</NoteLink> spreads the trials evenly and keeps the projection
+  property.
+- **A strong baseline.** Bergstra and Bengio proposed random search as the baseline against which adaptive methods are
+  judged <Cite id="bergstra2012" />. In neural architecture search, random search with
+  <NoteLink to="early-stopping">early stopping</NoteLink> performed at least as well as a leading method on two standard
+  benchmarks <Cite id="li2020randomnas" /> (see <NoteLink to="neural-architecture-search">neural architecture
+  search</NoteLink>).
+- **Early stopping.** Random search spends a full training run on every trial, including hopeless ones.
+  <NoteLink to="successive-halving">Successive halving</NoteLink> and <NoteLink to="hyperband">Hyperband</NoteLink> draw
+  configurations at random and stop the poor ones early <Cite id="li2018hyperband" />.
+- **Tools.** scikit-learn's `RandomizedSearchCV` draws a set number of configurations from given distributions and
+  scores each by cross-validation <Cite id="pedregosa2011" />.
+
+## Pitfalls
+
+- **The distribution is the method.** Random search draws from $p$, so a <Gloss name="learning-rate">learning
+  rate</Gloss> drawn uniformly instead of log-uniformly concentrates the trials in the top decade (see
+  <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink>).
+- **Reporting the best of $N$.** The best validation score of $N$ trials is biased low, and the bias grows with $N$ (see
+  <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). The quantile argument is
+  about the true loss; with noisy scores, the trial that looks best is not always the trial that is best.
+- **One run as evidence.** Two runs with different seeds return different configurations and scores. Report the
+  spread over seeds, or the expected best as a function of budget <Cite id="dodge2019" />.
+- **Unequal budgets in comparisons.** A method given 100 trials against a baseline given 10 has been tuned more, not
+  shown to be better (see <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
+- **Many important hyperparameters.** The advantage over a grid comes from low effective dimensionality. When all $D$
+  hyperparameters matter and $N$ is small, random search covers the space no better than a grid of the same size, as in
+  step 4 of the example.

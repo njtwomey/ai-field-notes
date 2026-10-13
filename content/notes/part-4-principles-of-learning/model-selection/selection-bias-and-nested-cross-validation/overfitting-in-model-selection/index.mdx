@@ -1,0 +1,241 @@
+---
+title: 'Overfitting in model selection'
+kind: concept
+summary: 'Choosing the candidate with the lowest of $J$ noisy validation estimates biases that estimate low: by at most $\sigma\sqrt{2\ln J}$ in expectation when each estimate errs with sub-Gaussian scale $\sigma$. The noise can also pick a worse model than the best candidate.'
+tags: [model-selection, generalisation, overfitting, worked-example]
+aliases: [selection bias in performance evaluation, overfitting the model selection criterion, optimism of the minimum cross-validation error, minimum cross-validation error bias, Tibshirani–Tibshirani bias correction]
+requires: [k-fold-cross-validation, maximal-inequalities]
+related: [nested-cross-validation, one-standard-error-rule, reusable-holdout, how-optimistic-is-the-best-cross-validation-score, test-set-reuse, multiple-testing, winners-curse, model-selection-and-model-assessment, tuning-budgets-in-comparisons]
+references: [cawley2010, varma2006, tibshirani2009bias, ng1997, hastie2009]
+status: draft
+updated: 2026-10-13
+---
+
+import { BestOfJScores } from './BestOfJScores'
+
+<Definition>
+Let $\Mcal_1, \dots, \Mcal_J$ be candidate models with true prediction errors $\operatorname{Err}_1, \dots,
+\operatorname{Err}_J$. Let $\widehat{\operatorname{Err}}_j$ be an estimate of $\operatorname{Err}_j$ from validation
+data, such as a hold-out or a <NoteLink to="k-fold-cross-validation">cross-validation</NoteLink> score, and let
+$\hat\jmath = \argmin_j \widehat{\operatorname{Err}}_j$ be the selected candidate. **Overfitting in model selection** is
+the fitting of the validation noise by the selection step <Cite id="cawley2010" />. It has two effects. The selected
+estimate is biased low, $\expect\widehat{\operatorname{Err}}_{\hat\jmath} < \expect\operatorname{Err}_{\hat\jmath}$,
+which is **selection bias** in the reported score. The selected model can be worse than the best candidate,
+$\operatorname{Err}_{\hat\jmath} > \min_j\operatorname{Err}_j$, which is overfitting of the selection criterion.
+</Definition>
+
+## Intuition
+
+Each validation estimate is the candidate's true error plus noise from the finite validation sample. Taking the minimum
+over $J$ estimates favours the candidate whose noise happened to be most negative. The winning score therefore reflects
+the candidate's quality and its luck. The luck does not carry over to new data.
+
+The training error is optimistic for the same reason: a fit adapts to the noise of the data it was fitted on (see
+<NoteLink to="optimism-of-the-training-error">optimism of the training error</NoteLink>). Selection is a fit with $J$
+possible outcomes, and the validation data play the role of the training data. One candidate scored on held-out data
+gives an unbiased estimate. The minimum of many such estimates does not.
+
+The size of the effect depends on three things:
+- **The number of candidates $J$.** More candidates give the noise more chances to produce a low score.
+- **The noise scale $\sigma$** of each estimate. It falls as the validation set grows.
+- **How close the candidates are.** If one candidate is better than the rest by much more than $\sigma$, it wins almost
+  every time, and its score is nearly unbiased. The bias is largest when many candidates are about equally good, as in
+  a fine hyperparameter grid or a search over pure noise.
+
+The same mechanism appears in <NoteLink to="multiple-testing">multiple testing</NoteLink>, where the smallest of many
+p-values is small by chance, and in <NoteLink to="winners-curse">the winner's curse</NoteLink> of significance testing,
+where the effects that pass a filter are exaggerated.
+
+## The winner's curse in model selection
+
+Write the error of each estimate as $\varepsilon_j = \widehat{\operatorname{Err}}_j - \operatorname{Err}_j$. Assume that
+each estimate is unbiased, $\expect\varepsilon_j = 0$, and that each $-\varepsilon_j$ is sub-Gaussian with variance
+proxy $\sigma^2$. The estimates may be dependent; scores computed on the same validation set always are.
+
+**The selected score is optimistic.** The optimism of the selected estimate is
+
+$$
+\operatorname{Err}_{\hat\jmath} - \widehat{\operatorname{Err}}_{\hat\jmath} = -\varepsilon_{\hat\jmath} \le \max_{1 \le j
+\le J}\paren{-\varepsilon_j}.
+$$
+
+The inequality holds because $\hat\jmath$ is one of the $J$ indices, whatever rule chose it. The right side is the
+largest of $J$ mean-zero sub-Gaussian variables. The <NoteLink to="maximal-inequalities">sub-Gaussian maximal
+inequality</NoteLink> bounds its expectation without any assumption on the dependence:
+
+$$
+\expect\brack{\operatorname{Err}_{\hat\jmath} - \widehat{\operatorname{Err}}_{\hat\jmath}} \le \sigma\sqrt{2\ln J}.
+$$
+
+With probability at least $1 - \delta$, the optimism is below $\sigma\sqrt{2\ln(J/\delta)}$, by the
+<NoteLink to="union-bound">union bound</NoteLink> behind the same inequality.
+
+**The bound is nearly attained for equal, independent candidates.** If every candidate has the same true error and the
+estimation errors are independent Gaussians, then $\hat\jmath$ is
+the index of the most negative $\varepsilon_j$, and the optimism equals $\max_j(-\varepsilon_j)$ exactly. Its
+expectation is $\sigma$ times the expected maximum of $J$ standard Gaussians: $1.54\sigma$ for $J = 10$, $2.51\sigma$
+for $J = 100$ and $3.24\sigma$ for $J = 1{,}000$. The bound gives $2.15\sigma$, $3.03\sigma$ and $3.72\sigma$. The
+growth is logarithmic: a hundred times more candidates roughly doubles the bias.
+
+**Dependence lowers the bias.** Neighbouring values on a hyperparameter grid give nearly the same model and nearly the
+same estimation error. A grid of 100 strongly correlated values behaves like far fewer independent candidates. The
+maximal inequality still holds but overstates the bias.
+
+**The selected model can be worse.** Let $j^\star = \argmin_j\operatorname{Err}_j$ be the best candidate. Because
+$\hat\jmath$ minimises the estimate,
+$\widehat{\operatorname{Err}}_{\hat\jmath} \le \widehat{\operatorname{Err}}_{j^\star}$. Adding and subtracting the
+estimation errors gives
+
+$$
+\operatorname{Err}_{\hat\jmath} = \widehat{\operatorname{Err}}_{\hat\jmath} - \varepsilon_{\hat\jmath} \le
+\widehat{\operatorname{Err}}_{j^\star} - \varepsilon_{\hat\jmath} = \operatorname{Err}_{j^\star} + \varepsilon_{j^\star} -
+\varepsilon_{\hat\jmath} \le \min_j\operatorname{Err}_j + 2\max_j\abs{\varepsilon_j}.
+$$
+
+The <NoteLink to="maximal-inequalities">maximal inequality</NoteLink> for absolute values bounds the expected excess
+error of the selected model by $2\sigma\sqrt{2\ln(2J)}$. Selection is reliable when the gaps between candidates are
+larger than this. When they are smaller, the noise decides, and adding candidates can make the chosen model worse even
+as its reported score improves <Cite id="ng1997" />.
+
+## How large is the bias?
+
+The noise scale $\sigma$ sets the units.
+- **A hold-out set** of $m$ examples scored with the <NoteLink to="surrogate-losses">0–1 loss</NoteLink> gives an
+  average of $m$ independent losses in $[0, 1]$. Its deviation is sub-Gaussian with $\sigma = 1/(2\sqrt m)$ by
+  <NoteLink to="hoeffdings-inequality">Hoeffding's lemma</NoteLink>, and its standard deviation is
+  $\sqrt{\operatorname{Err}(1 - \operatorname{Err})/m}$.
+- **A $K$-fold cross-validation estimate** averages $n$ held-out losses, but the fold models share training data, so
+  its standard deviation is at least that of a hold-out set of size $n$ and often larger (see
+  <NoteLink to="variance-of-cross-validation-estimates">variance of cross-validation estimates</NoteLink>). In the
+  simulation below, with $n = 50$ and pure-noise labels, it is about $0.088$ against $\sqrt{0.25/50} = 0.071$ for a
+  hold-out set of 50.
+
+Studies on real and simulated data show biases from negligible to severe.
+- Varma and Simon tuned shrunken-centroid classifiers and <Gloss name="svm">support vector machines</Gloss> on data with
+  no difference between the classes. The cross-validation error of the tuned classifier was below 30% on 18.5% and 38%
+  of the data sets respectively, while the true error was 50% <Cite id="varma2006" />.
+- Tibshirani and Tibshirani found the bias small when $n = 400$ and $p = 100$ but large when $n = 40$ and $p = 1{,}000$.
+  With no signal, the minimum 10-fold error of nearest shrunken centroids averaged 0.384 against a true 0.5
+  <Cite id="tibshirani2009bias" />.
+- Cawley and Talbot showed that the bias can be as large as the differences between the learning algorithms being
+  compared. It grows with the number of hyperparameters tuned, and a low-variance selection criterion matters as much as
+  an unbiased one <Cite id="cawley2010" />.
+
+## Correcting the minimum
+
+Three routes give an honest estimate for the selected model.
+
+1. **Fresh data.** Score the selected model once on a test set that played no part in the selection. This is the
+   three-way split of <NoteLink to="model-selection-and-model-assessment">model selection and model
+   assessment</NoteLink>.
+2. **Nested cross-validation.** Repeat the whole selection inside each training set of an outer cross-validation, and
+   score the selected model on the outer test fold (<NoteLink to="nested-cross-validation">nested
+   cross-validation</NoteLink>). It costs about $K_\text{out}$ times the original search.
+3. **Estimate the bias from the folds.** Tibshirani and Tibshirani proposed a correction that reuses the fold errors of
+   one $K$-fold run and needs no new fits <Cite id="tibshirani2009bias" />.
+
+The third route works as follows. Let $\lambda$ index the candidates, $\kappa(i)$ be the fold of point $i$, $C_k$ the
+points of fold $k$ and $n_k$ their number. The error curve of fold $k$ is
+
+$$
+e_k(\lambda) = \frac{1}{n_k}\sum_{i \in C_k}\ell\paren{y_i, \hat f^{-k}_\lambda(\xvec_i)},
+$$
+
+where $\hat f^{-k}_\lambda$ is candidate $\lambda$ fitted without fold $k$, and with equal folds
+$\operatorname{CV}(\lambda) = \frac1K\sum_k e_k(\lambda)$. Let $\hat\lambda$ minimise $\operatorname{CV}$ and
+$\hat\lambda_k$ minimise $e_k$. The bias estimate is
+
+$$
+\widehat{\operatorname{Bias}} = \frac1K\sum_{k=1}^K\brack{e_k(\hat\lambda) - e_k(\hat\lambda_k)},
+$$
+
+and the corrected estimate is $\operatorname{CV}(\hat\lambda) + \widehat{\operatorname{Bias}}$.
+
+The motivation has two parts. Each $e_k(\hat\lambda_k)$ is the minimum of a noisy error curve, like
+$\operatorname{CV}(\hat\lambda)$, so it shares its optimism; each $e_k(\hat\lambda)$ is closer to an honest score of the
+chosen candidate. The difference of the two mimics the gap between the minimum and an honest estimate. Every term is
+non-negative, so the correction never lowers the estimate. In the authors' simulations it was accurate in most settings
+and too large for <NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> and boosting with very small folds
+<Cite id="tibshirani2009bias" />. The correction is approximate: $\hat\lambda$ was chosen using fold $k$ too, so
+$e_k(\hat\lambda)$ is not fully independent of the selection.
+
+## Worked example
+
+**Bias of the best of 100 equal models.** A validation set has $m = 200$ examples. Each of $J = 100$ classifiers has
+true error $0.20$, and their validation errors are independent.
+
+1. **Noise scale.** Each validation error has standard deviation $\sqrt{0.2 \times 0.8/200} = 0.0283$.
+2. **Expected minimum.** By the Gaussian approximation, the expected maximum of 100 standard Gaussians is $2.508$, so
+   the best validation error is about $0.20 - 2.508 \times 0.0283 = 0.20 - 0.071 = 0.129$. A model with 20% error is
+   reported at about 13%.
+3. **The guarantee.** Hoeffding's lemma gives the proxy $\sigma = 1/(2\sqrt{200}) = 0.0354$. The maximal inequality
+   bounds the expected optimism by $0.0354 \times \sqrt{2\ln 100} = 0.0354 \times 3.035 = 0.107$, whatever the
+   dependence. With probability 95%, the optimism is below
+   $0.0354 \times \sqrt{2\ln 2{,}000} = 0.0354 \times 3.899 = 0.138$.
+4. **Sample size.** Keeping the bound on the expected optimism below $0.01$ needs
+   $3.035/(2\sqrt m) \le 0.01$, so $m \ge 151.7^2 \approx 23{,}000$ validation examples. Under the Gaussian
+   approximation with $\operatorname{Err} = 0.2$, $2.508 \times 0.4/\sqrt m \le 0.01$ needs $m \ge 10{,}064$.
+
+**The fold-based correction by hand.** Three candidates are compared by 5-fold cross-validation with the 0–1 loss. The
+fold errors $e_k(\lambda)$ are:
+
+| candidate | fold 1 | fold 2 | fold 3 | fold 4 | fold 5 | $\operatorname{CV}$ |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| $\lambda_1$ | 0.30 | 0.22 | 0.26 | 0.28 | 0.24 | 0.26 |
+| $\lambda_2$ | 0.24 | 0.28 | 0.20 | 0.26 | 0.27 | 0.25 |
+| $\lambda_3$ | 0.28 | 0.25 | 0.24 | 0.22 | 0.31 | 0.26 |
+
+1. **Select.** $\lambda_2$ has the smallest mean, so $\hat\lambda = \lambda_2$ and $\operatorname{CV}(\hat\lambda) =
+   0.25$.
+2. **Per-fold minima.** The smallest entry in each column is 0.24, 0.22, 0.20, 0.22 and 0.24.
+3. **Per-fold gaps.** Subtract each from the $\lambda_2$ entry of the same fold: $0.24 - 0.24 = 0$, $0.28 - 0.22 =
+   0.06$, $0.20 - 0.20 = 0$, $0.26 - 0.22 = 0.04$ and $0.27 - 0.24 = 0.03$.
+4. **Average.** $\widehat{\operatorname{Bias}} = (0 + 0.06 + 0 + 0.04 + 0.03)/5 = 0.026$.
+5. **Correct.** The corrected estimate is $0.25 + 0.026 = 0.276$.
+
+The three candidates have the same mean error to within 0.01, and each wins some folds. The correction reads this as
+evidence that the minimum owes part of its value to noise.
+
+## Simulation
+
+<BestOfJScores />
+
+The worked example <NoteLink to="how-optimistic-is-the-best-cross-validation-score" /> runs the same problem through
+nested cross-validation.
+
+## Avoiding it
+
+- **Assess on data the selection never saw:** a test set, <NoteLink to="nested-cross-validation">nested
+  cross-validation</NoteLink>, or a <NoteLink to="reusable-holdout">reusable holdout</NoteLink> when the same holdout
+  must answer many adaptive queries.
+- **Lower the noise of the criterion.** Larger validation sets and
+  <NoteLink to="repeated-and-monte-carlo-cross-validation">repeated cross-validation</NoteLink> reduce $\sigma$. Scoring
+  every candidate on the same folds makes the differences between candidates less noisy than the scores themselves.
+- **Search less.** Fewer hyperparameters, coarser grids and ranges set from prior knowledge lower the effective $J$.
+  Cawley and Talbot recommend regularising the selection criterion itself, for example with priors on the
+  hyperparameters <Cite id="cawley2010" />.
+- **Prefer the simpler candidate within the noise.** The <NoteLink to="one-standard-error-rule">one-standard-error
+  rule</NoteLink> picks the most regularised candidate whose score is within one <NoteLink to="standard-error">standard
+  error</NoteLink> of the best.
+- **Average instead of selecting.** Averaging the predictions of the top candidates, or
+  <NoteLink to="bayesian-model-averaging">Bayesian model averaging</NoteLink>, spreads the bet over the candidates that
+  noise cannot separate.
+
+## Pitfalls
+
+- **Reporting the tuned score as the model's performance.** The best cross-validation score of a search is a selection
+  statistic, not an estimate of the chosen model's error. The same holds for a validation score used for
+  <NoteLink to="early-stopping">early stopping</NoteLink> or checkpoint selection.
+- **Comparing algorithms by their tuned scores.** An algorithm with more hyperparameters, or a larger search budget,
+  gets more optimism. Tibshirani and Tibshirani warn that comparing minimum cross-validation errors across model
+  families can mislead for this reason <Cite id="tibshirani2009bias" />; see
+  <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>.
+- **Uncounted candidates.** Every variant tried counts towards $J$: feature sets, preprocessing choices, architectures
+  and random seeds, including those tried informally and discarded. Choices made after looking at earlier scores are
+  adaptive, and their cost can exceed $\sqrt{2\ln J}$ (see <NoteLink to="adaptive-data-analysis">adaptive data
+  analysis</NoteLink>).
+- **Selection inside preprocessing.** Choosing features on all the data before cross-validation is selection over a huge
+  number of candidates with no held-out data at all. <NoteLink to="selection-inside-cross-validation">Selection inside
+  cross-validation</NoteLink> treats that case.
+- **Trusting more search.** When the gaps between candidates are below the noise, a longer search lowers the reported
+  error and can raise the true error of the chosen model.

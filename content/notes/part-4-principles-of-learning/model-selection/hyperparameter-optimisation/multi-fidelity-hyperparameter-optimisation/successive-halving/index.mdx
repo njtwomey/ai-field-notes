@@ -1,0 +1,219 @@
+---
+title: 'Successive halving'
+kind: technique
+summary: 'Successive halving trains $n$ configurations on a small budget, keeps the best $1/\eta$, gives the survivors $\eta$ times the budget and repeats. Every round costs the same, so $n = \eta^K$ configurations cost $K + 1$ full trainings instead of $n$.'
+tags: [model-selection, hyperparameters, early-stopping, worked-example]
+aliases: [SHA, successive halving algorithm, sequential halving, HalvingRandomSearchCV, HalvingGridSearchCV]
+requires: [multi-fidelity-hyperparameter-optimisation, random-search]
+related: [hyperband, asynchronous-successive-halving, bayesian-optimisation-and-hyperband, learning-curve-extrapolation, best-arm-identification, early-stopping, population-based-training]
+references: [jamieson2016, karnin2013, li2018hyperband, li2020asha, hutter2019automl]
+status: draft
+updated: 2026-10-13
+---
+
+import { SuccessiveHalvingRun } from './SuccessiveHalvingRun'
+
+<Definition>
+**Successive halving** is a schedule for evaluating $n$ hyperparameter configurations under a budget such as training
+epochs. It trains every configuration with a small budget $r$, keeps the best $\lfloor n/\eta \rfloor$ by validation
+loss, trains the survivors to $\eta r$, keeps the best $1/\eta$ of those, and continues until the budget reaches a
+maximum $R$ or one configuration is left. The integer $\eta \ge 2$ is the **reduction factor**; $\eta = 2$ gives the
+halving of the name. Karnin, Koren and Somekh introduced it for stochastic best-arm identification
+<Cite id="karnin2013" />, and Jamieson and Talwalkar applied it to <Gloss name="hpo">hyperparameter optimisation</Gloss>
+<Cite id="jamieson2016" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="random-search">Random search</NoteLink> trains every configuration it draws to the full budget $R$. Most
+of those runs are visibly poor long before they finish: a learning rate that diverges, or a network that is far behind
+the others after one epoch. Training them to the end spends most of the budget on configurations that were never in
+contention.
+
+Stopping runs early saves that budget, but it raises two questions. When should a run be judged, and how many runs
+should be kept at each judgement? Successive halving answers both with one rule. It judges all surviving runs at the
+same budgets, which grow geometrically, and keeps a fixed fraction each time. It reuses the vocabulary of
+<NoteLink to="best-arm-identification">best-arm identification</NoteLink>: each configuration is an arm, a unit of
+budget is a pull, and the goal is to name the arm with the best final loss, not to do well along the way.
+
+## Mechanism
+
+### The schedule
+
+Draw $n$ configurations $\lambdavec_1, \dots, \lambdavec_n$ at random from the
+<NoteLink to="hyperparameter-search-spaces">search space</NoteLink>. Let $L_i(t)$ be the validation loss of
+configuration $i$ after a budget of $t$ units, such as $t$ epochs, and let $\nu_i = L_i(R)$ be its **final loss** at the
+maximum budget $R$. Successive halving runs in **rungs** $k = 0, 1, \dots, K$:
+
+1. Rung $k$ trains each of its $n_k$ configurations to budget $r_k = r\eta^k$ and records $L_i(r_k)$. Rung 0 holds all
+   $n_0 = n$ configurations.
+2. The best $n_{k+1} = \lfloor n_k/\eta \rfloor$ of them, by $L_i(r_k)$, go on to rung $k + 1$. The rest stop for good.
+3. Rungs continue while $r_k \le R$ and $n_k \ge 1$, and $K$ is the last of them. With $n = \eta^K$ and
+   $r = R\eta^{-K}$, the last rung has one configuration trained to $R$.
+
+The search returns the configuration with the lowest loss at the highest rung. Li et al. write the same schedule with an
+**early-stopping rate** $s$, which starts the first rung at $r\eta^s$ instead of $r$ <Cite id="li2020asha" />.
+
+### Every rung costs the same
+
+Rung $k$ trains about $n\eta^{-k}$ configurations to budget $r\eta^k$, so it costs
+
+$$
+n_k r_k \approx n\eta^{-k} \cdot r\eta^k = nr,
+$$
+
+independent of $k$. The early rungs spread the budget thinly over many configurations; the late rungs spend it on a few.
+With $K + 1$ rungs the total is about $(K + 1)nr$. When the schedule is set so that one configuration reaches $R$, that
+is $n = \eta^K$ and $r = R/n$, then $nr = R$ and
+
+$$
+B_{\text{SH}} = (K + 1)R = (\log_\eta n + 1)R.
+$$
+
+Training all $n$ configurations to $R$ costs $nR$. Successive halving costs $\log_\eta n + 1$ full trainings instead of
+$n$. With $n = 27$ and $\eta = 3$, that is 4 full trainings instead of 27.
+
+When a promoted configuration resumes from its checkpoint instead of restarting, rung $k$ only adds
+$r_k - r_{k-1}$ per configuration, and the total falls further, to $\sum_k n_k(r_k - r_{k-1})$ with $r_{-1} = 0$.
+
+### When the best configuration survives
+
+Early judgements can be wrong: a configuration that is behind at a small budget may finish ahead. The question is how
+far the losses at small budgets may stray from the final losses before successive halving discards the best
+configuration. The argument follows Jamieson and Talwalkar <Cite id="jamieson2016" />.
+
+Number the configurations so that $\nu_1 < \nu_2 \le \dots \le \nu_n$; configuration 1 has the best final loss. Let
+$\gamma(t)$ be a non-increasing **envelope** that bounds how far every curve can be from its final loss at budget $t$:
+
+$$
+\abs{L_i(t) - \nu_i} \le \gamma(t) \quad \text{for all } i \text{ and all } t \le R.
+$$
+
+**Step 1: a large gap fixes the order.** Suppose $\nu_i - \nu_1 > 2\gamma(t)$. Then
+
+$$
+L_i(t) \ge \nu_i - \gamma(t) > \nu_1 + \gamma(t) \ge L_1(t).
+$$
+
+The first inequality is the envelope for configuration $i$. The second rearranges the assumed gap. The third is the
+envelope for configuration 1. So at budget $t$, configuration 1 is ahead of every configuration whose final loss is more
+than $2\gamma(t)$ worse.
+
+**Step 2: what rung $k$ must resolve.** At rung $k$, configuration 1 is discarded only if at least $n_{k+1}$ of the
+other configurations in the rung are ahead of it. By step 1, only configurations with $\nu_i - \nu_1 \le 2\gamma(r_k)$
+can be ahead. The configurations are numbered by final loss, so there are fewer than $n_{k+1}$ such configurations in
+the whole set, and therefore in the rung, when
+
+$$
+\nu_{n_{k+1} + 1} - \nu_1 > 2\gamma(r_k).
+$$
+
+**Step 3: the condition for success.** Successive halving returns configuration 1 if this holds at every rung
+$k = 0, \dots, K - 1$:
+
+$$
+\gamma(r_k) < \tfrac{1}{2}\paren{\nu_{n_{k+1}+1} - \nu_1} \quad \text{for } k = 0, 1, \dots, K - 1.
+$$
+
+The condition explains the design. Rung 0 keeps $n/\eta$ configurations, so it only has to separate the best
+configuration from the one ranked $n/\eta + 1$ overall. That gap is large, and a crude estimate at a tiny budget
+suffices. The last rungs keep one or two configurations and must resolve the smallest gaps, $\nu_2 - \nu_1$ at the
+end. They get the largest budgets. Training every configuration to one common budget $t$ and choosing the best needs
+$\gamma(t) < \frac12(\nu_2 - \nu_1)$ for all $n$ of them, which is the hardest gap paid for at every configuration.
+Jamieson and Talwalkar turn this into budgets <Cite id="jamieson2016" />. Let $\gamma^{-1}(\alpha)$ be the smallest
+budget at which the envelope falls to $\alpha$ or below. With $\eta = 2$, successive halving returns the best
+configuration once its total budget exceeds a quantity at most
+
+$$
+2\lceil \log_2 n \rceil \paren{n + \sum_{i=2}^{n} \gamma^{-1}\paren{\tfrac{\nu_i - \nu_1}{2}}},
+$$
+
+in which each configuration pays only for its own gap. Uniform allocation is guaranteed only with
+$n\gamma^{-1}\paren{\tfrac{\nu_2 - \nu_1}{2}}$, the hardest gap paid by all $n$ configurations, and for some curves it
+needs that much.
+
+The condition is sufficient, not necessary. Curves that converge in parallel keep their order even when each is far from
+its final loss, so successive halving often succeeds when the envelope is wide. What it needs in practice is that the
+ranking at small budgets agrees with the ranking at $R$, not that the losses do.
+
+<SuccessiveHalvingRun />
+
+## Worked example
+
+Take $n = 9$ configurations, $\eta = 3$, $r = 1$ epoch and $R = 9$ epochs, so the rungs are 9 configurations at 1 epoch,
+3 at 3 and 1 at 9. The learning curves are the engine's seeded power-law family with crossing $\kappa = 0.5$ and no
+noise (seed 4, the figure's opening settings), so the final losses are known:
+
+| configuration | $L_i(1)$ | $L_i(3)$ | $\nu_i = L_i(9)$ |
+| --- | --- | --- | --- |
+| 0 | 0.730 | 0.275 | **0.131** |
+| 1 | 0.981 | 0.486 | 0.322 |
+| 2 | 0.710 | 0.450 | 0.343 |
+| 3 | 0.790 | 0.524 | 0.390 |
+| 4 | 0.817 | 0.425 | 0.237 |
+| 5 | 0.640 | 0.401 | 0.313 |
+| 6 | 0.843 | 0.438 | 0.304 |
+| 7 | 0.694 | 0.288 | 0.155 |
+| 8 | 0.954 | 0.542 | 0.389 |
+
+1. **Rung 0.** All nine train for 1 epoch. The order at 1 epoch is 5, 7, 2, 0, 3, 4, 6, 8, 1. The best
+   $\lfloor 9/3 \rfloor = 3$, configurations 5, 7 and 2, go on. Configuration 0, the best by final loss, ranks fourth
+   with $0.730$ against $0.710$ for the third and stops. Cost: 9 epochs.
+2. **Rung 1.** Configurations 5, 7 and 2 train to 3 epochs, with losses $0.401$, $0.288$ and $0.450$. Configuration 7
+   goes on. Cost: $3 \times 3 = 9$ epochs from scratch.
+3. **Rung 2.** Configuration 7 trains to 9 epochs and finishes at $0.155$. Cost: 9 epochs.
+
+Successive halving returns configuration 7, the second best of the nine, with a regret of $0.155 - 0.131 = 0.024$. It
+spent 27 epochs; training all nine to 9 epochs costs 81. With resumed training, rungs 1 and 2 add only 2 and 6 epochs
+per configuration, and the total is $9 + 3 \times 2 + 1 \times 6 = 21$ epochs.
+
+The envelope condition of the mechanism explains why the guarantee does not apply here. Rung 0 keeps 3, so it must
+separate configuration 0 from the fourth best by final loss, configuration 6. Their gap is $0.304 - 0.131 = 0.173$,
+which needs $\gamma(1) < 0.087$. At 1 epoch the losses lie 0.33 to 0.66 above their final values. The guarantee fails by
+a wide margin, and the near miss comes from rank order, not from closeness. At 3 epochs configuration 0 already has the
+lowest loss of all nine. A schedule that judged first at 3 epochs would have kept it, at a cost of fewer configurations
+for the same budget. That trade-off is what <NoteLink to="hyperband">Hyperband</NoteLink> hedges.
+
+Over 100 seeds of curves with $n = 27$, $\eta = 3$, $R = 27$ and noise of standard deviation $0.01$, the best
+configuration reaches the last rung in 66% of runs at $\kappa = 0$, 30% at $\kappa = 0.5$ and never at $\kappa = 1$.
+The mean regret of the returned configuration is $0.004$, $0.022$ and $0.155$. Random search with the same budget, 108
+epochs, trains 4 configurations fully and has a mean regret of about $0.05$ at every $\kappa$. Successive halving wins
+clearly when early rankings are informative, breaks even near $\kappa = 0.75$, and loses badly when they are reversed.
+Losing the exact best configuration is common and usually cheap: a near-best configuration survives instead.
+
+## Cost
+
+A run of successive halving with $n = \eta^K$ configurations and $r = R/n$ costs $(K + 1)R$ budget units from scratch,
+or less with resumed training. Measured in configurations evaluated per unit of budget, it explores
+$n/(K + 1)$ times as many configurations as random search. The rungs are synchronous: every configuration of a rung
+must finish before any is promoted, so with parallel workers the slowest run of a rung holds up the next.
+<NoteLink to="asynchronous-successive-halving">Asynchronous successive halving</NoteLink> removes that wait.
+
+## Trade-offs
+
+- **The number of configurations.** For a fixed total budget, a large $n$ explores widely but judges first at a tiny
+  budget. A small $n$ judges later and more reliably but explores less. The right $n$ depends on how fast the rankings
+  settle, which is unknown in advance. <NoteLink to="hyperband">Hyperband</NoteLink> runs several values of $n$.
+- **The reduction factor.** A larger $\eta$ means fewer rungs, fewer survivors and larger jumps in budget. Li et al.
+  suggest $\eta = 3$ or $4$ and found results not very sensitive to the choice <Cite id="li2018hyperband" />.
+- **The budget unit.** Epochs, training steps, a fraction of the training set, image resolution or the number of trees
+  all work, provided the cost grows with the budget and the loss at a small budget ranks configurations as the loss at
+  $R$ does. scikit-learn's `HalvingRandomSearchCV` uses the number of training samples by default.
+- **Against <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink>.** Successive halving chooses which
+  configurations to continue, not which to try. <NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink>
+  replaces its random draws with a model.
+
+## Pitfalls
+
+- **Slow starters.** A small <Gloss name="learning-rate">learning rate</Gloss>, strong regularisation or a large model
+  starts slowly and finishes well. Successive halving systematically discards such configurations when the first rung is
+  too early. Curves that cross are the failure case, not an edge case.
+- **Schedules tied to the budget.** A learning-rate schedule that decays over the full $R$ epochs is still near its peak
+  after one epoch, so a short run is not a truncated long run. Either give each rung its own complete schedule or use a
+  schedule without a fixed end (see <NoteLink to="tuning-deep-learning-hyperparameters">tuning deep-learning
+  hyperparameters</NoteLink>).
+- **Noise at small budgets.** The loss after one epoch depends heavily on the seed. With noisy rankings, a lucky
+  configuration survives and an unlucky better one stops. Larger first budgets or repeated evaluation reduce this.
+- **Reporting the winner's loss.** The returned configuration was selected for a low validation loss, so that loss is
+  optimistic (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). Assess it on
+  data the search never saw.

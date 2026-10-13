@@ -1,0 +1,221 @@
+---
+title: 'Expected improvement'
+kind: concept
+summary: 'Expected improvement is the posterior mean of the gain $\max(f^\star - f(\lambdavec), 0)$ over the incumbent $f^\star$. Under a Gaussian posterior it equals $(f^\star - \mu)\Phi(z) + \sigma\varphi(z)$ with $z = (f^\star - \mu)/\sigma$, large where the mean is low or the uncertainty high.'
+tags: [model-selection, optimisation, bayesian, hyperparameters, worked-example]
+aliases: [EI, expected improvement acquisition, efficient global optimization, EGO]
+requires: [acquisition-functions, gaussian-distribution]
+related: [bayesian-optimisation, gaussian-process-upper-confidence-bound, entropy-search, tree-structured-parzen-estimator, batch-bayesian-optimisation, constrained-bayesian-optimisation, overfitting-in-model-selection]
+references: [mockus1978, jones1998, kushner1964, bull2011, ament2023, snoek2012, frazier2018, garnett2023, forrester2008]
+status: draft
+updated: 2026-10-13
+---
+
+import { ImprovementGeometry } from './ImprovementGeometry'
+import { BoWalkthrough } from '../_shared/BoWalkthrough'
+
+<Definition>
+Let $f(\lambdavec)$ be an objective to minimise, such as a validation loss, and let $f^\star_t$ be the best value
+observed after $t$ evaluations. The **improvement** of a value $f$ is $\max(f^\star_t - f, 0)$: how far it falls below
+the incumbent, or zero if it does not. The **expected improvement** of a candidate $\lambdavec$ is the mean of the
+improvement under the surrogate's posterior for $f(\lambdavec)$,
+
+$$
+\operatorname{EI}_t(\lambdavec) = \expect\brack{\max\paren{f^\star_t - f(\lambdavec), 0} \mid \Dcal_t}.
+$$
+
+When that posterior is $\Gauss(\mu_t(\lambdavec), \sigma_t^2(\lambdavec))$, as for a <Gloss name="gp">Gaussian
+process</Gloss>,
+
+$$
+\operatorname{EI}_t(\lambdavec) = \paren{f^\star_t - \mu_t}\Phi(z) + \sigma_t\varphi(z), \qquad
+z = \frac{f^\star_t - \mu_t}{\sigma_t},
+$$
+
+where $\mu_t$ and $\sigma_t$ are evaluated at $\lambdavec$, and $\Phi$ and $\varphi$ are the standard
+<NoteLink to="gaussian-distribution">normal distribution</NoteLink> function and density <Cite id="mockus1978" />
+<Cite id="jones1998" />. <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink> evaluates the candidate
+with the largest EI next.
+</Definition>
+
+## Intuition
+
+A candidate's value is unknown before it is evaluated, but the surrogate gives a distribution for it. Some of that
+distribution may lie below the incumbent. Expected improvement adds up those possible gains, each weighted by its
+probability, and ignores outcomes that do no better than the incumbent. A candidate whose value is sure to be worse
+than $f^\star_t$ scores zero. A candidate whose value is sure to equal $f^\star_t - 0.1$ scores $0.1$.
+
+The asymmetry is what makes EI explore. A wide posterior has a long lower tail that can reach far below the incumbent,
+and its upper tail costs nothing because losses are truncated at zero. Widening the posterior therefore raises EI even
+when the mean stays put. A narrow posterior with a mean below the incumbent offers a nearly certain but small gain. EI
+weighs the two on one scale, the units of $f$, which is why it is the default acquisition of most Bayesian optimisation
+software.
+
+The method is old. Mockus, Tiešis and Žilinskas proposed it in 1978 <Cite id="mockus1978" />. Jones, Schonlau and
+Welch made it standard for expensive engineering simulations in 1998 under the name efficient global optimization
+(EGO), with a kriging surrogate and a branch-and-bound search for the maximum of EI <Cite id="jones1998" />. Snoek,
+Larochelle and Adams brought it to the tuning of machine learning models <Cite id="snoek2012" />.
+
+## Derivation
+
+Fix a candidate and drop $\lambdavec$ and $t$ from the notation: the posterior is $f \sim \Gauss(\mu, \sigma^2)$ with
+$\sigma > 0$, and the incumbent is $f^\star$.
+
+**Step 1: standardise.** Write $f = \mu + \sigma U$, where $U \sim \Gauss(0, 1)$. Then
+
+$$
+f^\star - f = f^\star - \mu - \sigma U = \sigma(z - U), \qquad z = \frac{f^\star - \mu}{\sigma}.
+$$
+
+The improvement is $\max(\sigma(z - U), 0) = \sigma\max(z - U, 0)$, because $\sigma > 0$.
+
+**Step 2: restrict to the improving outcomes.** The improvement is positive exactly when $U < z$. Its expectation is an
+integral over that half-line,
+
+$$
+\operatorname{EI} = \sigma\int_{-\infty}^{z} (z - u)\,\varphi(u)\,du
+= \sigma\paren{z\int_{-\infty}^{z}\varphi(u)\,du - \int_{-\infty}^{z}u\,\varphi(u)\,du}.
+$$
+
+**Step 3: evaluate the two integrals.** The first is $\Phi(z)$ by definition. For the second, the standard normal
+density satisfies $\varphi'(u) = -u\,\varphi(u)$, so $u\,\varphi(u)$ has antiderivative $-\varphi(u)$, and
+$\varphi(u) \to 0$ as $u \to -\infty$:
+
+$$
+\int_{-\infty}^{z}u\,\varphi(u)\,du = \brack{-\varphi(u)}_{-\infty}^{z} = -\varphi(z).
+$$
+
+**Step 4: collect.** Substituting both integrals,
+
+$$
+\operatorname{EI} = \sigma\paren{z\Phi(z) + \varphi(z)} = (f^\star - \mu)\Phi(z) + \sigma\varphi(z),
+$$
+
+since $\sigma z = f^\star - \mu$. When $\sigma = 0$ the posterior is a point mass at $\mu$, and the improvement is
+$\max(f^\star - \mu, 0)$ with certainty.
+
+The compact form $\operatorname{EI} = \sigma\,\tau(z)$ with $\tau(z) = z\Phi(z) + \varphi(z)$ separates the scale from
+the shape. The function $\tau$ is positive for every $z$, close to $z$ for large positive $z$ (a sure improvement of
+size about $f^\star - \mu$) and close to zero for large negative $z$.
+
+## Exploration and exploitation
+
+The two terms of the closed form have separate meanings. The first, $(f^\star - \mu)\Phi(z)$, is positive when the mean
+is below the incumbent and grows as the mean falls: it rewards **exploitation**. The second, $\sigma\varphi(z)$, grows
+with the standard deviation: it rewards **exploration**.
+
+The <NoteLink to="partial-derivatives">partial derivatives</NoteLink> make this exact. Differentiate
+$\operatorname{EI} = \sigma\tau(z)$ using $\tau'(z) = \Phi(z) + z\varphi(z) + \varphi'(z) = \Phi(z)$, and
+$\partial z/\partial\mu = -1/\sigma$, $\partial z/\partial\sigma = -z/\sigma$:
+
+$$
+\frac{\partial\operatorname{EI}}{\partial\mu} = \sigma\,\Phi(z)\cdot\paren{-\frac{1}{\sigma}} = -\Phi(z) < 0,
+\qquad
+\frac{\partial\operatorname{EI}}{\partial\sigma} = \tau(z) + \sigma\,\Phi(z)\cdot\paren{-\frac{z}{\sigma}} = \varphi(z) > 0.
+$$
+
+EI always rises when the mean falls with the spread fixed, and always rises when the spread grows with the mean fixed.
+A candidate can therefore win either way. The contours of equal EI in the $(\mu, \sigma)$ plane slope upwards: along
+each one, a worse mean is bought back by a wider posterior, at the exchange rate
+$d\sigma/d\mu = \Phi(z)/\varphi(z)$.
+
+<ImprovementGeometry />
+
+The figure shows both readings. On the left, the shaded mass below the incumbent is the probability of improvement, and
+the area under the dashed integrand is EI. Moving the incumbent into the body of the density raises both. On the right,
+EI is near zero only in the corner where the mean is far above the incumbent and the spread is small.
+
+## The margin ξ
+
+Expected improvement can be made more exploratory by measuring improvement against $f^\star - \xi$ for a margin
+$\xi \ge 0$ instead of against $f^\star$:
+
+$$
+\operatorname{EI}_\xi = \delta\,\Phi\paren{\frac{\delta}{\sigma}} + \sigma\,\varphi\paren{\frac{\delta}{\sigma}}, \qquad
+\delta = f^\star - \mu - \xi.
+$$
+
+The derivation is the one above with $f^\star - \xi$ in place of $f^\star$. A margin shrinks the exploitation term of
+candidates whose mean is just below the incumbent, which are the candidates EI would otherwise refine forever. The idea
+is Kushner's, who used it with the probability of improvement <Cite id="kushner1964" />. The margin is in the units of
+$f$, so a useful value depends on the scale of the objective. Libraries that standardise the observed values can use
+one small margin for every problem, and many use none.
+
+<BoWalkthrough mode="ei" />
+
+The walk-through runs EI on the Forrester function <Cite id="forrester2008" />. A margin helps the search leave a
+shallow local minimum sooner, and costs precision near the global minimum. No margin is best for every objective.
+
+## Worked example
+
+A search tunes a classifier by validation error. The incumbent is $f^\star = 0.20$. The surrogate's posterior at two
+candidates is
+
+| candidate | $\mu$ | $\sigma$ | description |
+| --- | --- | --- | --- |
+| A | $0.22$ | $0.04$ | an unexplored region, probably worse |
+| B | $0.19$ | $0.005$ | next to the incumbent, almost surely a little better |
+
+**Candidate A.** The standardised gap is $z = (0.20 - 0.22)/0.04 = -0.5$. The normal tables give $\Phi(-0.5) = 0.3085$
+and $\varphi(-0.5) = 0.3521$. The exploitation term is $(-0.02)(0.3085) = -0.00617$, and the exploration term is
+$0.04 \times 0.3521 = 0.01408$. So $\operatorname{EI}_A = 0.00791$: a 31% chance of improving, by about $0.026$ on
+average when it does.
+
+**Candidate B.** Here $z = (0.20 - 0.19)/0.005 = 2$, with $\Phi(2) = 0.9772$ and $\varphi(2) = 0.0540$. The
+exploitation term is $0.01 \times 0.9772 = 0.00977$ and the exploration term $0.005 \times 0.0540 = 0.00027$, so
+$\operatorname{EI}_B = 0.01004$.
+
+**Choice.** EI prefers B, by about a quarter. B's gain is nearly certain and close to $0.01$; A's gain is uncertain but
+can be several times larger. The probability of improvement prefers B far more strongly, $0.977$ against $0.309$,
+because it ignores the size of the gain.
+
+**With a margin $\xi = 0.01$.** For A, $\delta = 0.20 - 0.22 - 0.01 = -0.03$, $\delta/\sigma = -0.75$, and
+$\operatorname{EI}_A = (-0.03)(0.2266) + 0.04 \times 0.3011 = 0.00525$. For B, $\delta = 0$, so
+$\operatorname{EI}_B = 0.005\,\varphi(0) = 0.005 \times 0.3989 = 0.00199$. The margin erases most of B's sure gain, and
+EI now chooses A.
+
+## Noisy evaluations
+
+With noisy evaluations, the best observed value $f^\star_t$ is a minimum of noisy numbers and is biased low, as in
+<NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>. EI against a lucky incumbent
+undervalues every candidate and can stall. The common fix replaces $f^\star_t$ by the smallest posterior mean at the
+evaluated points, $\min_{i \le t} \mu_t(\lambdavec_i)$, which shrinks lucky observations towards their neighbours
+<Cite id="frazier2018" /> <Cite id="garnett2023" />. The knowledge gradient (see
+<NoteLink to="acquisition-functions">acquisition functions</NoteLink>) handles noise more directly, at a higher
+computational cost.
+
+## Convergence
+
+With a fixed Gaussian-process prior, EI eventually finds the minimum of any function in the prior's
+<Gloss name="rkhs">reproducing kernel Hilbert space</Gloss>, and Bull gave its convergence rates <Cite id="bull2011" />.
+The same paper shows a weakness of practice: when the kernel's hyperparameters are re-estimated from the data at each
+step, EI can fail to find the minimum at all. An overconfident length-scale makes the posterior spread small away from
+the evaluations, so EI never pays for the evaluation that would reveal its mistake. Bull proposes modified estimators of
+the hyperparameters that recover the rates of a fixed prior. A few random evaluations mixed into the search guard
+against the same failure in practice.
+
+## Assumptions
+
+- **A Gaussian posterior.** The closed form needs it. With other surrogates, such as <NoteLink to="random-forest">random
+  forests</NoteLink> in <NoteLink to="sequential-model-based-algorithm-configuration">SMAC</NoteLink>, EI is computed
+  from a Gaussian fitted to the surrogate's mean and spread.
+  <NoteLink to="tree-structured-parzen-estimator">TPE</NoteLink> reaches a version of EI through density ratios instead.
+- **One evaluation at a time.** EI values the next evaluation as if it were the last. It is myopic: it does not plan
+  for the evaluations that follow.
+- **A calibrated spread.** EI's exploration is only as good as $\sigma_t$.
+
+## Pitfalls
+
+- **Vanishing values.** Far from the incumbent, $z$ is very negative and EI is of order $\sigma\varphi(z)/z^2$, which
+  underflows to zero in floating point. Large regions then have zero EI and zero gradient, and a gradient-based search
+  for the maximum of EI stalls there. The problem grows with the number of evaluations and the dimension. Ament et al.
+  compute $\log\operatorname{EI}$ stably instead (LogEI), with the same maximisers and much better behaved optimisation
+  <Cite id="ament2023" />.
+- **Refining forever.** Once the posterior is narrow around the incumbent, EI can keep choosing points a hair away from
+  it. A margin, a minimum distance between evaluations, or a stopping rule on the largest EI ends the stall.
+- **Reporting the incumbent's score as its error.** EI chases low observed values. The incumbent's validation score is
+  therefore optimistic, and its error needs data the search did not use, such as a test set or
+  <NoteLink to="nested-cross-validation">nested cross-validation</NoteLink>.
+- **Parallel evaluations.** Running EI on several workers proposes the same point on each.
+  <NoteLink to="batch-bayesian-optimisation">Batch Bayesian optimisation</NoteLink> extends EI to several points at
+  once.

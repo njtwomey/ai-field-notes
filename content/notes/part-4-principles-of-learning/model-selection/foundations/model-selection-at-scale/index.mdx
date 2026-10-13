@@ -1,0 +1,179 @@
+---
+title: 'Model selection at scale'
+kind: concept
+summary: 'When one training run is expensive, models are selected on a single validation set, hyperparameters are tuned on small proxy models and transferred, scaling laws extrapolate from small runs, and checkpoints are chosen on held-out data free of benchmark contamination.'
+tags: [model-selection, large-models, practice, worked-example]
+aliases: [selecting large models, hyperparameter transfer]
+requires: [model-selection-and-model-assessment]
+related: [maximal-update-parameterisation, tuning-deep-learning-hyperparameters, test-set-reuse, benchmark-contamination, hold-out-validation, early-stopping, autoregressive-transformer-language-model]
+references: [yang2021mup, kaplan2020, hoffmann2022, openai2023gpt4, wei2022emergent, schaeffer2023mirage, godbole2023, dodge2020, wortsman2022soups, yang2023, oren2023, magar2022, recht2019, roelofs2019]
+status: draft
+updated: 2026-10-13
+---
+
+<Definition>
+**Model selection at scale** is model selection when a single training run of the final model costs a large share of
+the available compute, so that the candidates cannot each be trained at full size and cross-validated. It replaces the
+standard tools with cheaper ones: a single large validation set instead of $K$ folds; small proxy models whose tuned
+hyperparameters transfer to the large one; scaling laws fitted to small runs and extrapolated; and selection among the
+checkpoints and seeds of a few full-size runs. Assessment then depends on held-out benchmarks that the training data
+must not contain.
+</Definition>
+
+## Intuition
+
+<NoteLink to="cross-validation">Cross-validation</NoteLink> and <NoteLink to="nested-cross-validation">nested
+cross-validation</NoteLink> spend compute to save data. They fit each candidate $K$ times, sometimes $K^2$ times, so
+that every example can serve for both fitting and scoring. A large model reverses the scarcity. Data are plentiful,
+often billions of tokens or millions of images, and a single run can take weeks on thousands of accelerators. Fitting
+even one candidate $K$ times is unaffordable, and fitting each candidate once at full size is often unaffordable too.
+
+The questions of model selection stay the same: estimate, select, assess. The answers move. Estimation becomes cheap and
+precise, because a validation set of millions of examples has a tiny <NoteLink to="standard-error">standard
+error</NoteLink>. Selection becomes the expensive step, and it is done mostly on small models whose behaviour predicts
+the large one. Assessment becomes fragile, because the test data may have leaked into a training corpus scraped from the
+web.
+
+## One validation set
+
+With $n_\text{val}$ independent validation examples, the validation error of a fixed model has standard error
+$s/\sqrt{n_\text{val}}$, where $s$ is the standard deviation of the per-example loss. For an accuracy near $0.9$ on
+$n_\text{val} = 10\,000$ examples, the standard error is $\sqrt{0.9 \times 0.1/10\,000} = 0.003$. A validation set of
+that size separates models that differ by a percentage point. The training set loses only a small fraction of its data
+to the validation set, so the hold-out estimate is nearly unbiased for the model trained on everything (see
+<NoteLink to="hold-out-validation">hold-out validation</NoteLink>). $K$-fold cross-validation would cost $K$ training
+runs to reduce a variance that is already negligible.
+
+Three cautions apply.
+
+- **Correlated examples.** The tokens of one document, the frames of one video and the turns of one conversation are not
+  independent. The <Gloss name="ess">effective sample size</Gloss> is the number of documents or sessions, and the
+  standard error is larger than the token count suggests. Split by document or source (see
+  <NoteLink to="grouped-cross-validation">grouped cross-validation</NoteLink>).
+- **Repeated use.** The same validation set guides many decisions over a project, including architecture, data mixture,
+  <Gloss name="learning-rate">learning rate</Gloss> and stopping time. Each decision consumes some of its independence.
+  Godbole et al. warn against fitting the validation set adaptively over time <Cite id="godbole2023" />.
+- **Distribution.** The validation set should come from the distribution the model will meet. A held-out slice of the
+  pretraining corpus measures pretraining loss, not downstream quality.
+
+## Tuning on proxies
+
+Most hyperparameters of a large model are chosen on smaller models of the same family. The difficulty is that the best
+hyperparameters move as the model grows. Under the standard parameterisation of a Transformer, the best learning rate
+shifts as the width grows, so a value tuned on a small model is wrong for the large one.
+
+<NoteLink to="maximal-update-parameterisation">Maximal update parameterisation</NoteLink> (µP) scales
+the initialisation and learning rate of each layer with the width so that the optimal hyperparameters stay fixed as the
+width grows. The procedure, µTransfer, parameterises the target model in µP, tunes a small version and copies
+the hyperparameters across <Cite id="yang2021mup" />.
+
+- Yang et al. transferred hyperparameters from a 13M-parameter proxy to BERT-large (350M parameters), at a total tuning
+  cost equal to one pretraining of BERT-large. They transferred from a 40M-parameter proxy to the 6.7B-parameter
+  <Gloss name="gpt-3" /> architecture, at 7% of the pretraining cost. Both tuned models beat the published results
+  <Cite id="yang2021mup" />.
+- Optimisation hyperparameters, such as the learning rate, initialisation scales and parameter multipliers, transfer.
+  <NoteLink to="regularisation">Regularisation</NoteLink> hyperparameters, such as dropout and
+  <Gloss name="weight-decay">weight decay</Gloss>, do not <Cite id="yang2021mup" />.
+- Transfer across width has theoretical support. Transfer across depth, batch size, sequence length and training time
+  was verified empirically on Transformers, with caveats <Cite id="yang2021mup" />.
+
+The proxy must be close enough to the target that the ranking of candidates is preserved. A proxy that is too small,
+or trained too briefly, can rank two choices in the opposite order from the target.
+
+## Extrapolating from small runs
+
+Some choices cannot be made on one proxy, because they concern scale itself: how large the model should be, how many
+tokens to train it on, and which of two architectures will be better at full size. These are made by fitting a
+**scaling law** to a family of small runs and extrapolating.
+
+Kaplan et al. found that the test loss of <Gloss name="language-model">language models</Gloss> falls as a power law in
+the number of parameters $N$, the number of training tokens $D$ and the training compute $C$, over more than seven
+orders of magnitude, with training compute $C \approx 6ND$ <Gloss name="flop">floating-point operations</Gloss>
+<Cite id="kaplan2020" />. Hoffmann et al. trained over 400 models from 70 million to over 16 billion parameters on 5 to
+500 billion tokens. They fitted $L(N, D) = E + A/N^\alpha + B/D^\beta$, with constants $E$, $A$, $B$, $\alpha$ and
+$\beta$ fitted to the runs, and concluded that compute-optimal training scales $N$ and $D$ equally: each doubling of the
+model calls for a doubling of the tokens <Cite id="hoffmann2022" />. OpenAI predicted aspects of GPT-4's performance
+from models trained with at most 1/1000 of its compute <Cite id="openai2023gpt4" />.
+
+A scaling law turns model selection into curve fitting. Two candidate architectures are compared by their fitted curves
+at the target compute, not by their losses at the small scales where they were measured. The fit is an extrapolation,
+and its error grows with the distance to the target. Pretraining loss extrapolates more reliably than downstream task
+metrics. Wei et al. describe abilities that are absent in smaller models and present in larger ones, and that cannot be
+predicted by extrapolating the smaller models <Cite id="wei2022emergent" />. Schaeffer et al. argue that many such jumps
+come from the choice of a nonlinear or discontinuous metric, such as <Gloss name="exact-match">exact-match</Gloss>
+accuracy, and that continuous metrics of the same models change smoothly <Cite id="schaeffer2023mirage" />. The fitting
+and the compute-optimal trade-off are worked through in the
+<NoteLink to="autoregressive-transformer-language-model">autoregressive transformer language model</NoteLink> note.
+
+## Checkpoint selection
+
+A long run saves checkpoints, and the final model is chosen among them. The playbook recommends retrospective
+checkpoint selection: keep the best checkpoints of a fixed-length run by validation score and pick the best at the end,
+because the best checkpoint is often not the last <Cite id="godbole2023" />. This is <NoteLink to="early-stopping">early
+stopping</NoteLink> applied after the fact.
+
+Fine-tuning adds the random seed to the candidates. Dodge et al. fine-tuned <Gloss name="bert" /> hundreds of times on
+each of four <Gloss name="glue" /> tasks, changing only the seed. Distinct seeds gave substantially different results,
+and <NoteLink to="weight-initialisation">weight initialisation</NoteLink> and data order contributed comparably to the
+variance <Cite id="dodge2020" />. Keeping the best of many seeds is selection over noisy candidates, and its validation
+score is optimistic in the same way as the best of many hyperparameters (see
+<NoteLink to="model-selection-and-model-assessment">model selection and model assessment</NoteLink>).
+
+Averaging is an alternative to selecting. Wortsman et al. average the weights of models fine-tuned from one
+pretrained model with different hyperparameters, a "model soup", instead of keeping only the one with the best
+held-out validation accuracy <Cite id="wortsman2022soups" />.
+
+## Contamination
+
+A test set assesses a model honestly only if no part of it informed the model. For models pretrained on web-scale
+corpora, public benchmarks may sit in the training data. Yang et al. found that 8% to 18% of the HumanEval coding
+benchmark overlaps with the pretraining sets RedPajama-Data-1T and StarCoder-Data. They also showed that rephrased test
+items evade n-gram decontamination, and that a 13B-parameter model trained on rephrased test data can reach the
+benchmark performance of GPT-4 <Cite id="yang2023" />.
+
+Contamination does not always help. Magar and Schwartz pretrained BERT models on corpora containing downstream test
+data and found cases where the model memorised the contaminated data without exploiting it on the task
+<Cite id="magar2022" />. Detection is possible without the training data. Oren et al. test whether a model assigns
+higher likelihood to a benchmark in its canonical order than to shuffled orders, which an exchangeable benchmark
+would not show unless it had been memorised <Cite id="oren2023" />. The practice of detection and prevention is covered
+in <NoteLink to="benchmark-contamination">benchmark contamination</NoteLink>.
+
+Reuse of a public test set is a separate risk. Recht et al. built new test sets for <Gloss name="cifar-10" /> and
+<Gloss name="imagenet" /> following the original collection process and found accuracy drops that they attribute to a
+distribution shift between the old and new test sets rather than to adaptive reuse <Cite id="recht2019" />. Across more
+than a hundred Kaggle competitions, Roelofs et al. found little evidence of overfitting to the public leaderboard
+<Cite id="roelofs2019" />. Large test sets resist reuse; contamination defeats them.
+
+## Worked example
+
+A team has the compute budget of Gopher, a 280-billion-parameter model trained on 300 billion tokens, and must choose
+the model size.
+
+1. **The budget.** With $C \approx 6ND$, Gopher's run costs $6 \times (2.8 \times 10^{11}) \times (3 \times 10^{11})
+   \approx 5.0 \times 10^{23}$ floating-point operations.
+2. **The selection.** From scaling laws fitted to runs of 70 million to 16 billion parameters, Hoffmann et al. predicted
+   that this compute is better spent on a smaller model trained on more data <Cite id="hoffmann2022" />.
+3. **The candidate.** Chinchilla has $N = 7 \times 10^{10}$ parameters and was trained on $D = 1.4 \times 10^{12}$
+   tokens, so $6ND \approx 5.9 \times 10^{23}$, a similar budget. It has a quarter of Gopher's parameters and about
+   $4.7$ times its tokens.
+4. **The assessment.** Chinchilla outperformed Gopher on a large range of downstream evaluations
+   <Cite id="hoffmann2022" />. The decision was made without training a second 280-billion-parameter model.
+5. **The validation precision.** A held-out set of $10\,000$ multiple-choice items scored at about 70% accuracy has
+   standard error $\sqrt{0.7 \times 0.3/10\,000} = 0.0046$. Differences of two percentage points between the two
+   models are over four standard errors. Differences of half a point are within noise.
+
+## Pitfalls
+
+- **Rank reversals between scales.** A choice that wins on a small proxy can lose at full size. Verify transfer on at
+  least two proxy sizes, and prefer parameterisations designed for transfer.
+- **Extrapolating the wrong quantity.** Pretraining loss follows smooth power laws; benchmark accuracy often does not.
+  An extrapolated benchmark score has a much wider error than the fit suggests.
+- **Selecting on the benchmark.** Choosing checkpoints, prompts or seeds by their score on the reported benchmark turns
+  it into a validation set (see <NoteLink to="test-set-reuse">test-set reuse</NoteLink>). Keep a held-out set for the
+  final number.
+- **Reporting the best seed.** The best of many fine-tuning runs is an optimistic estimate of what the procedure
+  delivers. Report the spread over seeds, or the expected best score as a function of the number of runs.
+- **Trusting a contaminated test set.** A strong score on a public benchmark may measure memorisation. Prefer test sets
+  created after the training data was collected, or kept private.
+- **Too few tokens of validation per decision.** A validation set that is small relative to the number of decisions
+  made on it overfits like a small one. Refresh it, or keep a second set for confirmation.

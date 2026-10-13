@@ -1,0 +1,200 @@
+---
+title: 'Pseudo-dimension and fat-shattering dimension'
+kind: concept
+summary: 'The pseudo-dimension and the fat-shattering dimension extend the VC dimension to real-valued classes: a set is shattered when the functions pass above or below a witness level at each point in every pattern, by a margin $\gamma$ for fat-shattering. They bound covering numbers.'
+tags: [learning-theory, capacity, generalisation, worked-example]
+aliases: [pseudo-dimension, Pollard's pseudo-dimension, fat-shattering dimension, scale-sensitive dimension, P-dimension]
+requires: [vapnik-chervonenkis-dimension, covering-numbers-and-metric-entropy]
+related: [margin-bounds, chaining-and-dudley-entropy-integral, rademacher-complexity, natarajan-dimension, norm-based-bounds-for-neural-networks, kernel-support-vector-machine, isotonic-regression]
+references: [pollard1984, haussler1992, kearns1994b, alon1997, bartlett1998, mendelson2003, shawetaylor2000, anthony1999]
+status: draft
+updated: 2026-10-12
+---
+
+import { FatShatteringMonotone } from './FatShatteringMonotone'
+
+<Definition>
+Let $\Fcal$ be a class of functions from $\Xcal$ to $\reals$. Points $x_1, \dots, x_d$ are **pseudo-shattered** by
+$\Fcal$ if there are **witness levels** $r_1, \dots, r_d \in \reals$ such that for every pattern
+$b \in \set{0, 1}^d$ some $f \in \Fcal$ has $f(x_i) \ge r_i$ where $b_i = 1$ and $f(x_i) < r_i$ where $b_i = 0$. The
+**pseudo-dimension** $\mathrm{Pdim}(\Fcal)$ is the size of the largest pseudo-shattered set
+<Cite id="pollard1984" /><Cite id="haussler1992" />. For a scale $\gamma > 0$, the points are **$\gamma$-shattered** if
+the functions clear the witnesses by a margin: $f(x_i) \ge r_i + \gamma$ where $b_i = 1$ and $f(x_i) \le r_i - \gamma$
+where $b_i = 0$. The **fat-shattering dimension** $\mathrm{fat}_{\Fcal}(\gamma)$ is the size of the largest
+$\gamma$-shattered set <Cite id="kearns1994b" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> counts the points on which a class of
+classifiers realises every labelling. A class of real-valued functions does not label points, but each point can be
+given a threshold, its witness, and each function then labels the point by which side of the threshold it falls. The
+pseudo-dimension is the VC dimension of these induced labellings, with the witnesses chosen as favourably as possible.
+Equivalently, it is the VC dimension of the class of **subgraphs** $\set{(x, r) : f(x) \ge r}$, one per $f$.
+
+The pseudo-dimension ignores scale. A function that passes its witness by $10^{-9}$ counts as much as one that passes
+by 1. That makes it fragile: a class of tiny functions, all within $10^{-9}$ of zero, can have infinite
+pseudo-dimension and yet be learnable to any useful accuracy. The fat-shattering dimension repairs this by demanding a
+margin $\gamma$. It is a function of the scale: large for small $\gamma$, small for large $\gamma$, and it measures the
+class only at the resolution that matters.
+
+The scale is what connects these dimensions to margins. A classifier $\sgn(f)$ that separates the training data with
+margin $\gamma$ is controlled by $\mathrm{fat}_{\Fcal}(\gamma)$, not by the pseudo-dimension of $\Fcal$
+<Cite id="bartlett1998" />. This is how <NoteLink to="margin-bounds">margin bounds</NoteLink> avoid counting parameters.
+
+## Definitions and first properties
+
+- **Monotone in the scale.** A set that is $\gamma$-shattered is $\gamma'$-shattered for every $\gamma' < \gamma$, so
+  $\mathrm{fat}_{\Fcal}(\gamma)$ is non-increasing in $\gamma$.
+- **Bounded by the pseudo-dimension.** A $\gamma$-shattered set is pseudo-shattered with the same witnesses, so
+  $\mathrm{fat}_{\Fcal}(\gamma) \le \mathrm{Pdim}(\Fcal)$ for every $\gamma > 0$.
+- **Binary classes.** For a class of $\set{0, 1}$-valued functions, every witness can be taken as $\frac12$. The
+  pseudo-dimension is the VC dimension, and $\mathrm{fat}(\gamma)$ equals the VC dimension for $\gamma \le \frac12$
+  and 0 for $\gamma > \frac12$.
+- **Monotone transformations.** If $\phi : \reals \to \reals$ is non-decreasing, $\mathrm{Pdim}(\phi \circ \Fcal) \le
+  \mathrm{Pdim}(\Fcal)$. The condition $\phi(f(x)) \ge s$ holds exactly when $f(x)$ lies in an interval unbounded above,
+  so a pattern of $\phi \circ \Fcal$ against witnesses $s_i$ is a pattern of $\Fcal$ against suitable thresholds
+  <Cite id="anthony1999" />. Clipping predictions to $[0, 1]$ or passing them through a sigmoid does not raise the
+  pseudo-dimension.
+- **Vector spaces.** If $\Fcal$ is a vector space of functions of dimension $k$, then $\mathrm{Pdim}(\Fcal) = k$
+  <Cite id="anthony1999" />. Affine functions on $\reals^p$ form a space of dimension $p + 1$, so their pseudo-dimension
+  is $p + 1$, the VC dimension of half-spaces.
+
+<Derivation title="The pseudo-dimension of a vector space of dimension k">
+
+**At least $k$.** A space of dimension $k$ has points $x_1, \dots, x_k$ at which the evaluation map
+$f \mapsto (f(x_1), \dots, f(x_k))$ is onto $\reals^k$. Take every witness 0. Every sign pattern is the image of some
+$f$, so the points are pseudo-shattered.
+
+**At most $k$.** Suppose $x_1, \dots, x_{k+1}$ are pseudo-shattered with witnesses $r_i$. The vectors
+$(f(x_1), \dots, f(x_{k+1}))$ form a subspace of $\reals^{k+1}$ of dimension at most $k$, so some nonzero $\avec$ is
+orthogonal to all of them: $\sum_i a_i f(x_i) = 0$ for every $f$. Then $\sum_i a_i(f(x_i) - r_i) = c$ for the
+constant $c = -\sum_i a_i r_i$. Negating $\avec$ if needed, some $a_i > 0$.
+
+1. Take the pattern with $b_i = 1$ exactly where $a_i > 0$. Its function has $f(x_i) - r_i \ge 0$ where $a_i > 0$ and
+   $f(x_i) - r_i < 0$ where $a_i < 0$. Every term $a_i(f(x_i) - r_i)$ is non-negative, so $c \ge 0$.
+2. Take the opposite pattern. Its function has $f(x_i) - r_i < 0$ where $a_i > 0$, which makes at least one term
+   strictly negative, and $f(x_i) - r_i \ge 0$ where $a_i \le 0$, which makes the other terms non-positive. So $c < 0$.
+
+The two conclusions contradict each other, so no $k + 1$ points are pseudo-shattered.
+
+</Derivation>
+
+## Examples
+
+### Bounded-norm linear functions
+
+Let $\Fcal = \set{\xvec \mapsto \wvec^\top\xvec : \norm{\wvec} \le B}$ on inputs with $\norm{\xvec} \le R$, in a
+Euclidean or Hilbert space of any dimension. Then
+
+$$
+\mathrm{fat}_{\Fcal}(\gamma) \le \paren{\frac{BR}{\gamma}}^2
+$$
+
+<Cite id="shawetaylor2000" />. The bound does not involve the dimension. The pseudo-dimension does: in $\reals^p$ it is
+$p$, because shrinking a weight vector keeps every sign, and in an infinite-dimensional space it is infinite.
+
+<Derivation title="The fat-shattering bound for witnesses at zero">
+
+Suppose $\xvec_1, \dots, \xvec_d$ are $\gamma$-shattered with every witness 0. For each sign vector
+$\sigmavec \in \set{-1, +1}^d$ some $\wvec_{\sigmavec}$ with $\norm{\wvec_{\sigmavec}} \le B$ has
+$\sigma_i\wvec_{\sigmavec}^\top\xvec_i \ge \gamma$ for all $i$.
+
+1. **Sum the margins.** Adding the $d$ inequalities gives $\wvec_{\sigmavec}^\top\sum_i\sigma_i\xvec_i \ge d\gamma$.
+2. **Cauchy–Schwarz.** The left side is at most $B\norm{\sum_i\sigma_i\xvec_i}$, so
+   $\norm{\sum_i\sigma_i\xvec_i} \ge d\gamma/B$ for every $\sigmavec$.
+3. **Average over random signs.** For independent uniform signs, Jensen's inequality and $\expect\sigma_i\sigma_j = 0$
+   for $i \ne j$ give $\expect\norm{\sum_i\sigma_i\xvec_i} \le \sqrt{\sum_i\norm{\xvec_i}^2} \le R\sqrt d$.
+4. **Combine.** $d\gamma/B \le R\sqrt d$, so $d \le (BR/\gamma)^2$.
+
+General witnesses need a further argument, and the bound is the same <Cite id="shawetaylor2000" />.
+
+</Derivation>
+
+With $B = 10$ and $R = 1$, the class has $\mathrm{fat}(0.1) \le 10^4$ and $\mathrm{fat}(0.5) \le 400$, whether the
+inputs live in $\reals^{10^6}$ or in the feature space of a Gaussian kernel. The pseudo-dimension in $\reals^{10^6}$ is
+$10^6$. At scale $0.5$ the class $\gamma$-shatters at most 400 points, whatever the number of coordinates.
+
+### Non-decreasing functions
+
+Let $\Fcal$ be the non-decreasing functions from $[0, 1]$ to $[0, 1]$, the class fitted by
+<NoteLink to="isotonic-regression">isotonic regression</NoteLink>. It has infinite pseudo-dimension and finite
+fat-shattering dimension:
+
+$$
+\mathrm{Pdim}(\Fcal) = \infty, \qquad \mathrm{fat}_{\Fcal}(\gamma) = \left\lfloor\frac{1}{2\gamma}\right\rfloor.
+$$
+
+- **Infinite pseudo-dimension.** Take any points $x_1 < \dots < x_d$ and increasing witnesses $r_i = i/(d + 1)$. For a
+  pattern $b$, set $f(x_i) = r_i$ where $b_i = 1$ and $f(x_i) = r_i - \eta$ where $b_i = 0$, with
+  $\eta < 1/(d + 1)$. These values increase with $i$, so they extend to a non-decreasing function.
+- **Fat-shattering, upper bound.** Suppose $x_1 < \dots < x_d$ are $\gamma$-shattered. The pattern with $b_i = 1$ and
+  $b_{i+1} = 0$ needs $r_i + \gamma \le f(x_i) \le f(x_{i+1}) \le r_{i+1} - \gamma$, so consecutive witnesses are at
+  least $2\gamma$ apart. A pattern with $b_1 = 0$ needs $0 \le f(x_1) \le r_1 - \gamma$, and one with $b_d = 1$ needs
+  $r_d + \gamma \le f(x_d) \le 1$. Together, $1 \ge r_d + \gamma \ge r_1 + 2\gamma(d - 1) + \gamma \ge 2\gamma d$, so
+  $d \le 1/(2\gamma)$.
+- **Fat-shattering, lower bound.** Take $d = \lfloor 1/(2\gamma)\rfloor$ points and witnesses $r_i = (2i - 1)\gamma$.
+  Set $f(x_i) = 2i\gamma$ where $b_i = 1$ and $f(x_i) = 2(i - 1)\gamma$ where $b_i = 0$. Each value lies in
+  $[2(i - 1)\gamma, 2i\gamma]$, so the values never decrease, and they stay in $[0, 1]$.
+
+At $\gamma = 0.05$ the class $\gamma$-shatters 10 points and no more.
+
+<FatShatteringMonotone />
+
+## Bounds on covering numbers
+
+The dimensions bound <NoteLink to="covering-numbers-and-metric-entropy">covering numbers</NoteLink>,
+which feed the <NoteLink to="union-bound">union bound</NoteLink>, <NoteLink to="massarts-finite-class-lemma">Massart's
+lemma</NoteLink> and chaining.
+
+- **Pseudo-dimension.** If $\Fcal$ maps into $[0, 1]$ and $\mathrm{Pdim}(\Fcal) = d$, then for every distribution $P$,
+  in particular the empirical distribution of a sample, $N(\epsilon, \Fcal, L_1(P)) \le e(d + 1)(2e/\epsilon)^d$
+  <Cite id="anthony1999" />. Since $(f - g)^2 \le \abs{f - g}$ for values in $[0, 1]$, the $L_2$ covering number at
+  scale $\epsilon$ is at most the $L_1$ one at scale $\epsilon^2$. The bound is Haussler's bound for VC classes with
+  the pseudo-dimension in place of the VC dimension.
+- **Fat-shattering dimension.** If $\Fcal$ is bounded by 1 in absolute value, then for every distribution $P$,
+  $\ln N(\epsilon, \Fcal, L_2(P)) \le K\,\mathrm{fat}_{\Fcal}(c\epsilon)\ln(2/\epsilon)$, with absolute constants $K$
+  and $c$ <Cite id="mendelson2003" />. The covering number at scale $\epsilon$ is set by the fat-shattering dimension
+  at a proportional scale, and the bound does not grow with the sample size.
+- **Learnability.** A class of $[0, 1]$-valued functions has empirical means converging to expectations uniformly over
+  the class and over all distributions if and only if $\mathrm{fat}_{\Fcal}(\gamma)$ is finite for every $\gamma > 0$
+  <Cite id="alon1997" />. This is the real-valued counterpart of the equivalence between finite VC dimension and
+  <NoteLink to="uniform-convergence">uniform convergence</NoteLink>. Finite pseudo-dimension is sufficient but not
+  necessary, as the non-decreasing functions show.
+
+## Worked example: a clipped linear predictor
+
+Predict $y \in [0, 1]$ from $\xvec \in \reals^{10}$ with $h(\xvec) = \mathrm{clip}_{[0, 1]}(\wvec^\top\xvec + c)$ and
+the <NoteLink to="regression-losses">absolute loss</NoteLink> $\abs{h(\xvec) - y}$. Affine functions on $\reals^{10}$
+have pseudo-dimension 11, and clipping is non-decreasing, so $d = \mathrm{Pdim}(\Hcal) \le 11$ with no bound on the
+weights.
+
+1. **Covering numbers.** On any sample, $\ln N(\epsilon, \Hcal, d_{2, S}) \le \ln(e \cdot 12) + 11\ln(2e/\epsilon^2)$.
+2. **<NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink> (one-step bound).** The covering-numbers note
+   gives $\hat\Rad_S(\Hcal) \le \inf_\epsilon\paren{\epsilon + \sqrt{2\ln N(\epsilon)/m}}$. At $m = 10{,}000$ the best
+   scale is $\epsilon \approx 0.0145$, where $\ln N = 115$ and the bound is $0.0145 + \sqrt{230/10{,}000} = 0.166$.
+3. **Loss class (contraction).** The absolute loss is 1-Lipschitz in the prediction, so the
+   <NoteLink to="contraction-lemma">contraction lemma</NoteLink> keeps the complexity at $0.166$.
+4. **Generalisation bound.** With $\delta = 0.05$, every $h$ has test absolute error at most its training absolute
+   error plus $2 \times 0.166 + \sqrt{\ln 20/20{,}000} = 0.345$.
+5. **Reading it.** The losses lie in $[0, 1]$, so the bound is not vacuous, but it is weak. It falls to $0.12$ at
+   $m = 10^5$ and $0.041$ at $m = 10^6$, and a gap of $0.1$ needs about $146{,}000$ examples. Chaining would remove
+   a $\sqrt{\ln m}$ factor from the rate. Most of the bound comes from the constants of the covering bound and the
+   factor 2 of <NoteLink to="symmetrisation">symmetrisation</NoteLink>, not from the size of the class.
+
+The fat-shattering route gives a different trade. With weights bounded by $\norm{\wvec} \le B$ and inputs by
+$\norm{\xvec} \le R$, the scale-$\gamma$ dimension $(BR/\gamma)^2$ is free of the dimension $10$ and remains useful when
+the inputs are kernel features of unbounded dimension.
+
+## Pitfalls
+
+- **Infinite pseudo-dimension does not mean unlearnable.** Bounded-norm linear functions in infinite dimensions and
+  monotone functions both have infinite pseudo-dimension, and both are learnable. Use the fat-shattering dimension
+  for such classes.
+- **Witnesses may depend on the points.** The definition lets each point have its own witness. Fixing every witness at
+  0 gives a different, smaller quantity.
+- **Constants and scales.** Covering-number bounds from the fat-shattering dimension hold at a scale $c\epsilon$ with
+  unspecified absolute constants. They give rates, not numbers.
+- **The loss class is what is bounded.** A bound on the predictors transfers to the losses only through a Lipschitz or
+  monotone link. The <NoteLink to="surrogate-losses">0–1 loss</NoteLink> of $\sgn(f)$ is controlled by the
+  fat-shattering dimension only through a margin loss.

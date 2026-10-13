@@ -1,0 +1,183 @@
+---
+title: 'Tree-structured Parzen estimator'
+kind: technique
+summary: 'The tree-structured Parzen estimator (TPE) splits past trials at a quantile of their losses, fits kernel density estimates $\ell(\lambdavec)$ to the good configurations and $g(\lambdavec)$ to the rest, and evaluates the candidate with the largest ratio $\ell/g$, which maximises expected improvement.'
+tags: [model-selection, hyperparameters, bayesian, optimisation, worked-example]
+aliases: [TPE, Parzen estimator search, hyperopt TPE, TPE sampler]
+requires: [bayesian-optimisation, kernel-density-estimation, expected-improvement]
+related: [acquisition-functions, hyperparameter-search-spaces, sequential-model-based-algorithm-configuration, bayesian-optimisation-and-hyperband, random-search, density-ratio-estimation, automated-machine-learning]
+references: [bergstra2011, watanabe2023, akiba2019, jones1998, shahriari2016, forrester2008, hutter2019automl]
+status: draft
+updated: 2026-10-13
+---
+
+import { TpeWalkthrough } from './TpeWalkthrough'
+
+<Definition>
+The **tree-structured Parzen estimator** (TPE) is a sequential model-based search for hyperparameters
+<Cite id="bergstra2011" />. After $n$ trials it splits them at the $\gamma$-quantile $y^\star$ of their losses into a
+good group, the best $\lceil \gamma n \rceil$, and a bad group. It fits one
+<NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink> $\ell(\lambdavec)$ to the good
+configurations and another, $g(\lambdavec)$, to the bad ones. It then draws candidates from $\ell$ and evaluates the
+candidate with the largest ratio $\ell(\lambdavec)/g(\lambdavec)$. Under TPE's model this ratio orders candidates by
+<Gloss name="ei">expected improvement</Gloss> over $y^\star$.
+</Definition>
+
+## Problem
+
+A <Gloss name="gp">Gaussian-process</Gloss> surrogate models the loss given the configuration, $p(y \mid \lambdavec)$.
+It handles continuous hyperparameters on a box well. Real search spaces are messier. They mix real, integer and
+categorical hyperparameters, and some hyperparameters exist only when others take certain values: a second layer's width
+only when there are two layers, a kernel width only for an <Gloss name="rbf-kernel" /> (see
+<NoteLink to="hyperparameter-search-spaces">hyperparameter search spaces</NoteLink>). A Gaussian process needs a kernel
+for such a space, and its cost grows as the cube of the number of trials.
+
+TPE avoids both problems by modelling the other conditional. It models $p(\lambdavec \mid y)$, the distribution of
+configurations given how well they did, with one density for good results and one for bad. A density over a mixed,
+conditional space can be built one hyperparameter at a time, following the space's own structure. Fitting it costs
+time linear in the number of trials.
+
+## Mechanism
+
+### The model
+
+Fix a fraction $\gamma \in (0, 1)$ and let $y^\star$ be the $\gamma$-quantile of the observed losses, so that
+$\prob(y < y^\star) = \gamma$. TPE models the configurations as drawn from one of two densities, depending on which
+side of $y^\star$ their loss falls:
+
+$$
+p(\lambdavec \mid y) = \begin{cases} \ell(\lambdavec) & y < y^\star, \\ g(\lambdavec) & y \ge y^\star. \end{cases}
+$$
+
+The density $\ell$ describes where good configurations lie, and $g$ where the others lie. Both are Parzen estimators,
+which is the older name for kernel density estimates: a mixture of one kernel per observation in the group, plus a
+broad prior component so that no region gets zero density. A continuous hyperparameter gets a Gaussian kernel truncated
+to its range, on a log scale when the hyperparameter is searched on one. A categorical one gets a kernel that keeps most
+of its mass on the observed category and spreads the rest uniformly <Cite id="watanabe2023" />.
+
+### Why the ratio is expected improvement
+
+Expected improvement over the threshold $y^\star$ is
+
+$$
+\operatorname{EI}_{y^\star}(\lambdavec) = \int_{-\infty}^{y^\star} (y^\star - y)\,p(y \mid \lambdavec)\,dy.
+$$
+
+**Step 1: <NoteLink to="bayes-theorem">Bayes' theorem</NoteLink>.** TPE models $p(\lambdavec \mid y)$ and $p(y)$, not
+$p(y \mid \lambdavec)$, so rewrite $p(y \mid \lambdavec) = p(\lambdavec \mid y)\,p(y)/p(\lambdavec)$.
+
+**Step 2: the marginal density of configurations.** Averaging the model over $y$, a fraction $\gamma$ of the mass comes
+from $\ell$ and the rest from $g$:
+
+$$
+p(\lambdavec) = \int p(\lambdavec \mid y)\,p(y)\,dy = \gamma\,\ell(\lambdavec) + (1 - \gamma)\,g(\lambdavec).
+$$
+
+**Step 3: the numerator.** Over the range of integration, $y < y^\star$, the model says $p(\lambdavec \mid y) =
+\ell(\lambdavec)$, which does not depend on $y$ and comes out of the integral:
+
+$$
+\int_{-\infty}^{y^\star}(y^\star - y)\,p(\lambdavec \mid y)\,p(y)\,dy = \ell(\lambdavec)\int_{-\infty}^{y^\star}(y^\star - y)\,p(y)\,dy
+= \ell(\lambdavec)\,c,
+$$
+
+where $c > 0$ depends on the distribution of losses but not on $\lambdavec$.
+
+**Step 4: divide.** Combining the steps and dividing numerator and denominator by $\ell(\lambdavec)$,
+
+$$
+\operatorname{EI}_{y^\star}(\lambdavec) = \frac{c\,\ell(\lambdavec)}{\gamma\,\ell(\lambdavec) + (1 - \gamma)\,g(\lambdavec)}
+= \frac{c}{\gamma + (1 - \gamma)\,g(\lambdavec)/\ell(\lambdavec)}.
+$$
+
+The right-hand side increases with $\ell(\lambdavec)/g(\lambdavec)$. Maximising expected improvement is therefore the
+same as maximising the <NoteLink to="density-ratio-estimation">density ratio</NoteLink> <Cite id="bergstra2011" />. The
+same model gives the <NoteLink to="acquisition-functions">probability of improvement</NoteLink>
+$\prob(y < y^\star \mid \lambdavec) = \gamma\ell/(\gamma\ell + (1 - \gamma)g)$, which also increases with the ratio. So
+under TPE's model, expected improvement and probability of improvement choose the same point <Cite id="watanabe2023" />.
+
+The improvement is measured against the quantile $y^\star$, not against the best loss. With $\gamma = 0.15$ and 40
+trials the target is the sixth-best loss. Several trials already beat it, which keeps $\ell$ broad enough to explore.
+
+### Proposing a point
+
+The ratio is maximised approximately. TPE draws $N_s$ candidates from $\ell$, scores each by $\ell/g$, and evaluates
+the best. Drawing from $\ell$ concentrates candidates where good configurations have been seen; scoring by the ratio
+discounts places where bad configurations are just as dense. The usual defaults are $\gamma = 0.15$, $N_s = 24$
+candidates and 10 random trials before the densities take over <Cite id="watanabe2023" />. A larger $N_s$ maximises the
+ratio more exactly and exploits more.
+
+### The tree structure
+
+"Tree-structured" refers to conditional search spaces <Cite id="bergstra2011" />. The space is a tree: the choice of a
+model type decides which hyperparameters exist below it. The original TPE keeps a separate one-dimensional density for
+each hyperparameter, fitted only to the trials in which that hyperparameter was active, and multiplies them. This
+handles conditional spaces naturally but ignores interactions between hyperparameters. The multivariate variant puts a
+product kernel on each trial, which captures interactions, and Watanabe recommends it <Cite id="watanabe2023" />.
+
+<TpeWalkthrough />
+
+## Worked example
+
+A <Gloss name="learning-rate">learning rate</Gloss> is searched on a log scale, mapped to $\lambda \in [0, 1]$. Six
+trials gave validation losses
+
+| $\lambda$ | 0.10 | 0.30 | 0.45 | 0.55 | 0.70 | 0.90 |
+| --- | --- | --- | --- | --- | --- | --- |
+| loss | 0.40 | 0.28 | 0.21 | 0.24 | 0.33 | 0.45 |
+
+Take $\gamma = 1/3$. The good group is the best $\lceil 6/3 \rceil = 2$ trials, $\lambda = 0.45$ and $0.55$, and the
+threshold is $y^\star = 0.24$. The bad group is $\lambda = 0.10, 0.30, 0.70, 0.90$. For hand calculation, use plain
+Gaussian kernels of bandwidth $h = 0.15$ with no truncation or prior component, so each density is the average of
+$\varphi((\lambda - \lambda_i)/h)/h$ over its group.
+
+**Candidate $\lambda = 0.50$.** Both good trials are $0.05$ away, a standard score of $0.333$, and each kernel is
+$\varphi(0.333)/0.15 = 0.3774/0.15 = 2.516$. So $\ell(0.50) = 2.516$. The bad trials are $0.40$, $0.20$, $0.20$ and
+$0.40$ away, with kernels $0.076$, $1.093$, $1.093$ and $0.076$, so $g(0.50) = 2.338/4 = 0.585$. The ratio is
+$\ell/g = 4.30$.
+
+**Candidate $\lambda = 0.62$.** The good kernels are $1.399$ and $2.385$, so $\ell = 1.892$. The bad kernels are
+$0.007$, $0.273$, $2.307$ and $0.466$, so $g = 0.763$. The ratio is $2.48$. The candidate sits between the best trials
+and the bad trial at $0.70$.
+
+**Candidate $\lambda = 0.20$.** The good kernels are $0.663$ and $0.175$, so $\ell = 0.419$. Two bad trials are $0.10$
+away, and $g = 1.067$. The ratio is $0.39$.
+
+**Expected improvement.** With $\gamma = 1/3$, EI is proportional to $1/(1/3 + \tfrac23\,g/\ell)$: $2.05$ at $0.50$,
+$1.66$ at $0.62$ and $0.49$ at $0.20$, in units of the constant $c$. TPE evaluates $\lambda = 0.50$ next, between the
+two good trials. The probability that the loss beats $y^\star$, $\gamma\ell/(\gamma\ell + (1 - \gamma)g)$, is $0.68$,
+$0.55$ and $0.16$, in the same order.
+
+## Cost
+
+Fitting the two densities to $n$ trials costs $O(n)$ per hyperparameter, and scoring $N_s$ candidates costs $O(N_s\,n)$.
+A Gaussian process costs $O(n^3)$ to fit. TPE therefore stays fast for thousands of trials, and each proposal takes
+milliseconds. It is the core of Hyperopt and the main sampler of Optuna <Cite id="akiba2019" />
+<Cite id="watanabe2023" />, and the multi-fidelity method
+<NoteLink to="bayesian-optimisation-and-hyperband">BOHB</NoteLink> uses the same pair of densities. Like other
+sequential methods, it proposes one trial at a time. Parallel workers that ignore each other's pending trials can
+propose near-duplicates; inserting pending trials as provisional bad results spreads them out.
+
+## Trade-offs
+
+- **Against a Gaussian process.** TPE has no explicit model of $f$, so it cannot report a posterior mean or an
+  uncertainty, and it extrapolates poorly from few trials. On low-dimensional continuous problems with tight budgets,
+  Gaussian-process methods often find good configurations in fewer trials. TPE is better suited to large, mixed and
+  conditional spaces and to budgets of hundreds of trials or more.
+- **The fraction $\gamma$.** A small $\gamma$ fits $\ell$ to the very best trials and exploits; a large $\gamma$ blurs
+  good and bad and explores. The quantile also depends on noise: with noisy losses, the good group contains lucky
+  trials.
+- **Independent dimensions.** The original univariate TPE misses interactions, such as a learning rate whose best value
+  depends on the batch size. The multivariate variant captures them at a small extra cost.
+
+## Pitfalls
+
+- **Too few random trials.** The densities are meaningless with two or three good trials. Ten or more random trials
+  first, depending on the dimension, keep the first densities from locking onto an early accident.
+- **Bandwidths.** The kernel widths set how far $\ell$ reaches. Too narrow, and TPE resamples near past trials; too
+  wide, and it reduces to <NoteLink to="random-search">random search</NoteLink>. Implementations clip the bandwidth from
+  below for this reason <Cite id="watanabe2023" />.
+- **The ratio is not a density.** The ratio is large where $g$ is small, which includes regions with no trials at all.
+  The prior component in both densities and drawing candidates from $\ell$ keep the search from chasing empty regions.
+- **The best trial's score.** TPE concentrates trials where losses were low, so the best validation loss is optimistic,
+  as for every search (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

@@ -1,0 +1,198 @@
+---
+title: 'Quasi-random search'
+kind: technique
+summary: 'Quasi-random search places trials at the points of a low-discrepancy sequence, such as a Sobol or Halton sequence, or of a Latin hypercube, instead of independent draws. The trials and their projections onto each hyperparameter cover the space more evenly than random ones.'
+tags: [model-selection, hyperparameters, worked-example]
+aliases: [quasi-random search, low-discrepancy search, Sobol sequence, Halton sequence, Latin hypercube sampling, LHS, star discrepancy, space-filling design]
+requires: [random-search]
+related: [grid-search, hyperparameter-search-spaces, monte-carlo-integration, bayesian-optimisation, importance-sampling, tuning-deep-learning-hyperparameters]
+references: [bousquet2017, godbole2023, sobol1967, halton1960, mckay1979, owen2013, caflisch1998, bergstra2012]
+status: draft
+updated: 2026-10-13
+---
+
+import { QuasiRandomDesigns } from './QuasiRandomDesigns'
+
+<Definition>
+**Quasi-random search** is <NoteLink to="random-search">random search</NoteLink> with the independent draws replaced by
+a **space-filling design**: the first $N$ points $\uvec^{(1)}, \dots, \uvec^{(N)}$ of a low-discrepancy sequence in the
+unit cube $[0, 1]^m$, such as a Sobol or Halton sequence, or a Latin hypercube of $N$ points. Each point is decoded into
+a configuration through the encoding of the <NoteLink to="hyperparameter-search-spaces">search space</NoteLink>, scored
+by the validation loss, and the best is kept. A random shift or scrambling of the design makes repeated searches
+independent while keeping it even.
+</Definition>
+
+## Problem
+
+Independent draws clump and leave gaps. On one axis, $N$ uniform points have an expected largest gap of
+
+$$
+\frac{1}{N + 1}\sum_{k=1}^{N+1}\frac1k \approx \frac{\ln N}{N},
+$$
+
+against $1/N$ for evenly spread points. For $N = 60$ the expected largest gap is $0.077$, 4.6 times the even spacing
+of $0.017$. A narrow optimum inside a gap is missed. A grid has no gaps but repeats values on every axis
+(see <NoteLink to="grid-search">grid search</NoteLink>). Quasi-random designs aim for both: no large gaps, and $N$
+distinct values on every axis.
+
+## Mechanism
+
+### Discrepancy
+
+Evenness is measured by **discrepancy**. For a point set $P = \set{\uvec^{(1)}, \dots, \uvec^{(N)}}$ in $[0, 1]^m$, the
+**star discrepancy** is the largest error made by using the fraction of points in an anchored box as its volume:
+
+$$
+D^*_N(P) = \sup_{\avec \in [0, 1]^m}\abs{\frac{\#\set{i : \uvec^{(i)} \in [\zeros, \avec)}}{N} - \prod_{j=1}^m a_j},
+$$
+
+where $[\zeros, \avec) = [0, a_1) \times \dots \times [0, a_m)$ and $\#$ counts points. A **low-discrepancy sequence**
+has $D^*_N \le c_m(\ln N)^m/N$ for all $N$, with $c_m$ a constant depending on the dimension. Independent uniform
+points have a discrepancy of order $N^{-1/2}$ <Cite id="caflisch1998" />.
+
+Discrepancy controls integration error through the **Koksma–Hlawka inequality**: the average of $f$ over $P$ differs
+from $\int_{[0,1]^m} f$ by at most $V(f)\,D^*_N(P)$, where $V(f)$ is the variation of $f$ in the sense of Hardy and
+Krause <Cite id="owen2013" />. This is why quasi-Monte Carlo integration converges faster than
+<NoteLink to="monte-carlo-integration">Monte Carlo integration</NoteLink> for smooth integrands.
+
+### What discrepancy guarantees for search
+
+Search needs a different consequence: a large region cannot be empty.
+
+**Every anchored box larger than the discrepancy holds a point.** Let $B = [\zeros, \avec)$ have volume
+$\operatorname{vol}(B) > D^*_N$. By the definition of $D^*_N$,
+
+$$
+\frac{\#\set{i : \uvec^{(i)} \in B}}{N} \ge \operatorname{vol}(B) - D^*_N > 0,
+$$
+
+so at least one point lies in $B$.
+
+**Every box larger than $2^m D^*_N$ holds a point.** A general box $[\avec, \bvec)$ is a signed combination of $2^m$
+anchored boxes, by inclusion and exclusion over its corners. In two dimensions,
+$[\avec, \bvec) = [\zeros, \bvec) - [\zeros, (a_1, b_2)) - [\zeros, (b_1, a_2)) + [\zeros, \avec)$. Both the count and
+the volume obey the same combination, so the error of the count is at most $2^m D^*_N$. A box whose volume exceeds that
+bound contains a point.
+
+This is a deterministic version of the quantile argument for random search, which guarantees a hit only with probability
+$1 - (1 - q)^N$. It has two limits. The guarantee covers axis-aligned boxes only: a thin diagonal valley can have a
+large area and still contain no large axis-aligned box. And the bound $(\ln N)^m/N$ beats $N^{-1/2}$ only when $N$ is
+large compared with the dimension: for $m = 10$ it needs $N$ far beyond any
+tuning budget. In tuning, the useful property of these sequences
+is that their projections onto one or two coordinates are themselves low-discrepancy.
+
+### Halton sequences
+
+The **radical inverse** in base $b$ reflects the base-$b$ digits of an integer about the radix point. If
+$i = \sum_{k \ge 0} a_k b^k$ with digits $a_k \in \set{0, \dots, b - 1}$, then
+
+$$
+\phi_b(i) = \sum_{k \ge 0} a_k b^{-k-1}.
+$$
+
+In base 2, $1, 2, 3, 4$ are $1, 10, 11, 100$ in binary and map to $0.1, 0.01, 0.11, 0.001$ in binary: $0.5, 0.25, 0.75,
+0.125$. Each new point falls in the largest remaining gap. The **Halton sequence** in $m$ dimensions uses the first $m$
+primes $p_1, \dots, p_m$ as bases: $\uvec^{(i)} = (\phi_{p_1}(i), \dots, \phi_{p_m}(i))$ <Cite id="halton1960" />. Each
+coordinate is a one-dimensional low-discrepancy sequence. Among the first $p^k$ points of the coordinate in base $p$,
+exactly one lies in each interval $[j p^{-k}, (j + 1)p^{-k})$.
+
+### Sobol sequences
+
+A **Sobol sequence** uses base 2 in every coordinate and gives each coordinate its own binary matrix of direction
+numbers <Cite id="sobol1967" />. Its first coordinate is the base-2 radical inverse. The construction makes the first
+$2^k$ points balanced: in two dimensions, every rectangle of the dyadic form $[j_1 2^{-k_1}, (j_1 + 1)2^{-k_1}) \times
+[j_2 2^{-k_2}, (j_2 + 1)2^{-k_2})$ with $k_1 + k_2 = k$ holds exactly one point. The balance holds when $N$ is a power
+of 2. The first point of both sequences is the origin, a corner of the space, so implementations often skip it.
+
+### Latin hypercubes
+
+A **Latin hypercube** of $N$ points divides each axis into $N$ equal slices and places exactly one point in each slice
+of each axis <Cite id="mckay1979" />. Coordinate $j$ of point $i$ is $(\pi_j(i) + v_{ij})/N$, where
+$\pi_1, \dots, \pi_m$ are independent random permutations of $\set{0, \dots, N - 1}$ and $v_{ij}$ is uniform on
+$[0, 1)$. Every one-dimensional projection is stratified, so no gap on any axis exceeds $2/N$. Pairs of coordinates are
+not controlled: a Latin hypercube can put all its points on the diagonal. McKay, Beckman and Conover showed that for an
+output monotone in each input, the mean over a Latin hypercube has a variance no larger than the mean over independent
+draws <Cite id="mckay1979" />. A Latin hypercube is built for a fixed $N$ and cannot be extended by one point, while a
+sequence can.
+
+### Randomisation
+
+A deterministic sequence gives the same trials every time, so two searches are not independent repeats. A **random
+shift** adds one uniform vector $\Delta$ to every point modulo 1, $\uvec^{(i)} \mapsto (\uvec^{(i)} + \Delta) \bmod 1$.
+Every shifted point is uniform on the cube, so averages over a shifted design are unbiased, and independent shifts give
+independent repeats. **Scrambling** permutes the digits of each coordinate at random and preserves the balance of a
+Sobol set <Cite id="owen2013" />.
+
+## In practice
+
+Bousquet et al. compared low-discrepancy sequences with random search for tuning
+<NoteLink to="neural-language-model">LSTM language models</NoteLink> and image classifiers, and found suitable
+hyperparameters with far fewer training runs <Cite id="bousquet2017" />. The
+<NoteLink to="tuning-deep-learning-hyperparameters">Deep Learning Tuning Playbook</NoteLink> prefers quasi-random
+search, a shifted and scrambled Halton sequence, over adaptive black-box optimisers during the exploration phase of
+tuning <Cite id="godbole2023" />. Its reasons are that the trials spread out more than random ones, that a non-adaptive
+design lets the tuning objective change after the trials have run, that the results are reproducible, and that all
+trials can run in parallel. Bayesian-optimisation libraries use Sobol points or Latin hypercubes for the initial design
+before the surrogate takes over (see <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink>).
+
+<QuasiRandomDesigns />
+
+## Worked example
+
+**Halton points by hand.** The first four Halton points in two dimensions, skipping the origin, have first coordinates
+$\phi_2(1), \dots, \phi_2(4) = 0.5, 0.25, 0.75, 0.125$. In base 3, $1, 2, 3, 4$ are $1, 2, 10, 11$, so
+$\phi_3(1), \dots, \phi_3(4) = \tfrac13, \tfrac23, \tfrac19, \tfrac49$. Decoded to the <Gloss name="svm" /> search space
+$\log_{10}C = -2 + 5u_1$ and $\log_{10}\gamma = -3 + 5u_2$, the four trials and their tabulated cross-validated errors
+are:
+
+| $i$ | $\uvec^{(i)}$ | $(\log_{10}C, \log_{10}\gamma)$ | error |
+| ---: | --- | --- | ---: |
+| 1 | $(0.5, 0.333)$ | $(0.5, -1.33)$ | 0.046 |
+| 2 | $(0.25, 0.667)$ | $(-0.75, 0.33)$ | 0.116 |
+| 3 | $(0.75, 0.111)$ | $(1.75, -2.44)$ | 0.050 |
+| 4 | $(0.125, 0.444)$ | $(-1.38, -0.78)$ | 0.071 |
+
+Each coordinate fills the largest gap left by the earlier points. The first trial lands in the diagonal valley of good
+settings, within $0.007$ of the table's minimum of $0.040$.
+
+**Gaps on one axis.** Sixteen uniform draws on $[0, 1]$ have an expected largest gap of
+$\frac{1}{17}\sum_{k=1}^{17}\frac1k = 3.44/17 = 0.202$. The first 16 points of the base-2 radical inverse, starting from
+0, are the multiples of $1/16$, with every gap equal to $0.0625$.
+
+**Search on the SVM surface.** Over 500 runs of 64 trials each, the average best error is $0.0449$ for independent
+draws, $0.0449$ for Latin hypercubes and $0.0465$ for randomly shifted Sobol points. The worst run of the 500 reaches
+$0.0536$, $0.0517$ and $0.0517$. On this surface the designs differ mainly in their bad runs, not in their average. The
+good settings lie in a narrow diagonal valley, and evenness in axis-aligned boxes, which is what discrepancy measures,
+does not guarantee a point inside a thin diagonal strip.
+
+## Cost
+
+Generating the points costs nothing next to the trials: a radical inverse takes $O(\log N)$ operations per coordinate.
+The search costs the same $N$ evaluations as random search, and the trials are as easy to run in parallel. A sequence
+can be extended one trial at a time; a Latin hypercube of a new size must be drawn afresh.
+
+## Trade-offs
+
+- **Gains are largest for small budgets and few important hyperparameters.** These are the settings where independent
+  draws are most likely to leave a large gap.
+- **Against random search.** A quasi-random design keeps random search's indifference to hyperparameters that do not
+  matter, because each projection onto a coordinate is still a well-spread set of $N$ values. It adds evenness, not
+  adaptivity.
+- **Against Bayesian optimisation.** Neither design learns from earlier scores. When evaluations are expensive and
+  sequential, an adaptive method spends fewer of them near poor regions.
+- **Halton in high dimensions.** Coordinates with large prime bases start with long increasing runs: for $i < 29$,
+  $\phi_{29}(i) = i/29$ and $\phi_{31}(i) = i/31$, so the first 28 points lie on a line in those two coordinates.
+  Scrambled Halton sequences break this correlation, which is why the playbook scrambles <Cite id="godbole2023" />.
+
+## Pitfalls
+
+- **The origin as a trial.** Unscrambled Sobol and Halton sequences start at $\zeros$, the corner of the space where
+  every hyperparameter is at its lower bound.
+- **Sobol balance at powers of 2.** A Sobol design of 50 points is less balanced than one of 32 or 64.
+- **Unrandomised repeats.** Rerunning a deterministic sequence reproduces the same trials. Repeats that are meant to
+  measure the spread of the search need independent shifts or scrambles.
+- **Evenness on the wrong scale.** A design is even in the encoded cube. If a <Gloss name="learning-rate">learning
+  rate</Gloss> is encoded on a linear scale, an even design is even in the wrong coordinates (see
+  <NoteLink to="hyperparameter-search-spaces">search spaces</NoteLink>).
+- **Reporting the best score.** A quasi-random search selects among $N$ noisy scores like any other search, and its best
+  score is optimistic (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>).

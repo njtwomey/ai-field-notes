@@ -1,0 +1,263 @@
+---
+title: 'Sub-Gaussian random variables'
+kind: concept
+summary: 'A random variable is $\sigma$-sub-Gaussian if its centred moment generating function is at most $e^{\lambda^2\sigma^2/2}$, that of a Gaussian with variance $\sigma^2$; its tails then fall like $e^{-t^2/2\sigma^2}$. Bounded variables are sub-Gaussian (Hoeffding''s lemma).'
+tags: [probability, concentration, tail-bounds, learning-theory, worked-example]
+aliases: [sub-Gaussian, subgaussian, variance proxy, sub-exponential random variables, sub-exponential]
+requires: [moment-generating-function, chernoff-bounds]
+related: [hoeffdings-inequality, bernsteins-inequality, maximal-inequalities, massarts-finite-class-lemma, rademacher-complexity, gaussian-distribution, chi-squared-distribution]
+references: [vershynin2018, wainwright2019, boucheron2013, arbel2020]
+status: draft
+updated: 2026-10-12
+---
+
+import { ProxyTails } from './ProxyTails'
+
+<Definition>
+A real <NoteLink to="random-variable">random variable</NoteLink> $X$ with mean $\mu$ is **sub-Gaussian with variance
+proxy $\sigma^2$**, or $\sigma$-sub-Gaussian, if
+
+$$
+\expect\brack{e^{\lambda(X - \mu)}} \le e^{\lambda^2\sigma^2/2} \qquad \text{for every } \lambda \in \reals.
+$$
+
+The right side is the <Gloss name="mgf">moment-generating function</Gloss> of a $\Gauss(0, \sigma^2)$ variable. A
+$\sigma$-sub-Gaussian variable has Gaussian-type tails, $\prob(\abs{X - \mu} \ge t) \le 2e^{-t^2/(2\sigma^2)}$, and a
+variance of at most $\sigma^2$. Every variable taking values in an interval $[a, b]$ is sub-Gaussian with
+$\sigma = (b - a)/2$ <Cite id="vershynin2018" />.
+</Definition>
+
+## Intuition
+
+A Gaussian's tail probability $\prob(X - \mu \ge t)$ falls like $e^{-t^2/(2\sigma^2)}$: doubling the deviation
+multiplies the exponent by four. Many variables that are not Gaussian have tails at least this light: bounded variables,
+random signs, mixtures of Gaussians with a common variance and bounded means. The sub-Gaussian condition names this
+class by a single number, the variance proxy $\sigma^2$, and asks for the comparison on the moment-generating function
+rather than on the tail.
+
+The moment-generating function is chosen because it multiplies over independent variables, so the variance proxies of
+independent sub-Gaussian variables add, exactly as Gaussian variances do. The tail bound of
+a sum then follows. This is the mechanism behind <NoteLink to="hoeffdings-inequality">Hoeffding's
+inequality</NoteLink> and behind most concentration arguments in learning theory.
+
+The variance proxy is an upper bound on the variance, not the variance itself. It describes the worst behaviour of the
+tail, and for an asymmetric variable it can be much larger than the variance.
+
+## Definition and first consequences
+
+**The tail bound.** Let $X$ be $\sigma$-sub-Gaussian with mean $\mu$ and let $t > 0$. The
+<NoteLink to="chernoff-bounds">Chernoff bound</NoteLink> applies
+<NoteLink to="markov-and-chebyshev-inequalities">Markov's inequality</NoteLink> to $e^{\lambda(X - \mu)}$ for any
+$\lambda > 0$:
+
+$$
+\prob(X - \mu \ge t) \le e^{-\lambda t}\,\expect\brack{e^{\lambda(X - \mu)}} \le \exp\paren{-\lambda t + \frac{\lambda^2\sigma^2}{2}}.
+$$
+
+The exponent is a quadratic in $\lambda$ with its minimum at $\lambda = t/\sigma^2$. Substituting this value gives the
+exponent $-t^2/\sigma^2 + t^2/(2\sigma^2) = -t^2/(2\sigma^2)$, so
+
+$$
+\prob(X - \mu \ge t) \le e^{-t^2/(2\sigma^2)}.
+$$
+
+The definition holds for negative $\lambda$ too, so $-X$ is also $\sigma$-sub-Gaussian and the lower tail has the same
+bound. Adding the two tails gives $\prob(\abs{X - \mu} \ge t) \le 2e^{-t^2/(2\sigma^2)}$.
+
+**The variance is at most the proxy.** Both sides of the definition equal 1 at $\lambda = 0$. Expanding each to second
+order in $\lambda$ gives $1 + \lambda^2\var(X)/2 + o(\lambda^2)$ on the left, because the first-order term
+$\lambda\,\expect[X - \mu]$ is zero, and $1 + \lambda^2\sigma^2/2 + o(\lambda^2)$ on the right. Dividing the inequality
+by $\lambda^2$ and letting $\lambda \to 0$ gives $\var(X) \le \sigma^2$. The smallest valid $\sigma^2$ is the **optimal
+variance proxy**. A variable whose optimal proxy equals its variance is called strictly sub-Gaussian.
+
+**Equivalent conditions.** Up to constant factors in $\sigma$, the following say the same thing about a centred
+variable <Cite id="vershynin2018" />:
+
+- the moment-generating function condition above;
+- a tail condition, $\prob(\abs{X} \ge t) \le 2e^{-t^2/K_1^2}$ for all $t \ge 0$;
+- a moment condition, $(\expect\abs{X}^p)^{1/p} \le K_2\sqrt p$ for all $p \ge 1$;
+- an integrability condition, $\expect[e^{X^2/K_3^2}] \le 2$.
+
+Each $K_i$ is within a universal constant factor of $\sigma$. The moment condition says the $p$-th moments of a
+sub-Gaussian variable grow no faster than those of a Gaussian, like $\sqrt p$ after taking the $p$-th root.
+
+<Derivation title="From the tail to the moments">
+Let $X$ be centred with $\prob(\abs{X} \ge t) \le 2e^{-t^2/(2\sigma^2)}$, the tail bound of a $\sigma$-sub-Gaussian
+variable. For a non-negative variable, $\expect[Y] = \int_0^\infty \prob(Y \ge s)\,ds$. With $Y = \abs{X}^p$ and the
+substitution $s = t^p$, $ds = pt^{p-1}dt$:
+
+$$
+\expect\abs{X}^p = \int_0^\infty p t^{p-1}\prob(\abs{X} \ge t)\,dt \le 2p\int_0^\infty t^{p-1}e^{-t^2/(2\sigma^2)}\,dt.
+$$
+
+Substitute $u = t^2/(2\sigma^2)$, so $t = \sigma\sqrt{2u}$ and $dt = \sigma\,du/\sqrt{2u}$. The integral becomes
+
+$$
+2p\int_0^\infty (2\sigma^2u)^{(p-1)/2}e^{-u}\frac{\sigma}{\sqrt{2u}}\,du = 2p\,\sigma^p\,2^{p/2 - 1}\int_0^\infty u^{p/2 - 1}e^{-u}\,du = p\,2^{p/2}\sigma^p\,\Gamma(p/2).
+$$
+
+<NoteLink to="gamma-function">Stirling's formula</NoteLink> gives $\Gamma(p/2)^{1/p} \le C\sqrt p$ for a universal
+constant $C$, so $(\expect\abs{X}^p)^{1/p} \le C'\sigma\sqrt p$. At $p = 2$ the bound reads
+$\expect[X^2] \le 4\sigma^2$, four times looser than the direct argument above, which is the price of going through the
+tail.
+</Derivation>
+
+## Examples
+
+**Gaussian.** For $X \sim \Gauss(\mu, \sigma^2)$, $\expect[e^{\lambda(X - \mu)}] = e^{\lambda^2\sigma^2/2}$ exactly. The
+<NoteLink to="gaussian-distribution">Gaussian</NoteLink> is $\sigma$-sub-Gaussian, and strictly so.
+
+**Random signs.** A Rademacher variable $\varepsilon$ takes the values $-1$ and $+1$ with probability $\frac12$ each.
+Its moment-generating function is $\cosh\lambda = \sum_{k \ge 0}\lambda^{2k}/(2k)!$. Each term satisfies
+$(2k)! \ge 2^k k!$, because $(2k)!/k! = (k + 1)(k + 2)\cdots(2k)$ is a product of $k$ factors, each at least 2. So
+
+$$
+\cosh\lambda \le \sum_{k \ge 0}\frac{(\lambda^2/2)^k}{k!} = e^{\lambda^2/2},
+$$
+
+and $\varepsilon$ is 1-sub-Gaussian. Its variance is also 1, so it is strictly sub-Gaussian. Random signs are the noise
+of <NoteLink to="rademacher-complexity">Rademacher complexity</NoteLink>.
+
+**Bounded variables (Hoeffding's lemma).** If $a \le X \le b$, then
+$\expect[e^{\lambda(X - \mu)}] \le e^{\lambda^2(b - a)^2/8}$ for every $\lambda$. Comparing with the definition,
+$\sigma^2 = (b - a)^2/4$, so $X$ is $\frac{b - a}{2}$-sub-Gaussian. The proof bounds $e^{\lambda x}$ by the chord of the
+<NoteLink to="convex-sets-and-functions">convex function</NoteLink> on $[a, b]$ and expands the logarithm of the result
+to second order; it is given in the note on <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink>. The
+proxy $(b - a)^2/4$ is the largest variance any law on $[a, b]$ can have, attained by the two-point law with mass
+$\frac12$ at each end.
+
+**Bernoulli variables.** A <NoteLink to="bernoulli-distribution">Bernoulli</NoteLink>$(p)$ variable lies in $[0, 1]$,
+so Hoeffding's lemma gives the proxy $\frac14$. Its optimal proxy is
+
+$$
+\sigma^2_{\text{opt}} = \frac{1 - 2p}{2\ln\paren{(1 - p)/p}},
+$$
+
+which tends to $\frac14$ as $p \to \frac12$ <Cite id="arbel2020" />. For $p = 0.1$ the variance is $0.09$, the optimal
+proxy is $0.182$ and Hoeffding's proxy is $0.25$. The optimal proxy is twice the variance. A Bernoulli variable is
+strictly sub-Gaussian only at $p = \frac12$: the rare value $1$ makes the upper tail heavier than a Gaussian with the
+same variance would allow <Cite id="arbel2020" />.
+
+## Sums and tails
+
+**Proxies add under <NoteLink to="independence">independence</NoteLink>.** Let $X_1, \dots, X_m$ be independent, with
+$X_i$ $\sigma_i$-sub-Gaussian and mean $\mu_i$. The moment-generating function of a sum of independent variables is the
+product of theirs, so
+
+$$
+\expect\brack{e^{\lambda\sum_i(X_i - \mu_i)}} = \prod_{i=1}^m \expect\brack{e^{\lambda(X_i - \mu_i)}} \le \prod_{i=1}^m e^{\lambda^2\sigma_i^2/2} = e^{\lambda^2\sum_i\sigma_i^2/2}.
+$$
+
+The sum is sub-Gaussian with variance proxy $\sum_i\sigma_i^2$. Scaling by a constant $c$ multiplies the proxy by
+$c^2$, because $\lambda$ can absorb $c$. The mean $\bar X = \frac1m\sum_i X_i$ of $m$ variables with a common proxy
+$\sigma^2$ is therefore sub-Gaussian with proxy $\sigma^2/m$, and the tail bound gives
+
+$$
+\prob\paren{\abs{\bar X - \expect\bar X} \ge t} \le 2\exp\paren{-\frac{mt^2}{2\sigma^2}}.
+$$
+
+**Hoeffding's inequality is the bounded case.** For variables in $[a, b]$, $\sigma^2 = (b - a)^2/4$, and the bound
+becomes $2\exp(-2mt^2/(b - a)^2)$, which is Hoeffding's inequality. For losses in $[0, 1]$ this is the
+"concentrate" move of the <NoteLink to="statistical-learning-theory">recipe for a generalisation bound</NoteLink>: the
+empirical risk of one fixed hypothesis is within $\sqrt{\ln(2/\delta)/(2m)}$ of its true risk with probability at least
+$1 - \delta$.
+
+**Weighted sums of random signs.** For a fixed vector $\avec \in \reals^m$ and independent Rademacher signs
+$\varepsilon_i$, the sum $\sum_i a_i\varepsilon_i$ is $\norm{\avec}_2$-sub-Gaussian, since each term is
+$\abs{a_i}$-sub-Gaussian. This one fact, combined with a bound on the maximum of finitely many sub-Gaussian variables,
+proves <NoteLink to="massarts-finite-class-lemma">Massart's finite class lemma</NoteLink> for Rademacher complexity.
+
+**Maxima.** The maximum of $N$ variables, each $\sigma$-sub-Gaussian with mean zero, satisfies
+$\expect\max_{i \le N} X_i \le \sigma\sqrt{2\ln N}$, with no independence assumption. The maximum grows only like the
+square root of the logarithm of the number of variables. The proof and its refinements are in
+<NoteLink to="maximal-inequalities">maximal inequalities</NoteLink>.
+
+<ProxyTails />
+
+## Sub-exponential variables
+
+Some variables have tails heavier than a Gaussian's but still exponential. The square of a Gaussian is the standard
+example: $\prob(Z^2 \ge t) = \prob(\abs Z \ge \sqrt t)$ falls like $e^{-t/2}$, not like $e^{-t^2}$. Its
+moment-generating function is infinite for $\lambda \ge \frac12$, so no sub-Gaussian bound can hold for every $\lambda$.
+
+A variable $X$ with mean $\mu$ is **sub-exponential with parameters $(\nu, \alpha)$** if
+
+$$
+\expect\brack{e^{\lambda(X - \mu)}} \le e^{\lambda^2\nu^2/2} \qquad \text{for } \abs\lambda < 1/\alpha.
+$$
+
+The condition is the sub-Gaussian one, required only near $\lambda = 0$ <Cite id="wainwright2019" />. Every
+sub-Gaussian variable is sub-exponential with $\alpha = 0$.
+
+**The tail has two regimes.** For $t \ge 0$,
+
+$$
+\prob(X - \mu \ge t) \le \begin{cases} e^{-t^2/(2\nu^2)}, & 0 \le t \le \nu^2/\alpha, \\ e^{-t/(2\alpha)}, & t > \nu^2/\alpha. \end{cases}
+$$
+
+Small deviations look Gaussian with variance $\nu^2$; large deviations decay only exponentially
+<Cite id="wainwright2019" />. To derive this, apply the Chernoff bound with $0 \le \lambda < 1/\alpha$, which gives the
+exponent $-\lambda t + \lambda^2\nu^2/2$. Its unconstrained minimiser $\lambda = t/\nu^2$ is allowed when
+$t < \nu^2/\alpha$, and gives $-t^2/(2\nu^2)$ as before. For larger $t$ the exponent is still decreasing at the
+boundary, so take $\lambda \uparrow 1/\alpha$. The exponent becomes $-t/\alpha + \nu^2/(2\alpha^2)$, and
+$\nu^2/\alpha \le t$ makes the second term at most $t/(2\alpha)$, which leaves $-t/(2\alpha)$.
+
+**Example: the chi-squared variable.** Let $Z \sim \Gauss(0, 1)$. For $\lambda < \frac12$,
+$\expect[e^{\lambda(Z^2 - 1)}] = e^{-\lambda}/\sqrt{1 - 2\lambda}$, and this is at most $e^{2\lambda^2}$ for
+$\abs\lambda < \frac14$. So $Z^2$ is sub-exponential with $(\nu, \alpha) = (2, 4)$ <Cite id="wainwright2019" />. Sums
+behave as for sub-Gaussian variables: the parameters $\nu^2$ add and $\alpha$ takes the maximum. A
+<NoteLink to="chi-squared-distribution">chi-squared</NoteLink> variable with $m$ degrees of freedom is a sum of $m$
+independent copies, with parameters $(2\sqrt m, 4)$. Its first regime ends at $\nu^2/\alpha = m$, so for $t \in (0, 1)$,
+
+$$
+\prob\paren{\abs{\frac{1}{m}\chi^2_m - 1} \ge t} \le 2e^{-mt^2/8}.
+$$
+
+**Products of sub-Gaussians.** The square of a $\sigma$-sub-Gaussian variable, and the product of two sub-Gaussian
+variables, are sub-exponential <Cite id="vershynin2018" />. Squared errors of sub-Gaussian noise, empirical variances
+and <NoteLink to="dot-product">inner products</NoteLink> of random vectors are therefore sub-exponential. Their sums
+concentrate by <NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink>, which is the sub-exponential tail
+bound written with the variance.
+
+## Worked example
+
+**Random signs.** Let $T = \varepsilon_1 + \dots + \varepsilon_{100}$ be a sum of 100 independent random signs. Each
+sign is 1-sub-Gaussian, so $T$ is 10-sub-Gaussian ($\sigma^2 = 100$). The probability that $T$ reaches 30 is at most
+
+$$
+\prob(T \ge 30) \le e^{-30^2/(2 \cdot 100)} = e^{-4.5} = 0.011.
+$$
+
+The exact value is the probability of at least 65 heads in 100 fair flips, $0.0018$. The bound is six times too large,
+which is typical of exponential bounds at moderate deviations; the missing factor is polynomial in the deviation.
+Cantelli's one-sided Chebyshev bound, $\sigma^2/(\sigma^2 + t^2) = 100/1\,000 = 0.1$, is nine times weaker again.
+
+**A mean of losses.** A classifier is tested on $m = 100$ independent points, each with 0–1 loss in $[0, 1]$. The test
+error is the mean of the losses. Each loss has proxy $\frac14$, so the mean has proxy $1/(4m) = 0.0025$.
+
+1. **Bound at $t = 0.1$.** $\prob(\abs{\bar X - \mu} \ge 0.1) \le 2e^{-0.01/(2 \cdot 0.0025)} = 2e^{-2} = 0.27$.
+2. **With the optimal proxy.** If the true error rate is $p = 0.1$, the optimal proxy $0.182$ applies to each loss. The
+   bound becomes $2e^{-100 \cdot 0.01/(2 \cdot 0.182)} = 2e^{-2.75} = 0.13$.
+3. **The truth.** The exact probability that a Binomial$(100, 0.1)$ count is 0 or at least 20 is $0.0020$.
+4. **Sample size.** To guarantee $\abs{\bar X - \mu} < 0.05$ with probability $0.95$ for every error rate, Hoeffding's
+   proxy needs $m \ge \ln(2/0.05)/(2 \cdot 0.05^2) = 738$ test points.
+
+The sub-Gaussian bound with the worst-case proxy is valid for every error rate, but at $p = 0.1$ it is more than a
+hundred times too large. The variance $0.09$ is much smaller than the proxy, and no sub-Gaussian bound can use it,
+because the proxy must also control the upper tail of the rare value 1. A bound that uses the variance is
+<NoteLink to="bernsteins-inequality">Bernstein's inequality</NoteLink>; the exact binomial tail is used in
+<NoteLink to="test-set-bounds">test-set bounds</NoteLink>.
+
+## Pitfalls
+
+- **The proxy is not the variance.** A sub-Gaussian bound with $\sigma^2$ set to the sample variance is not a valid
+  bound for asymmetric variables. The optimal proxy of a Bernoulli$(0.01)$ variable is $0.11$, eleven times its variance
+  of $0.0099$.
+- **"Sub-Gaussian" without a constant says little.** Every bounded variable is sub-Gaussian. Bounds are only as good as
+  the proxy that is plugged in.
+- **Heavy tails are not covered.** Variables with polynomial tails, such as a Student-$t$ or a Pareto variable, have
+  infinite moment-generating functions for every $\lambda > 0$ and are neither sub-Gaussian nor sub-exponential.
+  Averages of such variables need median-of-means estimators or truncation.
+- **Independence is needed for adding proxies.** The maximal inequality needs no independence, but the sum rule does.
+  For dependent sequences, <NoteLink to="martingale">martingale</NoteLink> versions such as the
+  <NoteLink to="mcdiarmids-inequality">Azuma–Hoeffding inequality</NoteLink> replace it.
