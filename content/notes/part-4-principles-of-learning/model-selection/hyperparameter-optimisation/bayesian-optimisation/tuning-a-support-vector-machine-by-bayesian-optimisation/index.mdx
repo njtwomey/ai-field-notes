@@ -12,6 +12,7 @@ updated: 2026-10-13
 ---
 
 import { SvmBoWalkthrough } from './SvmBoWalkthrough'
+import { SvmSearchStudy } from './SvmSearchStudy'
 
 <Definition>
 An RBF <Gloss name="svm">support vector machine</Gloss> separates two iris species, versicolor and virginica
@@ -39,7 +40,7 @@ with the seed?
 - **Random search.** <NoteLink to="random-search">Random search</NoteLink> draws 30 configurations uniformly on the box
   and keeps the best <Cite id="bergstra2012" />.
 - **Score.** For each method and each budget $t \le 30$, the true error of the configuration it would return. Each
-  method runs with 20 seeds.
+  method runs with seeds 1 to 20.
 
 ## Solution
 
@@ -71,16 +72,19 @@ The mean over 20 seeds of the true error of the returned configuration, by budge
 
 | evaluations $t$ | expected improvement | random search | seeds where EI is better |
 | --- | --- | --- | --- |
-| 5 | 0.0555 | 0.0556 | 7 of 20 |
-| 10 | 0.0473 | 0.0504 | 15 of 20 |
-| 15 | 0.0448 | 0.0477 | 12 of 20 |
-| 20 | 0.0421 | 0.0466 | 16 of 20 |
-| 30 | 0.0415 | 0.0455 | 19 of 20 |
+| 5 | 0.0570 | 0.0678 | 11 of 20 |
+| 10 | 0.0466 | 0.0523 | 16 of 20 |
+| 15 | 0.0447 | 0.0507 | 18 of 20 |
+| 20 | 0.0430 | 0.0497 | 18 of 20 |
+| 30 | 0.0418 | 0.0479 | 19 of 20 |
 
-At 5 evaluations both methods have only their initial random designs, and they tie. After that expected improvement
-pulls ahead. Every one of its 20 runs reaches an error of $0.045$ or less within 30 evaluations, after a median of 12.5.
-Random search reaches $0.045$ in 12 of its 20 runs. At 30 evaluations expected improvement is within $0.0015$ of the
-best error on average, and random search within $0.0055$.
+At 5 evaluations both methods have only their initial designs. The Latin hypercube spreads its five points over the box
+and beats five uniform draws on average, $0.0570$ against $0.0678$, though the uniform draws do better in 9 of the 20
+seeds. After that expected improvement pulls further ahead. Every one of its 20 runs reaches an error of $0.045$ or less
+within 30 evaluations, after a median of 11.5. Random search reaches $0.045$ in 7 of its 20 runs. At 30 evaluations
+expected improvement is within $0.0018$ of the best error on average, and random search within $0.0079$.
+
+<SvmSearchStudy />
 
 The surface is easy for random search. About 5% of the box has error below $0.050$, within $0.01$ of the minimum (see
 <NoteLink to="random-search">random search</NoteLink>), so 30 random trials land there with probability
@@ -96,18 +100,19 @@ Gaussian process now fitting a noise variance, the means over 20 seeds become:
 
 | evaluations $t$ | EI, true error | EI, observed best | random, true error | random, observed best |
 | --- | --- | --- | --- | --- |
-| 10 | 0.0623 | 0.0312 | 0.0596 | 0.0403 |
-| 20 | 0.0572 | 0.0230 | 0.0559 | 0.0269 |
-| 30 | 0.0531 | 0.0158 | 0.0549 | 0.0222 |
+| 10 | 0.0550 | 0.0283 | 0.0593 | 0.0340 |
+| 20 | 0.0574 | 0.0223 | 0.0560 | 0.0277 |
+| 30 | 0.0532 | 0.0165 | 0.0555 | 0.0230 |
 
 Both methods return the configuration with the lowest observed score, which is now often a lucky draw. The reported
 best score falls with every evaluation while the true error of the returned configuration barely improves. At 30
-evaluations expected improvement reports $0.016$ for a configuration whose true error is $0.053$. The optimism is larger
+evaluations expected improvement reports $0.0165$ for a configuration whose true error is $0.0532$. Set the noise to
+$0.02$ in the figure above to see the two curves part. The optimism is larger
 for expected improvement than for random search, because it re-evaluates near low scores, including scores that were
 low by chance.
 
 Recommending instead the configuration with the lowest posterior mean, rather than the lowest observed score, gives a
-true error of $0.051$ at 30 evaluations, averaged over the 20 seeds, with a posterior mean there of $0.042$. The
+true error of $0.052$ at 30 evaluations, averaged over the 20 seeds, with a posterior mean there of $0.042$. The
 posterior mean averages neighbouring evaluations and shrinks lucky scores, so it is both the better choice and the less
 optimistic estimate. It is still optimistic.
 
@@ -117,7 +122,8 @@ optimistic estimate. It is still optimistic.
 
 The figure runs one seed at a time. Step through seed 1 to watch the length-scale settle and the evaluations collect
 along the valley, then try seeds 2 to 4. Set the noise to $0.02$ to see the observed incumbent (dashed) fall away from
-its true error.
+its true error. Its seeds draw from random streams of their own, so its seed 1 is a different run from seed 1 of the
+twenty-seed figure.
 
 ## What it illustrates
 
@@ -130,8 +136,8 @@ its true error.
 - **Refitting matters.** The length-scale fitted to five points is far too short. Refitting it at every step corrects it
   within one evaluation here, but an overconfident length-scale can stop expected improvement from exploring at all
   <Cite id="bull2011" />.
-- **Compare over seeds.** A single run can favour either method: random search beat expected improvement at 15
-  evaluations in 8 of 20 seeds. Comparisons need several seeds and equal budgets <Cite id="dodge2019" /> (see
+- **Compare over seeds.** A single run can favour either method: random search beat expected improvement at 10
+  evaluations in 4 of 20 seeds. Comparisons need several seeds and equal budgets <Cite id="dodge2019" /> (see
   <NoteLink to="tuning-budgets-in-comparisons">tuning budgets in comparisons</NoteLink>).
 - **Selection makes scores optimistic.** The best observed score of any search is biased low, and an adaptive search
   more so (see <NoteLink to="overfitting-in-model-selection">overfitting in model selection</NoteLink>). The error of

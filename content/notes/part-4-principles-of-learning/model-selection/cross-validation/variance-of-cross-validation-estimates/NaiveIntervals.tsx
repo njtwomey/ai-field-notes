@@ -13,31 +13,17 @@ import {
   useComputed,
   useFigureState,
 } from 'aifn-render'
-import { child, normals, stream, type Stream } from 'aifn-compute/foundation/random'
-import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
-import { dataset } from 'aifn-compute/learning/estimators'
+import { child, stream } from 'aifn-compute/foundation/random'
+import { type Tensor } from 'aifn-compute/foundation/tensor'
 import { meanSquaredError } from 'aifn-compute/learning/metrics'
 import { crossValidate, kFold, type Fittable } from 'aifn-compute/learning/validate'
 import { standardDeviation } from 'aifn-compute/probability/stats'
 import { linearRegression, type LinearRegressionModel } from 'aifn-methods/learning/linear'
 import { kNearestNeighboursRegression, type NeighboursRegressor } from 'aifn-methods/learning/neighbours'
+import { draw, LEARNERS, ROOT, TEST } from './problem'
 
-const TEST = 5000
 /** The two-sided 90% normal quantile. */
 const Z90 = 1.645
-const LEARNERS = ['least squares', '10-nearest neighbours'] as const
-
-/** n rows of p standard-normal inputs with y = x₁ + … + x₅ + unit noise. */
-function draw(s: Stream, rows: number, p: number) {
-  const x = Float64Array.from(toFlat(normals(child(s, 'x'), [rows, p])))
-  const e = toFlat(normals(child(s, 'e'), [rows]))
-  const y = Float64Array.from({ length: rows }, (_, i) => {
-    let v = e[i]
-    for (let j = 0; j < Math.min(5, p); j++) v += x[i * p + j]
-    return v
-  })
-  return dataset(fromData(x, [rows, p]), fromData(y))
-}
 
 /** Naive 90% intervals from the fold errors of K-fold cross-validation, against the errors they should cover. */
 export function NaiveIntervals() {
@@ -51,7 +37,7 @@ export function NaiveIntervals() {
   const { learner, n, p, folds, replicates } = state
   const computed = useComputed(
     () => {
-      const root = stream('naive-cv-intervals')
+      const root = stream(ROOT)
       const test = draw(child(root, 'test'), TEST, p)
       const est = (
         learner === 'least squares' ? linearRegression({ intercept: false }) : kNearestNeighboursRegression({ k: 10 })

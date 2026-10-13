@@ -11,7 +11,9 @@ status: draft
 updated: 2026-10-13
 ---
 
+import { CostAwareRun } from './CostAwareRun'
 import { ForresterFidelities } from './ForresterFidelities'
+import { TwoFidelityPosterior } from './TwoFidelityPosterior'
 
 <Definition>
 **Multi-fidelity Bayesian optimisation** extends <NoteLink to="bayesian-optimisation">Bayesian optimisation</NoteLink>
@@ -147,8 +149,6 @@ models in <NoteLink to="learning-curve-extrapolation">learning-curve extrapolati
 
 <ForresterFidelities />
 
-{/* figure pending engine (multiFidelityGp and multiFidelityBayesianOptimisationSteps, see logs/ms-multi-fidelity.md): two-fidelity autoregressive GP posterior on Forrester, and a cost-aware run choosing x and the fidelity */}
-
 ## Worked example
 
 The Forrester function $f(x) = (6x - 2)^2\sin(12x - 4)$ on $[0, 1]$ plays the full-fidelity validation loss, and its
@@ -175,6 +175,37 @@ standard cheap version $f_{\text{lo}}(x) = 0.5f(x) + 10(x - 0.5) + 5$ plays a
 The example is idealised: the discrepancy really is linear here, and a Gaussian process with a smooth kernel only
 approximates such structure from data. The lesson carries over. The cheap fidelity is useful through a learned
 relation, not as a stand-in for the target.
+
+**The same relation learned by a Gaussian process.** The figure below fits the autoregressive model to 11 cheap
+evaluations evenly spaced on $[0, 1]$ and a few expensive ones, with the kernels and $\rho$ fitted by marginal
+likelihood.
+
+1. **Three expensive evaluations**, at $x = 0, 0.5, 1$ as in step 3, are too few. The fit returns $\rho = 0.83$, not 2.
+   A kernel with free hyperparameters can explain three points by the discrepancy as easily as by the scale, so the
+   data do not pin $\rho$ down. The model's mean is lowest at $x = 0.485$, where $f = 0.80$.
+2. **Four expensive evaluations**, at $x = 0, \tfrac13, \tfrac23, 1$, give $\rho = 1.91$. The model's mean is within
+   $0.15$ of $f$ in root-mean-square over $[0, 1]$ and is lowest at $x = 0.755$, where $f = -6.018$.
+3. **The expensive evaluations alone.** A Gaussian process fitted to the same four expensive evaluations, without the
+   cheap ones, has a root-mean-square error of $1.99$. Its mean is lowest at $x = 0.665$, where $f = -2.945$. The cheap
+   evaluations located the narrow minimum; the four expensive ones calibrated the relation.
+
+<TwoFidelityPosterior />
+
+**A cost-aware run.** The second figure lets the acquisition choose each evaluation's point and fidelity, with a full
+evaluation costing 10 and a cheap one 1. The run starts from 8 cheap and 4 full evaluations, a cost of 48, whose best
+full-fidelity loss is $-5.148$. The kernels are fixed and $\rho$ is estimated from the start; it is $1.89$ after the
+initial design.
+
+1. **Max-value entropy search per unit cost** spends its first nine steps on cheap evaluations, eight of them between
+   $x = 0.75$ and $0.77$. Its tenth step pays for one full evaluation at $x = 0.76$, which returns $-6.017$ at a total
+   cost of 67. The minimum of $f$ is $-6.021$.
+2. **MF-GP-UCB** chooses the full fidelity in 9 of its 12 steps. Near the minimum the cheap fidelity's uncertainty
+   falls below its threshold $\gamma^{(m)}$, and the rule then moves to the full fidelity. It spends 141 and reaches
+   $-5.870$.
+3. **Expected improvement per unit cost** chooses the cheap fidelity in all 12 steps, since a cheap evaluation costs a
+   tenth as much. It never confirms anything at full fidelity, so its incumbent stays at $-5.148$.
+
+<CostAwareRun />
 
 ## Cost
 

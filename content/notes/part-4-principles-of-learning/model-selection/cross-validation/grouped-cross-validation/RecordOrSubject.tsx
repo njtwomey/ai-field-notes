@@ -13,7 +13,7 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { child, stream, type Stream } from 'aifn-compute/foundation/random'
-import { fromData, mean, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
+import { fromData, mean, toFlat, toRows } from 'aifn-compute/foundation/tensor'
 import { dataset } from 'aifn-compute/learning/estimators'
 import { accuracy } from 'aifn-compute/learning/metrics'
 import { crossValidate, groupKFold, kFold } from 'aifn-compute/learning/validate'
@@ -36,12 +36,12 @@ const SEPARATION = 1.5
  */
 function entityData(s: Stream, entities: number, records: number, spread: number) {
   const centres = gaussians(child(s, 'centres'), { n: entities, separation: SEPARATION })
-  const centre = toRows(centres.x as Tensor) as number[][]
-  const label = Array.from(toFlat(centres.y as Tensor))
+  const centre = toRows(centres.x) as number[][]
+  const label = Array.from(toFlat(centres.y))
   const rows = blobs(child(s, 'rows'), { centers: centre, n: Array(entities).fill(records), sd: spread })
-  const group = Array.from(toFlat(rows.y as Tensor))
+  const group = Array.from(toFlat(rows.y))
   const y = fromData(Float64Array.from(group.map((e) => label[e])))
-  return { centre, label, group, data: dataset(rows.x as Tensor, y, { groups: group }) }
+  return { centre, label, group, data: dataset(rows.x, y, { groups: group }) }
 }
 
 /**
@@ -75,8 +75,8 @@ export function RecordOrSubject() {
         })
         const fitted = model.fit(d.data)
         const again = blobs(child(s, 'new-records'), { centers: d.centre, n: Array(entities).fill(20), sd: spread })
-        const againLabels = Array.from(toFlat(again.y as Tensor)).map((e) => d.label[e])
-        values[3].push(accuracy(againLabels, fitted.decide(again.x as Tensor)))
+        const againLabels = Array.from(toFlat(again.y)).map((e) => d.label[e])
+        values[3].push(accuracy(againLabels, fitted.decide(again.x)))
         const fresh = entityData(child(s, 'new-entities'), 200, Math.max(records, 1), spread)
         values[4].push(accuracy(fresh.data.y, fitted.decide(fresh.data.x)))
       }

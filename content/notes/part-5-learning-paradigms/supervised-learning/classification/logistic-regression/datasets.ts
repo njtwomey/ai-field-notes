@@ -111,11 +111,12 @@ function solverDataset(name: SolverDatasetName): Dataset {
     case 'correlated':
       return correlated('logistic-regression/solver/correlated', 0.95, 0.25)
     case 'noisy labels':
+      // withLabelNoise keeps the labels but is typed with the unlabelled Dataset (engine v0.2.9).
       return withLabelNoise(
         stream('logistic-regression/solver/noisy/flips'),
         diagonalBlobs('logistic-regression/solver/noisy', 2.5),
         { rate: 0.15 },
-      )
+      ) as Dataset
     case 'separable':
       return diagonalBlobs('logistic-regression/solver/separable', 6)
   }

@@ -7,7 +7,7 @@ import { child, type Stream } from 'aifn-compute/foundation/random'
 import { fromData, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
 import { pipeline } from 'aifn-compute/learning/compose'
 import { dataset } from 'aifn-compute/learning/estimators'
-import { meanSquaredError, recall } from 'aifn-compute/learning/metrics'
+import { meanSquaredError } from 'aifn-compute/learning/metrics'
 import { pspline } from 'aifn-compute/numerics/interpolate'
 import { linearRegression } from 'aifn-methods/learning/linear'
 import { polynomialFeatures } from 'aifn-methods/learning/preprocessing'
@@ -63,15 +63,4 @@ export function psplineLearner(lambda: number, segments = 15) {
       return { fit, decide: (x: Tensor) => fit.evaluate(column(x)) }
     },
   }
-}
-
-/** Recall of class 1, with class 1 fixed as the positive class (NaN for a fold with no positives). */
-export const recallOfPositives = Object.assign(
-  (y: Tensor, p: Tensor) => recall(y as never, p as never, { positive: 1, labels: [0, 1] }),
-  { info: recall.info },
-)
-
-/** A generator's dataset, whose targets are optional in its type, as the supervised dataset the learners take. */
-export function supervised(d: { x: unknown; y?: unknown }) {
-  return dataset(d.x as Tensor, d.y as Tensor)
 }

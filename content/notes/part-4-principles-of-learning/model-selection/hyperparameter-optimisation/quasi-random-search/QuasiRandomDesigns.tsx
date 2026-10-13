@@ -14,62 +14,56 @@ import {
 } from 'aifn-render'
 import { child, stream, uniform } from 'aifn-compute/foundation/random'
 import { decode } from 'aifn-compute/foundation/space'
-import { run } from 'aifn-compute/foundation/trace'
-import { halton, sobol } from 'aifn-compute/numerics/quadrature'
 import { toFlat } from 'aifn-compute/foundation/tensor'
-import { bayesianOptimisationSteps } from 'aifn-methods/optimisation/bayesian'
+import {
+  halton,
+  latinHypercube,
+  maxGap,
+  randomShift,
+  scrambledHalton,
+  scrambledSobol,
+  sobol,
+  starDiscrepancy,
+} from 'aifn-compute/numerics/quadrature'
 import { bestSoFar, SVM_BEST, SVM_HI, SVM_LO, SVM_SPACE, svmError, svmRaster } from '../_shared/svmSurface'
 
 const MAX_TRIALS = 256
 const RUNS = 8
 
-type Design = 'random' | 'latin' | 'shifted' | 'sobol' | 'halton'
+type Design = 'random' | 'latin' | 'shifted' | 'scrambled-sobol' | 'scrambled-halton' | 'sobol' | 'halton'
 type Point = { logC: number; logGamma: number }
 
-/** Unit-cube points, an n × 2 row-major array, decoded into the SVM space. */
-function decodeAll(cube: ArrayLike<number>, n: number): Point[] {
-  return Array.from({ length: n }, (_, i) => decode(SVM_SPACE, [cube[2 * i], cube[2 * i + 1]]))
-}
-
-/**
- * An initial design of the engine's Bayesian-optimisation loop, which places `n` points in the box by a Latin
- * hypercube or by randomly shifted Sobol points: the state before any step holds them.
- */
-function loopDesign(design: 'lhs' | 'sobol', n: number, seed: string): Point[] {
-  const alg = bayesianOptimisationSteps(
-    (x) => svmError(toFlat(x)[0], toFlat(x)[1]),
-    { lo: [...SVM_LO], hi: [...SVM_HI] },
-    {
-      init: n,
-      design,
-      refit: false,
-      grid: 2,
-    },
-  )
-  const x = run(alg, undefined, 0, { stream: stream(seed) }).x.data
-  return Array.from({ length: n }, (_, i) => ({ logC: x[2 * i], logGamma: x[2 * i + 1] }))
-}
-
-function makeDesign(design: Design, n: number, seed: number): Point[] {
+/** The design's N points in the unit square, as [u1, u2] rows. */
+function unitDesign(design: Design, n: number, seed: number): number[][] {
   const key = `quasi-random-designs/${design}/${seed}`
+  const rows = (flat: ArrayLike<number>) => Array.from({ length: n }, (_, i) => [flat[2 * i], flat[2 * i + 1]])
   switch (design) {
     case 'random': {
       const s = stream(key)
       return Array.from({ length: n }, (_, i) => {
         const c = child(s, 'trial', i)
-        return decode(SVM_SPACE, [uniform(c), uniform(c)])
+        return [uniform(c), uniform(c)]
       })
     }
     case 'latin':
-      return loopDesign('lhs', n, key)
+      return rows(toFlat(latinHypercube(stream(key), n, 2)))
     case 'shifted':
-      return loopDesign('sobol', n, key)
+      return rows(toFlat(randomShift(stream(key), sobol(n, 2))))
+    case 'scrambled-sobol':
+      return rows(toFlat(scrambledSobol(stream(key), n, 2)))
+    case 'scrambled-halton':
+      return rows(toFlat(scrambledHalton(stream(key), n, 2)))
     case 'sobol':
-      return decodeAll(sobol(n, 2).data, n)
+      return rows(toFlat(sobol(n, 2)))
     case 'halton':
-      return decodeAll(halton(n, 2, { skip: 1 }).data, n)
+      return rows(toFlat(halton(n, 2, { skip: 1 })))
   }
 }
+
+/** Unit-square points decoded into the SVM space. */
+const decodeAll = (cube: number[][]): Point[] => cube.map((u) => decode(SVM_SPACE, u))
+
+const makeDesign = (design: Design, n: number, seed: number) => decodeAll(unitDesign(design, n, seed))
 
 const errorsOf = (points: Point[]) => points.map((p) => svmError(p.logC, p.logGamma))
 
@@ -84,6 +78,8 @@ export function QuasiRandomDesigns() {
         { value: 'random', label: 'independent uniform' },
         { value: 'latin', label: 'Latin hypercube' },
         { value: 'shifted', label: 'Sobol, randomly shifted' },
+        { value: 'scrambled-sobol', label: 'Sobol, scrambled' },
+        { value: 'scrambled-halton', label: 'Halton, scrambled' },
         { value: 'sobol', label: 'Sobol' },
         { value: 'halton', label: 'Halton (origin skipped)' },
       ],
@@ -95,7 +91,15 @@ export function QuasiRandomDesigns() {
   })
   const { design, trials, seed } = state
   const raster = useMemo(() => svmRaster(81), [])
-  const points = useMemo(() => makeDesign(design, trials, seed), [design, trials, seed])
+  const chosen = useMemo(() => {
+    const cube = unitDesign(design, trials, seed)
+    return {
+      points: decodeAll(cube),
+      discrepancy: starDiscrepancy(cube),
+      gap: maxGap(cube.map((u) => u[0])),
+    }
+  }, [design, trials, seed])
+  const points = chosen.points
 
   const curves = useMemo(() => {
     const n = Array.from({ length: MAX_TRIALS }, (_, t) => t + 1)
@@ -121,10 +125,13 @@ export function QuasiRandomDesigns() {
     <Figure
       title="Space-filling designs on an SVM's cross-validated error"
       state={state}
-      caption="Left: N trials of the chosen design over the tabulated cross-validated error of an RBF support vector machine (colour clipped at 0.15), with each trial's log C repeated along the bottom edge to show the projection onto one axis. Independent draws clump and leave gaps; a Latin hypercube puts one trial in each of N slices of each axis; Sobol and Halton points fill the largest remaining gaps as N grows. Right: the best error within the first N trials. Thin orange lines are eight independent random-search runs and the thick orange line their average; blue is the Sobol sequence and green the Halton sequence, which are fixed. The dashed line is the lowest error in the table."
+      caption="Left: N trials of the chosen design over the tabulated cross-validated error of an RBF support vector machine (colour clipped at 0.15), with each trial's log C repeated along the bottom edge to show the projection onto one axis. Independent draws clump and leave gaps; a Latin hypercube puts one trial in each of N slices of each axis; Sobol and Halton points fill the largest remaining gaps as N grows, and a random shift or scramble keeps that evenness while making repeats independent. The readouts give the design's exact star discrepancy D* in the unit square, the area 4D* above which every axis-aligned box must hold a trial, and the largest gap left on the log C axis as a share of its range. Right: the best error within the first N trials. Thin orange lines are eight independent random-search runs and the thick orange line their average; blue is the Sobol sequence and green the Halton sequence, which are fixed. The dashed line is the lowest error in the table."
       readouts={
         <>
           <Readout label={`best error, this design (N = ${trials})`} value={formatNumber(best)} />
+          <Readout label="star discrepancy D*" value={formatNumber(chosen.discrepancy)} />
+          <Readout label="empty-box bound 4D*" value={formatNumber(Math.min(1, 4 * chosen.discrepancy))} />
+          <Readout label="largest gap in log C (share of range)" value={formatNumber(chosen.gap)} />
           <Readout label="random search, average best" value={formatNumber(curves.average[trials - 1])} />
           <Readout label="Sobol, best" value={formatNumber(curves.sobol[trials - 1])} />
           <Readout label="Halton, best" value={formatNumber(curves.halton[trials - 1])} />

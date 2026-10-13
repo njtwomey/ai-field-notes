@@ -13,6 +13,8 @@ import {
 } from 'aifn-render'
 import { child, stream } from 'aifn-compute/foundation/random'
 import { stratifiedKFold } from 'aifn-compute/learning/validate'
+import { standardDeviation } from 'aifn-compute/probability/stats'
+import { expectedGaussianMaximum } from 'aifn-methods/theory/adaptive-holdout'
 import { featurePairs, pairSearch, trueAccuracy } from '../_shared/featurePairs'
 
 const TEST_ROWS = 4000
@@ -64,11 +66,18 @@ export function BestOfJScores() {
       js.map((_, j) => runs.reduce((a, r) => a + pick(r)[j], 0) / runs.length)
     // The average single candidate: the mean of all scores over candidates and replicates.
     const all = runs.flatMap((r) => r.scores)
+    const typical = all.reduce((a, b) => a + b, 0) / all.length
+    // σ̂: the spread of a single candidate's score over candidates and replicates, the noise of one estimate when
+    // every candidate has the same true accuracy.
+    const sigma = all.length > 1 ? standardDeviation(all, { sample: true }) : NaN
     return {
       js,
       best: average((r) => r.best),
       truth: average((r) => r.truthOfWinner),
-      typical: all.reduce((a, b) => a + b, 0) / all.length,
+      typical,
+      sigma,
+      gaussian: js.map((J) => typical + sigma * expectedGaussianMaximum(J)),
+      bound: js.map((J) => typical + sigma * Math.sqrt(2 * Math.log(J))),
     }
   }, [runs, candidates])
   const last = candidates - 1
@@ -78,13 +87,19 @@ export function BestOfJScores() {
     <Figure
       title="The best of J cross-validation scores"
       state={state}
-      caption="J candidate classifiers, each a 5-nearest-neighbour rule on its own pair of features, scored by stratified 5-fold cross-validation on n rows. Only pair 0 can carry signal; at separation 0 the labels are pure noise and every candidate's true accuracy is 0.5. Thin lines: the best cross-validation accuracy among the first J candidates, one line per replicate data set. Thick orange: their average. The line in the text colour: the average true accuracy of the candidate that won, measured on 4,000 fresh rows. The gap between the two is the optimism of the reported score. It grows with J and shrinks as n grows. Raise the separation to give pair 0 real signal: the winner is then usually pair 0, and the gap narrows but does not close."
+      caption="J candidate classifiers, each a 5-nearest-neighbour rule on its own pair of features, scored by stratified 5-fold cross-validation on n rows. Only pair 0 can carry signal; at separation 0 the labels are pure noise and every candidate's true accuracy is 0.5. Thin lines: the best cross-validation accuracy among the first J candidates, one line per replicate data set. Thick orange: their average. The line in the text colour: the average true accuracy of the candidate that won, measured on 4,000 fresh rows. The gap between the two is the optimism of the reported score. It grows with J and shrinks as n grows. Dashed: the average single score plus σ̂√(2 ln J), the maximal-inequality bound, and plus σ̂ times the expected maximum of J independent standard normals, where σ̂ is the standard deviation of one candidate's score over candidates and data sets. At separation 0 the average best score follows the Gaussian curve closely and stays below the bound. Raise the separation to give pair 0 real signal: the winner is then usually pair 0, the overlays no longer apply, and the gap narrows but does not close."
       readouts={
         <>
           <Readout label="average single candidate, CV" value={formatNumber(view.typical)} />
           <Readout label={`best of ${candidates}, CV`} value={formatNumber(view.best[last])} />
           <Readout label="winner's true accuracy" value={formatNumber(view.truth[last])} />
           <Readout label="optimism" value={formatNumber(view.best[last] - view.truth[last])} />
+          <Readout label="σ̂, spread of one score" value={formatNumber(view.sigma)} />
+          <Readout
+            label={`equal independent candidates, σ̂ · E max of ${candidates} normals`}
+            value={formatNumber(view.gaussian[last] - view.typical)}
+          />
+          <Readout label={`bound σ̂√(2 ln ${candidates})`} value={formatNumber(view.bound[last] - view.typical)} />
         </>
       }
     >
@@ -95,6 +110,8 @@ export function BestOfJScores() {
         <Curve name="best CV accuracy, average" x={view.js} y={view.best} slot={1} stale={computed.stale} />
         <Curve name="winner's true accuracy, average" x={view.js} y={view.truth} emphasis stale={computed.stale} />
         <Curve name="chance" x={[1, candidates]} y={[0.5, 0.5]} muted dashed />
+        <Curve name="mean + σ̂√(2 ln J), the maximal-inequality bound" x={view.js} y={view.bound} slot={0} dashed />
+        <Curve name="mean + σ̂ · E max of J normals" x={view.js} y={view.gaussian} slot={2} dashed />
       </Plot>
     </Figure>
   )

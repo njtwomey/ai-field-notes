@@ -18,7 +18,6 @@ import { crossValidate, kFold, repeated, shuffleSplit, type Splitter } from 'aif
 import { standardDeviation } from 'aifn-compute/probability/stats'
 import { gaussians } from 'aifn-methods/data/synthetic'
 import { kNearestNeighbours } from 'aifn-methods/learning/neighbours'
-import { supervised } from '../_shared/problems'
 
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(3))) : '—')
 const FITS = 500
@@ -50,12 +49,11 @@ export function RepeatAverages() {
     seed: int(1, { ge: 1, le: 999, label: 'dataset' }),
   })
   const { scheme, n, k, draws, seed } = state
-  const raw = useMemo(() => gaussians(stream(`repeat/${seed}`), { n, separation: SEPARATION }), [n, seed])
-  const data = useMemo(() => supervised(raw), [raw])
+  const data = useMemo(() => gaussians(stream(`repeat/${seed}`), { n, separation: SEPARATION }), [n, seed])
   const run = useComputed(
     () => {
       const model = kNearestNeighbours({ k })
-      const fresh = supervised(gaussians(stream('repeat/fresh'), { n: 4000, separation: SEPARATION }))
+      const fresh = gaussians(stream('repeat/fresh'), { n: 4000, separation: SEPARATION })
       const trueError = errorRate(fresh.y, model.fit(data).decide(fresh.x))
       const lines: number[][] = []
       const all: number[] = []
@@ -72,13 +70,13 @@ export function RepeatAverages() {
       return {
         lines,
         trueError,
-        bayes: (raw.meta?.truth as { bayesError?: number } | undefined)?.bayesError ?? NaN,
+        bayes: (data.meta?.truth as { bayesError?: number } | undefined)?.bayesError ?? NaN,
         limit: mean(fromData(Float64Array.from(all))),
         sdFirst: draws > 1 ? standardDeviation(first, { sample: true }) : NaN,
         sdLast: draws > 1 ? standardDeviation(last, { sample: true }) : NaN,
       }
     },
-    [data, raw, scheme, k, draws],
+    [data, scheme, k, draws],
     { mode: 'release' },
   )
   const v = run.value

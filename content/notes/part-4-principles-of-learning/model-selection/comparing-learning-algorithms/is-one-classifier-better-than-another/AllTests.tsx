@@ -13,7 +13,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { child, stream } from 'aifn-compute/foundation/random'
-import { replicate, TESTS } from '../_shared/equalLearners'
+import { typeIErrorReplicate } from 'aifn-methods/theory/algorithm-comparison'
+import { TESTS } from '../_shared/equalLearners'
 
 const ALPHA = 0.05
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(3))) : '—')
@@ -27,7 +28,7 @@ export function AllTests() {
   })
   const { n, handicap, seed } = state
   const computed = useComputed(
-    () => replicate(child(stream('comparing/type-i'), seed), n, handicap, 10),
+    () => typeIErrorReplicate(child(stream('comparing/type-i'), seed), { n, handicap, repeats: 10 }),
     [n, handicap, seed],
     { mode: 'release' },
   )
@@ -41,7 +42,7 @@ export function AllTests() {
       ps,
     }
   }, [result])
-  const x = useAxis({ categories: TESTS.map((t) => t.label) })
+  const x = useAxis({ categories: TESTS.map((t) => t.axis) })
   const y = useAxis({ label: 'p-value (log scale)', log: true, range: [1e-6, 1] })
   return (
     <Figure

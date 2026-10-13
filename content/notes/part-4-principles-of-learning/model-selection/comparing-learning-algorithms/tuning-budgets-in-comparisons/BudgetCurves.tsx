@@ -19,6 +19,7 @@ import { rbf } from 'aifn-compute/learning/kernels'
 import { errorRate } from 'aifn-compute/learning/metrics'
 import { crossValidate, kFold, type Fittable } from 'aifn-compute/learning/validate'
 import { quantile } from 'aifn-compute/probability/stats'
+import { expectedMaxOfDraws } from 'aifn-compute/probability/tests'
 import { supportVectorMachine } from 'aifn-methods/learning/kernel-methods'
 import { kNearestNeighbours } from 'aifn-methods/learning/neighbours'
 
@@ -110,7 +111,24 @@ export function BudgetCurves() {
         hi: rows.map((r) => r.hi),
       }
     }
-    return { budgets, knn: curve(knn, 'knn'), svm: curve(svm, 'svm') }
+    // Dodge et al.'s expected best validation score of b random trials, for a loss: the expected maximum of the
+    // negated cross-validation errors, negated back.
+    const expectedBest = (pool: Trial[]) =>
+      Array.from(
+        toFlat(
+          expectedMaxOfDraws(
+            pool.map((t) => -t.cv),
+            budgets,
+          ),
+        ),
+        (v) => -v,
+      )
+    return {
+      budgets,
+      knn: curve(knn, 'knn'),
+      svm: curve(svm, 'svm'),
+      dodge: { knn: expectedBest(knn), svm: expectedBest(svm) },
+    }
   }, [knn, svm])
   const x = useAxis({ label: 'random-search trials b', integer: true, range: [1, POOL] })
   const y = useAxis({ label: 'test error of the selected configuration' })
@@ -120,7 +138,7 @@ export function BudgetCurves() {
     <Figure
       title="The winner depends on the tuning budget"
       state={state}
-      caption={`Two learners tuned by random search on the same n training rows (five standard-normal inputs; the class depends on the radius in the first two). k-nearest neighbours tunes k on a log scale from 1 to 100; the RBF support vector machine tunes C and the kernel lengthscale on log scales. Each learner has a pool of ${POOL} random configurations, scored once by 5-fold cross-validation and once on ${FRESH} fresh rows. A search with b trials draws b configurations from the pool and keeps the one with the lowest cross-validation error; the curve is the mean of its fresh-data error over ${SEARCHES} searches, the band its 10th to 90th percentiles. Drag the two vertical lines to give each learner its budget.`}
+      caption={`Two learners tuned by random search on the same n training rows (five standard-normal inputs; the class depends on the radius in the first two). k-nearest neighbours tunes k on a log scale from 1 to 100; the RBF support vector machine tunes C and the kernel lengthscale on log scales. Each learner has a pool of ${POOL} random configurations, scored once by 5-fold cross-validation and once on ${FRESH} fresh rows. A search with b trials draws b configurations from the pool and keeps the one with the lowest cross-validation error; the curve is the mean of its fresh-data error over ${SEARCHES} searches, the band its 10th to 90th percentiles. The dashed curves are Dodge and colleagues' expected best cross-validation error of b trials, computed from the same pools by the formula above. Drag the two vertical lines to give each learner its budget.`}
       readouts={{
         'expected test error at the chosen budgets': (
           <>
@@ -129,6 +147,12 @@ export function BudgetCurves() {
           </>
         ),
         verdict: <Readout label="looks better" value={atKnn < atSvm ? 'k-NN' : 'SVM'} />,
+        'expected best CV error at 30 trials': (
+          <>
+            <Readout label="k-NN" value={fmt(view.dodge.knn[POOL - 1])} />
+            <Readout label="SVM" value={fmt(view.dodge.svm[POOL - 1])} />
+          </>
+        ),
         'equal budgets': (
           <>
             <Readout label="k-NN, 30 trials" value={fmt(view.knn.mean[POOL - 1])} />
@@ -158,6 +182,22 @@ export function BudgetCurves() {
         />
         <Curve name="k-NN" x={view.budgets} y={view.knn.mean} slot={0} stale={computed.stale} />
         <Curve name="SVM" x={view.budgets} y={view.svm.mean} slot={1} stale={computed.stale} />
+        <Curve
+          name="k-NN, expected best CV error"
+          x={view.budgets}
+          y={view.dodge.knn}
+          slot={0}
+          dashed
+          stale={computed.stale}
+        />
+        <Curve
+          name="SVM, expected best CV error"
+          x={view.budgets}
+          y={view.dodge.svm}
+          slot={1}
+          dashed
+          stale={computed.stale}
+        />
         <Handle
           kind="x"
           at={knnBudget}

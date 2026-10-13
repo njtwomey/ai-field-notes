@@ -15,13 +15,12 @@ import {
 } from 'aifn-render'
 import { child, stream } from 'aifn-compute/foundation/random'
 import { toFlat } from 'aifn-compute/foundation/tensor'
-import { errorRate } from 'aifn-compute/learning/metrics'
+import { errorRate, recall } from 'aifn-compute/learning/metrics'
 import { crossValidate, kFold, stratifiedKFold } from 'aifn-compute/learning/validate'
 import { standardDeviation } from 'aifn-compute/probability/stats'
 import { gaussians } from 'aifn-methods/data/synthetic'
 import { logisticRegression } from 'aifn-methods/learning/generalised/glm'
 import { FoldGrid } from '../_shared/FoldGrid'
-import { recallOfPositives, supervised } from '../_shared/problems'
 
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(3))) : '—')
 const PARTITIONS = 100
@@ -49,22 +48,22 @@ export function StratifiedRareClass() {
   })
   const { prevalence, n, k, metric, shown } = state
   const data = useMemo(
-    () => supervised(gaussians(stream('stratified/data'), { n, prevalence, separation: SEPARATION })),
+    () => gaussians(stream('stratified/data'), { n, prevalence, separation: SEPARATION }),
     [n, prevalence],
   )
   const labels = useMemo(() => Array.from(toFlat(data.y)), [data])
   const run = useComputed(
     () => {
       const model = logisticRegression({ l2: 0.1 })
-      const fresh = supervised(gaussians(stream('stratified/fresh'), { n: 5000, prevalence, separation: SEPARATION }))
+      const fresh = gaussians(stream('stratified/fresh'), { n: 5000, prevalence, separation: SEPARATION })
       const fitted = model.fit(data)
       const predicted = fitted.decide(fresh.x)
-      const truth = { recall: recallOfPositives(fresh.y, predicted), error: errorRate(fresh.y, predicted) }
+      const truth = { recall: recall(fresh.y, predicted), error: errorRate(fresh.y, predicted) }
       const estimates = (stratify: boolean) => {
         const out = { recall: [] as number[], error: [] as number[] }
         for (let p = 0; p < PARTITIONS; p++) {
           const splitter = stratify ? stratifiedKFold({ k, shuffle: true }) : kFold({ k, shuffle: true })
-          const cv = crossValidate(model, data, splitter, [errorRate, recallOfPositives], {
+          const cv = crossValidate(model, data, splitter, [errorRate, recall], {
             stream: child(stream('stratified/partitions'), p),
           })
           out.recall.push(cv.mean.recall)

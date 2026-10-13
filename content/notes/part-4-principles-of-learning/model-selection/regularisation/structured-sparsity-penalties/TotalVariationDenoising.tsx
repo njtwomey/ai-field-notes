@@ -14,9 +14,9 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { normals, stream } from 'aifn-compute/foundation/random'
-import { toFlat } from 'aifn-compute/foundation/tensor'
+import { eye, toFlat, toRows } from 'aifn-compute/foundation/tensor'
 import { fusedLassoSignal } from 'aifn-compute/optim/proximal'
-import { differenceOperator, tikhonov } from 'aifn-compute/numerics/regularisation'
+import { differenceOperator, tikhonovPath } from 'aifn-compute/numerics/regularisation'
 
 const N = 100
 const T = Array.from({ length: N }, (_, i) => i)
@@ -24,9 +24,7 @@ const T = Array.from({ length: N }, (_, i) => i)
 const TRUTH: number[] = T.map((i) => (i >= 20 && i < 45 ? 2 : i >= 65 && i < 80 ? 1 : 0))
 const LOG_LAMBDAS = Array.from({ length: 41 }, (_, i) => -1 + i * 0.1)
 const LAMBDAS = LOG_LAMBDAS.map((l) => 10 ** l)
-// The quadratic fits each solve a stacked least-squares problem, so they use a coarser grid.
-const QUAD_LOG = LOG_LAMBDAS.filter((_, i) => i % 2 === 0)
-const IDENTITY = T.map((i) => T.map((j) => (i === j ? 1 : 0)))
+const IDENTITY = eye(N)
 const D1 = differenceOperator(N)
 const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecision(3))) : '—')
 const rms = (x: ArrayLike<number>) => Math.sqrt(TRUTH.reduce((a, v, i) => a + (x[i] - v) ** 2, 0) / N)
@@ -38,7 +36,7 @@ const pieces = (x: ArrayLike<number>) => {
 
 /**
  * Total variation and the fused lasso (`fusedLassoSignal`) against the quadratic first-difference penalty
- * (`tikhonov` with `differenceOperator`) on a noisy piecewise-constant signal, each scored against the truth.
+ * (`tikhonovPath` with `differenceOperator`) on a noisy piecewise-constant signal, each scored against the truth.
  */
 export function TotalVariationDenoising() {
   const state = useFigureState({
@@ -62,7 +60,8 @@ export function TotalVariationDenoising() {
   )
   const quadRun = useComputed(
     () => {
-      const quad = QUAD_LOG.map((l) => toFlat(tikhonov(IDENTITY, y, { lambda: 10 ** l, L: D1 }).x))
+      // One transformation to standard form, then a filter per λ.
+      const quad = toRows(tikhonovPath(IDENTITY, y, LAMBDAS, { L: D1 }).x) as number[][]
       return { quad, quadError: quad.map(rms) }
     },
     [y],
@@ -94,7 +93,7 @@ export function TotalVariationDenoising() {
           />
           <Readout
             label="quadratic: best λ / its error"
-            value={`${fmt(10 ** QUAD_LOG[bestQuad])} / ${fmt(v.quadError[bestQuad])}`}
+            value={`${fmt(LAMBDAS[bestQuad])} / ${fmt(v.quadError[bestQuad])}`}
           />
           <Readout label="true pieces" value="5" />
         </>
@@ -115,7 +114,7 @@ export function TotalVariationDenoising() {
             slot={0}
             stale={run.stale}
           />
-          <Curve name="quadratic" x={QUAD_LOG} y={v.quadError} slot={1} stale={quadRun.stale} />
+          <Curve name="quadratic" x={LOG_LAMBDAS} y={v.quadError} slot={1} stale={quadRun.stale} />
           <Handle
             kind="x"
             at={LOG_LAMBDAS[j]}

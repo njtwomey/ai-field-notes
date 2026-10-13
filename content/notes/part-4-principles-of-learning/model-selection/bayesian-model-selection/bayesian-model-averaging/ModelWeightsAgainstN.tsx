@@ -12,8 +12,8 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { permutation, stream } from 'aifn-compute/foundation/random'
-import { fromData, mean, take, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
-import { psisLoo } from 'aifn-compute/learning/selection'
+import { fromData, mean, stack, take, toFlat, type Tensor } from 'aifn-compute/foundation/tensor'
+import { psisLoo, pseudoBmaPlusWeights, pseudoBmaWeights, stackingWeights } from 'aifn-compute/learning/selection'
 import { softmax } from 'aifn-compute/numerics/special'
 import { drawData, fmt, logLikDraws, polynomialEvidence, predictiveLogDensity, type Target } from '../_shared/blr'
 
@@ -27,13 +27,17 @@ const TRUTHS = [
 const WEIGHTS = [
   { value: 'bma', label: 'BMA (evidence)' },
   { value: 'pseudo', label: 'pseudo-BMA (PSIS-LOO)' },
+  { value: 'pseudoPlus', label: 'pseudo-BMA+ (Bayesian bootstrap)' },
 ] as const
-const weightsOf = (logScores: number[]) =>
-  Array.from(toFlat(softmax(fromData(Float64Array.from(logScores), [logScores.length]))))
+type Rule = (typeof WEIGHTS)[number]['value']
+/** Bayesian-bootstrap replicates of pseudo-BMA+. */
+const BOOTSTRAP = 1000
+const flatOf = (t: Tensor) => Array.from(toFlat(t))
 
 /**
- * Posterior model probabilities of three polynomial regressions as the sample grows, when one candidate generated the
- * data and when none did, beside each candidate's held-out log predictive density per point.
+ * Posterior model probabilities (or pseudo-BMA weights) and stacking weights of three polynomial regressions as the
+ * sample grows, when one candidate generated the data and when none did, beside each candidate's held-out log
+ * predictive density per point.
  */
 export function ModelWeightsAgainstN() {
   const state = useFigureState({
@@ -67,17 +71,27 @@ export function ModelWeightsAgainstN() {
         const x = take(all.x, order.slice(0, n)) as Tensor
         const y = take(all.y, order.slice(0, n)) as Tensor
         const fits = CANDIDATES.map((d) => polynomialEvidence(x, y, d, alpha, beta))
-        const scores =
-          weights === 'bma'
-            ? fits.map((f) => f.ev.logEvidence)
-            : fits.map((f, k) => psisLoo(logLikDraws(f.ev, f.X, y, 1000, `bma/draws/${seed}/${n}/${k}`)).elpd)
+        // The n × J matrix of leave-one-out log predictive densities, one PSIS-LOO column per model.
+        const loo = stack(
+          fits.map((f, k) => psisLoo(logLikDraws(f.ev, f.X, y, 1000, `bma/draws/${seed}/${n}/${k}`)).pointwise.elpd),
+          1,
+        )
+        const evidence = fits.map((f) => f.ev.logEvidence)
+        const w: Record<Rule, number[]> = {
+          bma: flatOf(softmax(fromData(Float64Array.from(evidence), [evidence.length])) as Tensor),
+          pseudo: flatOf(pseudoBmaWeights(loo).weights),
+          pseudoPlus: flatOf(
+            pseudoBmaPlusWeights(loo, { B: BOOTSTRAP, stream: stream(`bma/bootstrap/${seed}/${n}`) }).weights,
+          ),
+        }
         return {
-          w: weightsOf(scores),
+          w,
+          stacking: flatOf(stackingWeights(loo).weights),
           heldOut: fits.map((f) => Number(mean(predictiveLogDensity(f.ev, f.map(fresh.x), fresh.y)))),
         }
       })
     },
-    [target, weights, noise, alpha, seed],
+    [target, noise, alpha, seed],
     { mode: 'release' },
   )
   const rows = run.value
@@ -100,41 +114,43 @@ export function ModelWeightsAgainstN() {
     />
   )
   const best = r.heldOut.reduce((b, x, i) => (x > r.heldOut[b] ? i : b), 0)
+  const rule = weights as Rule
+  const ruleLabel = WEIGHTS.find((w) => w.value === rule)?.label ?? ''
+  const weightCurves = (of: (row: (typeof rows)[number]) => number[]) =>
+    CANDIDATES.map((d, k) => (
+      <Curve key={d} name={`degree ${d}`} x={LOG_SIZES} y={rows.map((row) => of(row)[k])} slot={k} stale={run.stale} />
+    ))
   return (
     <Figure
       title="Model weights as the data grow"
       state={state}
       hoverReadout={false}
-      caption="Three Bayesian polynomial regressions, of degree 1, 3 and 5, each with a N(0, 1/α) prior on its coefficients and the noise known, fitted to the first n points of one growing sample. Left: the weight of each model, by BMA (proportional to the evidence, with equal prior probabilities) or by pseudo-BMA (proportional to exp of the PSIS-LOO elpd). Right: the truth the weights should follow, each model's log predictive density per point on 2,000 fresh points. When the cubic generated the data, the weights move towards degree 3, the simplest true model, even though degree 5 contains it. When the truth is a sine, no candidate is right; the weights still collapse onto one model as n grows, whichever predicts best, rather than mixing them. Drag the vertical line to read one sample size."
+      defaultSize="L"
+      caption="Three Bayesian polynomial regressions, of degree 1, 3 and 5, each with a N(0, 1/α) prior on its coefficients and the noise known, fitted to the first n points of one growing sample. Left: the weight of each model, by BMA (proportional to the evidence, with equal prior probabilities), by pseudo-BMA (proportional to exp of the PSIS-LOO elpd) or by pseudo-BMA+ (pseudo-BMA averaged over 1,000 Bayesian-bootstrap replicates of the elpd). Middle: the stacking weights, which maximise the PSIS-LOO log score of the mixture of the three predictive distributions. Right: the truth the weights should follow, each model's log predictive density per point on 2,000 fresh points. When the cubic generated the data, BMA moves towards degree 3, the simplest true model, even though degree 5 contains it; the pseudo-BMA weights keep a share on degree 5, which predicts almost as well. When the truth is a sine, no candidate is right, but degree 5 predicts best at large n, and every rule, stacking included, ends with nearly all its weight on it. Drag the vertical line to read one sample size."
       readouts={
         <>
           <Readout label="n" value={`${SIZES[j]}`} />
           {CANDIDATES.map((d, k) => (
             <Readout
               key={d}
-              label={`degree ${d}: weight / held-out log density`}
-              value={`${fmt(r.w[k])} / ${fmt(r.heldOut[k])}`}
+              label={`degree ${d}: ${ruleLabel} / stacking / held-out log density`}
+              value={`${fmt(r.w[rule][k])} / ${fmt(r.stacking[k])} / ${fmt(r.heldOut[k])}`}
             />
           ))}
           <Readout label="best held-out model" value={`degree ${CANDIDATES[best]}`} />
         </>
       }
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Plot x={nx} y={wy} title="model weights">
-          {CANDIDATES.map((d, k) => (
-            <Curve
-              key={d}
-              name={`degree ${d}`}
-              x={LOG_SIZES}
-              y={rows.map((row) => row.w[k])}
-              slot={k}
-              stale={run.stale}
-            />
-          ))}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Plot x={nx} y={wy} title={ruleLabel}>
+          {weightCurves((row) => row.w[rule])}
           {handle}
         </Plot>
-        <Plot x={nx} y={hy} title="held-out log density per point (truth)">
+        <Plot x={nx} y={wy} title="stacking (PSIS-LOO)">
+          {weightCurves((row) => row.stacking)}
+          {handle}
+        </Plot>
+        <Plot x={nx} y={hy} title="truth: held-out log density">
           {CANDIDATES.map((d, k) => (
             <Curve
               key={d}

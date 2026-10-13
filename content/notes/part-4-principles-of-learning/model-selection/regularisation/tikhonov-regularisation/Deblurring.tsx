@@ -16,9 +16,15 @@ import {
   useFigureState,
 } from 'aifn-render'
 import { normals, stream } from 'aifn-compute/foundation/random'
-import { matmul, tensor, toFlat, toRows } from 'aifn-compute/foundation/tensor'
+import { add, matmul, mul, norm, sub, tensor, toFlat, toRows, type Tensor } from 'aifn-compute/foundation/tensor'
 import { svd } from 'aifn-compute/numerics/linalg'
-import { differenceOperator, discrepancyPrinciple, tikhonov, tikhonovPath } from 'aifn-compute/numerics/regularisation'
+import {
+  convolutionMatrix,
+  differenceOperator,
+  discrepancyPrinciple,
+  tikhonov,
+  tikhonovPath,
+} from 'aifn-compute/numerics/regularisation'
 import { gaussianKernel } from 'aifn-compute/signal/image'
 
 const N = 64
@@ -35,17 +41,10 @@ const fmt = (v: number) => (Number.isFinite(v) ? formatNumber(Number(v.toPrecisi
 /** The signal to recover: a smooth bump plus a plateau, on [0, 1]. */
 const truth = (t: number) => Math.exp(-((t - 0.3) ** 2) / 0.008) + (t > 0.6 && t < 0.85 ? 0.6 : 0)
 const X_TRUE = T.map(truth)
+const X_TRUE_T = tensor(X_TRUE)
 
-/** The blur: row i of A holds the Gaussian kernel's taps centred on sample i, cut off at the ends. */
-const blurMatrix = (width: number) => {
-  const taps = toFlat(gaussianKernel(width))
-  const r = (taps.length - 1) / 2
-  return Array.from({ length: N }, (_, i) =>
-    Array.from({ length: N }, (_, j) => (Math.abs(j - i) <= r ? taps[j - i + r] : 0)),
-  )
-}
-
-const errorNorm = (x: ArrayLike<number>) => Math.sqrt(X_TRUE.reduce((a, v, i) => a + (x[i] - v) ** 2, 0))
+/** ‖x − x_true‖ for each row of a matrix of solutions. */
+const errorNorms = (x: Tensor) => Array.from(toFlat(norm(sub(x, X_TRUE_T), 1) as Tensor))
 
 /**
  * Deblurring a one-dimensional signal by Tikhonov regularisation on the engine: the solution at a chosen λ, its error
@@ -61,33 +60,27 @@ export function Deblurring() {
   })
   const { width, noise, order, seed } = state
   const problem = useMemo(() => {
-    const A = blurMatrix(width)
-    const e = toFlat(normals(stream(`deblur/${seed}`), [N]))
-    const b = A.map((row, i) => row.reduce((a, v, j) => a + v * X_TRUE[j], 0) + noise * e[i])
+    // The blur: a Gaussian kernel's taps as a convolution matrix, cut off at the ends.
+    const A = convolutionMatrix(gaussianKernel(width), N)
+    const e = normals(stream(`deblur/${seed}`), [N])
+    const b = Array.from(toFlat(add(matmul(A, X_TRUE_T), mul(e, noise))))
     return { A, b }
   }, [width, noise, seed])
   const run = useComputed(
     () => {
       const { A, b } = problem
-      const path = tikhonovPath(A, b, LAMBDAS)
-      const s = toFlat(path.singularValues)
+      const standard = tikhonovPath(A, b, LAMBDAS)
+      const s = toFlat(standard.singularValues)
       // The Picard plot's data coefficients |u_iᵀb|: b in the left singular vectors of A.
-      const beta = toFlat(matmul(tensor([b]), svd(tensor(A)).U)).map(Math.abs)
-      let solutions: number[][]
-      let residual: number[]
-      if (order === '0') {
-        solutions = toRows(path.x)
-        residual = toFlat(path.residualNorm)
-      } else {
-        const L = differenceOperator(N, Number(order))
-        const fits = LAMBDAS.map((lambda) => tikhonov(A, b, { lambda, L }))
-        solutions = fits.map((f) => toFlat(f.x))
-        residual = fits.map((f) => f.residualNorm)
-      }
-      const error = solutions.map(errorNorm)
-      const naive = toFlat(tikhonov(A, b, { lambda: 0 }).x)
+      const beta = toFlat(matmul(tensor([b]), svd(A).U)).map(Math.abs)
+      // A difference penalty: one transformation to standard form (Eldén), then a filter per λ.
+      const path = order === '0' ? standard : tikhonovPath(A, b, LAMBDAS, { L: differenceOperator(N, Number(order)) })
+      const solutions = toRows(path.x) as number[][]
+      const residual = Array.from(toFlat(path.residualNorm))
+      const error = errorNorms(path.x)
+      const naiveError = norm(sub(tikhonov(A, b, { lambda: 0 }).x, X_TRUE_T)) as number
       const morozov = discrepancyPrinciple(A, b, { sigma: noise })
-      return { s, beta, solutions, residual, error, naiveError: errorNorm(naive), morozov }
+      return { s, beta, solutions, residual, error, naiveError, morozov }
     },
     [problem, order, noise],
     { mode: 'release' },

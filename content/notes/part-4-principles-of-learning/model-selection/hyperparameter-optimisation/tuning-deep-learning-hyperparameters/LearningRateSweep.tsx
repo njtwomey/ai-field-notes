@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import {
   Annotation,
+  call,
   choice,
   Curve,
   Figure,
@@ -14,49 +15,13 @@ import {
   useComputed,
   useFigureState,
 } from 'aifn-render'
-import { type Params } from 'aifn-compute/foundation/pytree'
-import { stream } from 'aifn-compute/foundation/random'
-import { fromData, toFlat, unwrap, type Tensor } from 'aifn-compute/foundation/tensor'
-import { run } from 'aifn-compute/foundation/trace'
-import { binaryCrossEntropyWithLogits } from 'aifn-compute/learning/losses'
-import { heNormal } from 'aifn-compute/nn/init'
-import { Mlp } from 'aifn-compute/nn/layers'
-import { trainingLoop } from 'aifn-compute/nn/training'
-import { adamRule, sgdRule } from 'aifn-compute/optim/first-order'
-import { moons } from 'aifn-methods/data/synthetic'
+import { type LearningRateSweep as Sweep } from 'aifn-methods/neural/tuning'
 
 /** Learning rates on a half-decade grid, as log10 values. */
 const LOG_RATES = [-3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5]
 const RATES = LOG_RATES.map((e) => 10 ** e)
 /** Losses above this are off the chart (chance level is ln 2 = 0.69). */
 const CEILING = 1
-
-const column = (y: Tensor) => fromData(Float64Array.from(toFlat(y)), [y.shape[0], 1])
-const TRAIN = moons(stream('lr-sweep/train'), { n: 200, noise: 0.25 })
-const VALID = moons(stream('lr-sweep/validation'), { n: 1000, noise: 0.25 })
-const DATA = { x: TRAIN.x, y: column(TRAIN.y!) }
-const VALID_Y = column(VALID.y!)
-const NET = Mlp([2, 16, 16, 1], { activation: 'relu', init: heNormal() })
-
-/** The validation loss of every (learning rate, seed) run, NaN for a run that diverged. */
-function sweep(optimiser: 'Adam' | 'SGD with momentum', batch: number, steps: number, seeds: number) {
-  return RATES.map((rate) =>
-    Array.from({ length: seeds }, (_, k) => {
-      const rule = optimiser === 'Adam' ? adamRule({ stepSize: rate }) : sgdRule({ stepSize: rate, momentum: 0.9 })
-      const algorithm = trainingLoop({
-        loss: (w: Params[], b: { x: Tensor; y: Tensor }) => binaryCrossEntropyWithLogits(NET.apply(w, b.x), b.y),
-        data: DATA,
-        batchSize: batch,
-        optimizer: rule,
-      })
-      const final = run(algorithm, { params: NET.init(stream(`lr-sweep/init/${k + 1}`)) }, steps, {
-        stream: stream(`lr-sweep/order/${k + 1}`),
-      })
-      if (final.diverged) return NaN
-      return Number(unwrap(binaryCrossEntropyWithLogits(NET.apply(final.params, VALID.x), VALID_Y)))
-    }),
-  )
-}
 
 /** A learning-rate sweep of a small network: validation loss against learning rate, one point per seed. */
 export function LearningRateSweep() {
@@ -67,15 +32,26 @@ export function LearningRateSweep() {
     seeds: int(3, { ge: 1, le: 5, suggestions: [1, 3, 5], label: 'seeds per learning rate' }),
   })
   const { optimiser, batch, steps, seeds } = state
-  const computed = useComputed(() => sweep(optimiser, batch, steps, seeds), [optimiser, batch, steps, seeds], {
-    mode: 'release',
-  })
-  const losses = computed.value
+  // The engine's sweep (two-moons data, a 2-16-16-1 ReLU network, constant learning rate), run in the compute worker.
+  const computed = useComputed<Sweep, number[][] | null>(
+    () =>
+      call<Sweep>('neural/tuning/learningRateSweep', {
+        optimiser: optimiser === 'Adam' ? 'adam' : 'sgd',
+        rates: RATES,
+        batch,
+        steps,
+        seeds,
+      }),
+    [optimiser, batch, steps, seeds],
+    { mode: 'worker', initial: null, then: (r) => r.losses, cancelAfter: 20_000 },
+  )
+  const ready = computed.value !== null
+  const losses = useMemo(() => computed.value ?? RATES.map(() => [NaN]), [computed.value])
 
   const summary = useMemo(() => {
     const means = losses.map((row) => row.reduce((a, b) => a + b, 0) / row.length)
     const finite = means.map((m, i) => (Number.isFinite(m) ? i : -1)).filter((i) => i >= 0)
-    const best = finite.reduce((a, i) => (means[i] < means[a] ? i : a), finite[0])
+    const best = finite.length ? finite.reduce((a, i) => (means[i] < means[a] ? i : a), finite[0]) : 0
     const row = losses[best]
     const sd = row.length > 1 ? Math.sqrt(row.reduce((a, v) => a + (v - means[best]) ** 2, 0) / (row.length - 1)) : NaN
     const points = losses.flatMap((r, i) => r.map((v) => [RATES[i], v] as const))
@@ -90,7 +66,8 @@ export function LearningRateSweep() {
 
   const x = useAxis({ label: 'learning rate', log: true, range: [1e-4, 10], format: formatPower })
   const y = useAxis({ label: 'validation cross-entropy', range: [0, CEILING] })
-  const bestRate = RATES[summary.best]
+  const bestRate = ready ? RATES[summary.best] : NaN
+  const show = (v: number) => (Number.isFinite(v) ? formatNumber(v) : '—')
   return (
     <Figure
       title="A learning-rate sweep"
@@ -99,13 +76,10 @@ export function LearningRateSweep() {
       readouts={{
         sweep: (
           <>
-            <Readout label="best learning rate" value={formatNumber(bestRate)} />
-            <Readout label="mean loss there" value={formatNumber(summary.means[summary.best])} />
-            <Readout
-              label="spread over seeds (sd)"
-              value={Number.isFinite(summary.sd) ? formatNumber(summary.sd) : '—'}
-            />
-            <Readout label="runs off the chart" value={String(summary.off)} />
+            <Readout label="best learning rate" value={show(bestRate)} />
+            <Readout label="mean loss there" value={ready ? show(summary.means[summary.best]) : '—'} />
+            <Readout label="spread over seeds (sd)" value={ready ? show(summary.sd) : '—'} />
+            <Readout label="runs off the chart" value={ready ? String(summary.off) : '—'} />
           </>
         ),
       }}
@@ -124,7 +98,7 @@ export function LearningRateSweep() {
         {curve.x.length > 0 && (
           <Curve name="mean over seeds" x={curve.x} y={curve.y} slot={0} showPoints stale={computed.stale} />
         )}
-        <Annotation x={bestRate} text="best mean" dashed emphasis />
+        {ready && <Annotation x={bestRate} text="best mean" dashed emphasis />}
         <Annotation y={Math.log(2)} text="constant prediction" dashed muted />
       </Plot>
     </Figure>
