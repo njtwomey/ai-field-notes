@@ -1,0 +1,153 @@
+---
+title: 'Hypergraph neural networks'
+kind: concept
+summary: 'A hyperedge joins any number of nodes, as co-authors join a paper. Hypergraph networks pass messages in two stages, node to hyperedge and hyperedge to node, through the incidence matrix $\Hmat\in\{0,1\}^{n\times m}$; clique expansion loses which nodes shared an edge.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['hypergraph convolution', 'HGNN', 'hyperedge', 'incidence matrix']
+requires: [message-passing-neural-network]
+related:
+  [
+    heterogeneous-graph-networks,
+    deep-sets,
+    graph-convolutional-network,
+    graph-laplacian-and-graph-fourier-transform,
+    higher-order-and-subgraph-graph-neural-networks,
+  ]
+references: [feng2019hgnn, zhou2006hypergraph, chien2022allset]
+status: draft
+updated: 2026-10-17
+---
+
+import { HypergraphMessages } from './HypergraphMessages'
+
+<Definition>
+A hypergraph has $n$ nodes and $m$ hyperedges, each hyperedge a set of any number of nodes. Its incidence matrix
+$\Hmat \in \set{0, 1}^{n \times m}$ has $H_{ve} = 1$ when node $v$ belongs to hyperedge $e$. A hypergraph neural network
+updates node vectors in two stages: every hyperedge aggregates the vectors of its member nodes, then every node
+aggregates the vectors of the hyperedges it belongs to. HGNN implements the two stages as the normalised product
+$\Dmat_v^{-1/2}\Hmat\Wmat\Dmat_e^{-1}\Hmat^{\tr}\Dmat_v^{-1/2}$ <Cite id="feng2019hgnn" />.
+</Definition>
+
+## Intuition
+
+A paper with three authors is one relation among three people. A graph can only record pairs, so it must either
+replace the paper by three author–author edges or add the paper as an extra node. Many relations come in groups of
+more than two: the items in one shopping basket, the genes in one pathway, the atoms in one ring, the users in one group
+chat.
+
+The **clique expansion** joins every two members of a hyperedge by an edge. It loses information. Three authors who
+wrote one paper together and three authors who wrote three separate two-author papers give the same triangle. The **star
+expansion** keeps the information by turning each hyperedge into a node of a second type, joined to its members. Two
+rounds of <NoteLink to="message-passing-neural-network">message passing</NoteLink> on the star expansion, member to
+hyperedge and hyperedge to member, are the two stages of a hypergraph network.
+
+## Details
+
+### Incidence matrix and degrees
+
+The degree of node $v$ is $d(v) = \sum_e w_e H_{ve}$, the weighted number of hyperedges containing it, with hyperedge
+weights $w_e$ (often all 1). The degree of hyperedge $e$ is $\delta(e) = \sum_v H_{ve}$, its number of members. Collect
+them in diagonal matrices $\Dmat_v \in \reals^{n \times n}$ and $\Dmat_e \in \reals^{m \times m}$, and the weights in
+$\Wmat = \diag(w_1, \dots, w_m)$ <Cite id="feng2019hgnn" />.
+
+### Two-stage message passing
+
+With node vectors as the rows of $\Xmat \in \reals^{n \times F}$, the simplest two-stage layer takes means:
+
+$$
+\Emat = \Dmat_e^{-1}\Hmat^{\tr}\Xmat, \qquad \Xmat' = \Dmat_v^{-1}\Hmat\Emat.
+$$
+
+Row $e$ of $\Emat \in \reals^{m \times F}$ is the mean of hyperedge $e$'s members. Row $v$ of $\Xmat'$ is the mean of
+the hyperedges containing $v$. A learned weight matrix and a nonlinearity complete the layer, as in a
+<NoteLink to="graph-convolutional-network">graph convolution</NoteLink>. Each stage is a sum over a set, so the layer is
+permutation-equivariant in the nodes and in the hyperedges, and it accepts hyperedges of any size.
+
+### HGNN
+
+HGNN normalises symmetrically, as a GCN does <Cite id="feng2019hgnn" />:
+
+$$
+\Xmat^{(l+1)} = \sigma\paren{\Dmat_v^{-1/2}\Hmat\Wmat\Dmat_e^{-1}\Hmat^{\tr}\Dmat_v^{-1/2}\Xmat^{(l)}\Thetamat^{(l)}},
+$$
+
+with learned $\Thetamat^{(l)} \in \reals^{F_l \times F_{l+1}}$. The matrix
+$\Dmat_v^{-1/2}\Hmat\Wmat\Dmat_e^{-1}\Hmat^{\tr}\Dmat_v^{-1/2}$ is the identity minus the normalised hypergraph
+Laplacian of Zhou, Huang and Schölkopf, $\Delta = \I - \Dmat_v^{-1/2}\Hmat\Wmat\Dmat_e^{-1}\Hmat^{\tr}\Dmat_v^{-1/2}$
+<Cite id="zhou2006hypergraph" />. HGNN derives the layer as a first-order approximation of a spectral filter on this
+Laplacian, as GCN does on the graph Laplacian; when every hyperedge has two members, $\Delta$ is the
+<NoteLink to="spectral-clustering">normalised graph Laplacian</NoteLink> up to a factor of $\tfrac12$
+<Cite id="feng2019hgnn" />. The <NoteLink to="graph-laplacian-and-graph-fourier-transform">graph Laplacian</NoteLink>
+note covers the spectral view.
+
+The product is never formed as an $n \times n$ matrix. It is computed right to left: scale the rows of $\Xmat\Thetamat$,
+multiply by $\Hmat^{\tr}$ (node to hyperedge), scale, multiply by $\Hmat$ (hyperedge to node), scale. Each product
+touches every incidence once, so a layer costs $O\paren{\sum_e \delta(e)\, F}$.
+
+### Learned aggregation
+
+The mean is a fixed choice. AllSet writes both stages as learnable functions of multisets, one from members to a
+hyperedge and one from hyperedges to a node, each built like a <NoteLink to="deep-sets">deep sets</NoteLink> network
+or a set transformer <Cite id="chien2022allset" />. HGNN and other propagation rules are special cases of the framework.
+
+### Where hypergraphs come from
+
+Some data are hypergraphs by nature: co-authorship (papers as hyperedges), co-citation, baskets of purchased items,
+email threads. Others are built. HGNN forms one hyperedge per node, joining it to its $K$
+<NoteLink to="nearest-neighbours">nearest neighbours</NoteLink> in feature space, which gives $n$ hyperedges of $K + 1$
+members each <Cite id="feng2019hgnn" />. Several feature sets give several groups of hyperedges, concatenated as columns
+of $\Hmat$.
+
+## Worked example
+
+Six authors have scalar features $1, 2, 3, 4, 5, 6$. Three papers join them: $e_1 = \set{1, 2, 3}$, $e_2 = \set{3, 4}$
+and $e_3 = \set{4, 5, 6}$. Authors 3 and 4 are in two papers; the others are in one.
+
+**Two-stage mean.**
+
+1. Node to hyperedge: $e_1$ averages $1, 2, 3$ to $2$; $e_2$ averages $3, 4$ to $3.5$; $e_3$ averages $4, 5, 6$ to $5$.
+2. Hyperedge to node: authors 1 and 2 are only in $e_1$ and get $2$. Author 3 averages $e_1$ and $e_2$ to
+   $(2 + 3.5)/2 = 2.75$. Author 4 averages $e_2$ and $e_3$ to $(3.5 + 5)/2 = 4.25$. Authors 5 and 6 get $5$.
+
+The new vector is $(2, 2, 2.75, 4.25, 5, 5)$.
+
+**Clique expansion.** The cliques give seven edges: $1{-}2$, $1{-}3$, $2{-}3$, $3{-}4$, $4{-}5$, $4{-}6$, $5{-}6$. One
+round of averaging each author with its neighbours gives $(2, 2, 2.5, 4.5, 5, 5)$. Author 3 now weighs author 4 as one
+neighbour in four, a quarter, whereas the two-stage pass gave the paper $\set{3, 4}$ half of author 3's update.
+
+**What the expansion loses.** Replace $e_1$ by three two-author papers $\set{1, 2}$, $\set{2, 3}$, $\set{1, 3}$. The
+clique expansion is the same seven edges, so its output is unchanged. The two-stage pass changes: the pairs average to
+$1.5$, $2.5$ and $2$, author 1 (in $\set{1, 2}$ and $\set{1, 3}$) gets $(1.5 + 2)/2 = 1.75$ instead of $2$, and author 3
+(in $\set{2, 3}$, $\set{1, 3}$ and $e_2$) gets $(2.5 + 2 + 3.5)/3 \approx 2.67$ instead of $2.75$. Only the hypergraph
+model tells one three-author paper from three two-author papers.
+
+**HGNN normalisation.** With $\Wmat = \I$ and $\Thetamat = 1$, the degrees are $d = (1, 1, 2, 2, 1, 1)$ and
+$\delta = (3, 2, 3)$. The hyperedge values are averages of $x_u/\sqrt{d(u)}$:
+$e_1 = (1 + 2 + 3/\sqrt2)/3 \approx 1.707$, $e_2 = (3/\sqrt2 + 4/\sqrt2)/2 \approx 2.475$ and
+$e_3 = (4/\sqrt2 + 5 + 6)/3 \approx 4.609$. Each author sums its hyperedges and divides by $\sqrt{d(v)}$: author 3 gets
+$(1.707 + 2.475)/\sqrt2 \approx 2.957$, author 4 gets $(2.475 + 4.609)/\sqrt2 \approx 5.009$, and the others get the
+value of their single hyperedge. Nodes in many hyperedges are scaled down on both stages, as high-degree nodes are in a
+GCN.
+
+<HypergraphMessages />
+
+## Assumptions
+
+- **Group membership is the signal.** A hyperedge treats its members symmetrically. Roles inside a group, such as a
+  paper's first and last author, need features on the incidences or a heterogeneous model.
+- **Homophily within hyperedges.** Mean aggregation helps when members of a hyperedge tend to share labels, as edges
+  do for a graph convolution.
+- **Hyperedges are given or well constructed.** A built hypergraph, such as $K$ nearest neighbours, inherits the
+  quality of the feature space and the choice of $K$.
+
+## Pitfalls
+
+- **Clique expansion of large hyperedges.** A hyperedge of $k$ members becomes $k(k - 1)/2$ edges. One mailing list of
+  1,000 people gives 499,500 edges and dominates the graph, while the star expansion adds 1,000 incidences.
+- **Mean over hyperedge sizes.** A two-member hyperedge and a 500-member hyperedge count equally in a node's mean. If
+  large hyperedges are weak relations, down-weight them through $w_e$.
+- **Indistinguishable structures.** Two-stage mean aggregation inherits the
+  <NoteLink to="expressive-power-of-message-passing">limits of message passing</NoteLink>: hypergraphs with the same
+  local multisets of sizes and features get the same outputs. AllSet replaces the fixed mean in each stage by a learned
+  multiset function <Cite id="chien2022allset" />; as on graphs, a sum-based multiset function separates multisets that
+  a mean merges, such as $\set{1}$ and $\set{1, 1}$.

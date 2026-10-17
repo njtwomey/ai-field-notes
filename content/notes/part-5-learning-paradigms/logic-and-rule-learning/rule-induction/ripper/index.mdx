@@ -1,0 +1,192 @@
+---
+title: 'RIPPER'
+kind: technique
+summary: 'RIPPER grows each rule on two thirds of the data and prunes it on the rest, stops adding rules when the description length exceeds the best seen by 64 bits, and revises each rule in a final optimisation pass (Cohen). It is fast on noisy data and matches C4.5rules in accuracy.'
+tags: [logic, rule-learning, worked-example]
+aliases: [repeated incremental pruning to produce error reduction, IREP, IREP*, incremental reduced error pruning, RIPPERk, JRip]
+requires: [sequential-covering]
+related: [rules-from-decision-trees, minimum-description-length, rule-quality-measures, foil, hold-out-validation, tree-pruning]
+references: [cohen1995, furnkranz1994, furnkranz1999, quinlan1990, furnkranz2012]
+status: draft
+updated: 2026-10-17
+---
+
+import { RipperPhases } from './RipperPhases'
+
+<Definition>
+**<Gloss name="ripper" />** is a <NoteLink to="sequential-covering">sequential covering</NoteLink> rule learner (Cohen,
+1995). For each class, from the least to the most frequent, it learns a <NoteLink to="decision-lists-and-rule-sets">rule
+set</NoteLink> that separates the class from the classes after it. Each rule is grown on a random two thirds of the
+remaining rows, adding the condition of largest <NoteLink to="rule-quality-measures">FOIL gain</NoteLink> until the rule
+covers no negative row, and then pruned on the other third by deleting final conditions while the pruning-set value
+$(p - n)/(p + n)$ rises. Rules are added until the description length of the rule set and its errors exceeds the
+smallest seen by 64 bits. An optimisation pass then offers each rule a regrown replacement and an extended revision, and
+keeps whichever variant gives the shortest description <Cite id="cohen1995" />.
+</Definition>
+
+## Problem
+
+A rule learner fitted to noisy data keeps adding conditions to exclude the last few mislabelled negatives, and keeps
+adding rules to include the last few mislabelled positives. Both overfit. Significance tests during the search, as in
+CN2, stop some of this and leave much of it. <NoteLink to="tree-pruning">Reduced error pruning</NoteLink> (REP) grows a
+full rule set and then prunes it against held-out data. It is accurate, but on noisy data the full rule set is large,
+and the pruning search over it grows much faster than the number of rows $n$ <Cite id="cohen1995" />.
+
+**IREP**, incremental reduced error pruning, prunes each rule as soon as it is grown, before the next rule is learned
+<Cite id="furnkranz1994" />. A pruned rule removes the rows it covers, so the rules grown later see less noise, and
+Cohen shows the whole procedure runs in $O(n \log^2 n)$ time <Cite id="cohen1995" />. On Cohen's benchmarks IREP was
+fast but often less accurate than C4.5rules, the rules-from-trees method of
+<NoteLink to="rules-from-decision-trees">rules from decision trees</NoteLink>. RIPPER keeps IREP's grow-then-prune loop
+and its running time, and changes three things: the pruning metric, the stopping rule and a final optimisation of the
+rule set <Cite id="cohen1995" />.
+
+## Mechanism
+
+### One rule set per class
+
+Order the $K$ classes by frequency, smallest first. For the first class, the positives are its rows and the negatives
+all other rows; learn a rule set for it, remove the rows the set covers, and move to the next class. The most frequent
+class has no rules and becomes the default. The result is an ordered list of rule sets: a row takes the class of the
+first set with a rule that covers it. Learning the rare classes first lets the frequent class absorb what is left.
+
+### Growing a rule
+
+The rows in play are split at random into a **growing set** of two thirds and a **pruning set** of one third. A rule
+starts empty and covers every growing row. At each step it takes the condition $q$ that maximises
+<NoteLink to="foil">FOIL</NoteLink>'s information gain on the growing set,
+
+$$
+\text{gain}(r \wedge q) = p'\left(\log_2 \frac{p'}{p' + n'} - \log_2 \frac{p}{p + n}\right),
+$$
+
+where $(p, n)$ are the positive and negative growing rows the rule $r$ covers and $(p', n')$ those that $r \wedge q$
+covers <Cite id="quinlan1990" />. Growing stops when the rule covers no negative growing row or no condition has a
+positive gain. On noisy data the grown rule is long and fits individual rows.
+
+### Pruning a rule
+
+IREP deleted one final condition at a time while the pruning-set accuracy of the rule, $(p + N - n)/(P + N)$ with
+$(P, N)$ the pruning set's totals, did not fall <Cite id="furnkranz1994" />. That metric orders rules as $p - n$, which
+can prefer imprecise rules: a rule covering 2000 positives and 1000 negatives has $p - n = 1000$ and beats a rule
+covering 1000 positives and 1 negative, with $p - n = 999$. RIPPER's IREP* uses the value
+
+$$
+v(r) = \frac{p - n}{p + n}
+$$
+
+on the pruning set, a rescaled precision, and considers deleting any final sequence of conditions: it keeps the prefix
+of the grown rule with the largest $v$, the shorter on a tie <Cite id="cohen1995" />. A rule whose error rate
+$n/(p + n)$ on the pruning set reaches 50% is rejected and ends the class.
+
+### Stopping by description length
+
+IREP stopped when a pruned rule was less accurate than the empty rule. IREP* keeps adding rules while positives remain
+and measures the rule set by its <NoteLink to="minimum-description-length">description length</NoteLink>: the bits to
+send the rules plus the bits to send the rows they get wrong, as in Quinlan's coding for C4.5. Write
+$S(t, k, \rho) = -k\log_2\rho - (t - k)\log_2(1 - \rho)$ for the bits to name $k$ of $t$ items at rate $\rho$.
+
+- A rule with $k$ conditions chosen from $c$ candidates costs $\frac12\big(\lVert k\rVert + S(c, k, k/c)\big)$ bits,
+  where $\lVert k\rVert$ is the length of a code for the integer $k$. The factor $\frac12$ allows for redundant
+  attributes.
+- A rule set that covers $C$ rows with $f_p$ <Gloss name="fp">false positives</Gloss> and leaves $U$ rows uncovered with
+  $f_n$ <Gloss name="fn">false negatives</Gloss> costs about $\log_2(C + U + 1) + S(C, f_p, \cdot) + S(U, f_n, \cdot)$
+  bits for its exceptions.
+
+After each new rule the total is compared with the smallest total so far. When it exceeds that minimum by more than
+$d = 64$ bits, IREP* stops. It then deletes rules, last first, whenever a deletion shortens the description
+<Cite id="cohen1995" />. The 64-bit slack lets a rule that costs bits now be followed by rules that pay them back.
+
+### Optimisation and RIPPER$k$
+
+The rules of IREP* were each chosen given the rules before them. The optimisation pass revisits them in order. For rule
+$R_i$, with a fresh growing and pruning split, it builds two variants:
+
+- a **replacement**, grown from the empty rule and pruned to maximise the accuracy of the whole rule set, with the
+  replacement in place of $R_i$, on the pruning set;
+- a **revision**, grown by adding conditions to $R_i$ and pruned the same way.
+
+Of $R_i$, its replacement and its revision, the one that gives the rule set the shortest description length is kept.
+After the pass, positives that no rule covers get new rules by IREP*, and the deletion step runs again. RIPPER is
+IREP* followed by one optimisation pass; RIPPER$k$ repeats the pass $k$ times <Cite id="cohen1995" />. Weka's JRip,
+the most used implementation, defaults to $k = 2$ and a growing share of two thirds.
+
+## Worked example
+
+The Titanic data list 2201 people by class, sex and age: 711 survived and 1490 died. Survivors are the smaller class,
+so RIPPER learns rules for "survived" and makes "died" the default. For a split that can be checked by hand, put every
+third row of the table in the pruning set: the growing set holds 1468 rows (474 survivors, 994 deaths) and the pruning
+set 733 (237 survivors, 496 deaths). The eight candidate conditions are the values of class, sex and age.
+
+**Grow, step 1.** The empty rule covers $(p, n) = (474, 994)$, precision $474/1468 = 0.323$, $\log_2 0.323 = -1.631$.
+The best conditions by FOIL gain are
+
+- sex = female, $(230, 84)$: $230\,(\log_2 \tfrac{230}{314} + 1.631) = 230 \times 1.182 = 271.8$,
+- class = 1st, $(135, 82)$: gain $127.7$,
+- class = 2nd, $(78, 110)$: gain $28.2$,
+- age = child, $(38, 35)$: gain $26.2$.
+
+The rule becomes "sex = female", which still covers 84 deaths.
+
+**Grow, step 2.** From $(230, 84)$, with $\log_2 \tfrac{230}{314} = -0.449$: class = 1st gives $(94, 3)$ and gain
+$94\,(\log_2 \tfrac{94}{97} + 0.449) = 94 \times 0.404 = 38.0$; class = 2nd gives $(62, 8)$ and gain $17.0$. The rule
+becomes "sex = female ∧ class = 1st", which still covers 3 deaths.
+
+**Grow, step 3.** Adding age = adult gives $(93, 3)$ and a negative gain. Adding age = child gives $(1, 0)$, the one
+first-class girl in the growing set, and gain $1 \times (0 + 0.045) = 0.045$. It is the only positive gain, so the
+rule grows to "sex = female ∧ class = 1st ∧ age = child", which is pure on the growing set and covers one row.
+
+**Prune.** On the pruning set the three-condition rule covers no row. Its two-condition prefix covers 47 survivors and
+1 death, so $v = 46/48 = 0.958$. The one-condition prefix "sex = female" covers $(114, 42)$, so $v = 72/156 = 0.462$.
+RIPPER keeps "sex = female ∧ class = 1st". The grow phase had learned an accident of the sample; the pruning set
+removed it.
+
+**Accept and measure.** The pruned rule's error rate on the pruning set is $1/48 = 2\%$, well below 50%, so it is
+accepted. Its two conditions out of eight candidates cost
+$\frac12\big(1 + S(8, 2, \tfrac14)\big) = \frac12(1 + 6.49) = 3.7$ bits. The description length of the rule set on the
+whole table falls from 2259.9 bits (no rules: all 711 survivors are exceptions) to 1982.8 bits. The 145 first-class
+women and girls it covers leave play.
+
+**To the end.** Continued with random splits (seed 1 of the implementation used for the figure), the next rules are
+"sex = female ∧ class = 2nd" and "sex = female ∧ class = crew", and the description length falls to 1818.0 and then
+1783.4 bits. The next rule grown targets the third-class women, about half of whom survived, and its error rate on the
+pruning set reaches 50%, which ends learning. The final model reads: survived if female and not travelling third
+class, else died. It is right for 1724 of the 2201 people (0.783), below the 0.791 of the best list on these
+attributes. The difference is the 16 boys of the first two classes, all of whom survived: two rules for them would
+shorten the description to 1753.1 bits, but the greedy order stops before it reaches them. Other seeds stop
+elsewhere; one keeps the single rule "sex = female".
+
+The figure runs RIPPER on noisy two moons, where the rules are boxes and the growing and pruning sets can be seen.
+
+<RipperPhases />
+
+## Cost
+
+Growing a rule scores every candidate condition against the growing set at each step, $O(\abs{\mathcal{C}}\,n)$ per
+condition for $\abs{\mathcal{C}}$ candidate conditions. Pruning evaluates the prefixes of one rule on the pruning set.
+The description length after each rule costs one pass over the rows. Cohen shows that under mild assumptions the number
+of rules and their lengths grow slowly with $n$, so IREP, IREP* and RIPPER$k$ run in $O(n \log^2 n)$ time. He reports
+IREP learning from 500,000 examples in 7 <Gloss name="cpu" /> minutes, against an estimated 79 CPU years for C4.5rules
+on the same problem <Cite id="cohen1995" />.
+
+## Trade-offs
+
+- **Against C4.5rules.** RIPPER$k$ matched or beat C4.5rules in error rate on 22 of the 37 benchmark problems of
+  Cohen's study, at a fraction of the cost on large noisy sets <Cite id="cohen1995" />.
+- **Against CN2.** CN2 grows on all the data and stops by significance; RIPPER sacrifices a third of the data for each
+  rule's growth and gets an honest estimate of the rule's precision in return (see
+  <NoteLink to="hold-out-validation">hold-out validation</NoteLink>).
+- **Rule sets per class.** Learning the smallest class first gives the minority class explicit rules and the majority
+  class the default. The model is a list across classes and a set within each class.
+- **Description length constants.** The factor $\frac12$ on rule bits, the 64-bit slack and the exception code are
+  engineering choices. They work across Cohen's benchmarks; they are not derived from a model of the data.
+
+## Pitfalls
+
+- **Randomness.** Each rule uses a fresh random split, so different seeds give different rule sets, especially on
+  small data. Report the seed or average over several.
+- **Small data.** With a few hundred rows, a third of them is a small pruning set, and pruning decisions rest on a
+  handful of rows.
+- **Implementation differences.** Weka's JRip documents differences from Cohen's program, such as the pruning metric
+  $(p + 1)/(p + n + 2)$ in place of $(p - n)/(p + n)$, so results differ between implementations.
+- **Reading the default.** The most frequent class is explained only as "no rule fired", which may cover most of the
+  data.

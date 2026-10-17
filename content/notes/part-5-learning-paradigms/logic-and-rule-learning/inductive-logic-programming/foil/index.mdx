@@ -1,0 +1,183 @@
+---
+title: 'FOIL'
+kind: technique
+summary: 'FOIL learns first-order Horn clauses by sequential covering. It specialises each clause from an empty body by adding the literal with the highest FOIL gain, the gain in information about positive variable bindings weighted by the positives still covered (Quinlan).'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['first-order inductive learner']
+requires: [inductive-logic-programming, rule-quality-measures, sequential-covering]
+related: [differentiable-inductive-logic-programming, generality-ordering-and-refinement, ripper, inverse-entailment-and-progol, decision-tree, knowledge-graph-rule-mining]
+references: [quinlan1990, quinlan1993foil, cohen1995, deraedt2008]
+status: draft
+updated: 2026-10-17
+---
+
+import { FoilStepper } from './FoilStepper'
+
+<Definition>
+**FOIL** (First-Order Inductive Learner) learns a set of <NoteLink to="horn-clauses-and-logic-programs">definite
+clauses</NoteLink> for a target relation from background relations given as ground facts, positive examples and negative
+examples <Cite id="quinlan1990" />. An outer loop of <NoteLink to="sequential-covering">sequential covering</NoteLink>
+learns one clause, removes the positives it covers and repeats. An inner loop grows each clause from an empty body,
+adding at each step the literal with the highest **FOIL gain**
+
+$$
+\text{Gain}(L) = t \paren{\log_2 \frac{p_1}{p_1 + n_1} - \log_2 \frac{p_0}{p_0 + n_0}},
+$$
+
+where $p_0$ and $n_0$ count the positive and negative variable bindings before the literal $L$, $p_1$ and $n_1$ after
+it, and $t$ counts the positive bindings before $L$ that still have an extension after it. The clause is finished when
+it covers no negative binding.
+</Definition>
+
+## Problem
+
+Early inductive logic programming systems tested hypotheses by theorem proving and searched with little guidance, which
+limited them to small problems. Quinlan carried the ideas of <NoteLink to="decision-tree">decision trees</NoteLink> and
+propositional rule learners over to first-order clauses <Cite id="quinlan1990" />. The background relations are stored
+as tables of tuples, as in a relational database. A clause's coverage is computed by joining those tables, not by
+proving each example. And the next literal is chosen by an information measure, greedily, as a decision tree chooses
+its next split.
+
+FOIL keeps the shape of propositional sequential covering
+(<NoteLink to="rule-quality-measures">rule quality measures</NoteLink>, <NoteLink to="ripper">RIPPER</NoteLink>). It
+changes what a condition is. A propositional rule adds attribute tests. A FOIL clause adds literals such as
+$\text{parent}(X, Z)$, which may introduce a new variable $Z$ that later literals refer to. A single example can then
+satisfy a clause body in several ways, one for each value of the new variables, and the gain has to count those ways.
+
+## Mechanism
+
+### Tuples instead of examples
+
+FOIL represents the state of a growing clause by its **tuples**: the bindings of all the clause's variables that
+satisfy its body. The clause with an empty body, $\text{grandparent}(X, Y)$, has one tuple per example. Adding
+$\text{parent}(X, Z)$ replaces each tuple $(x, y)$ by one tuple $(x, y, z)$ per child $z$ of $x$, and drops the tuple if
+$x$ has no child. A tuple is positive when it extends a positive example and negative when it extends a negative one.
+The clause covers an example when at least one tuple extends it.
+
+Negatives usually come from the **closed-world assumption**: every tuple of constants of the target's arity that is not
+a positive example is negative. With $c$ constants and a binary target there are $c^2$ such tuples, minus the positives.
+
+### Candidate literals
+
+A literal added to the body has one of the forms $Q(V_1, \dots, V_k)$, $\neg Q(V_1, \dots, V_k)$, $V_i = V_j$ or
+$V_i \neq V_j$, where $Q$ is a background relation or the target, and at least one argument $V_i$ is a variable
+already in the clause <Cite id="quinlan1990" />. The other arguments may be new variables. That requirement keeps the
+clause connected: every literal constrains the variables already bound. With $v$ variables in the clause and a relation
+of arity $k$, about $(v + k - 1)^k$ argument patterns are possible, minus those that use no old variable.
+
+### FOIL gain
+
+Before the literal, a positive tuple drawn at random from the clause's $p_0 + n_0$ tuples carries the information
+$I_0 = -\log_2 \frac{p_0}{p_0 + n_0}$ bits: the cost of signalling that a tuple is positive. After the literal it costs
+$I_1 = -\log_2 \frac{p_1}{p_1 + n_1}$ bits. The gain multiplies the saving per tuple, $I_0 - I_1$, by $t$, the number of
+positive tuples that survive the literal in at least one extension. A literal must therefore both raise the fraction of
+positive tuples and keep many positives. A literal that keeps no positive tuple has gain $-\infty$.
+
+The factor is $t$ and not $p_1$ because a literal with a new variable can multiply tuples. If $\text{parent}(X, Z)$
+turns one positive tuple into two, $p_1$ counts both, but only one tuple before the literal was kept, and only kept
+tuples earn the saving. In the propositional case no tuple is ever split, $t = p_1$, and the gain reduces to the form in
+<NoteLink to="rule-quality-measures">rule quality measures</NoteLink>.
+
+### Stopping, recursion and simplification
+
+- **Clause complete.** The inner loop stops when no negative tuple is left. FOIL then removes the positives the clause
+  covers and starts the next clause from an empty body.
+- **Encoding length.** A clause is not grown further when the bits needed to encode it exceed the bits needed to list
+  the positive examples it covers <Cite id="quinlan1990" />. This stops FOIL from memorising noise and lets it learn
+  clauses that cover a few negatives.
+- **Recursion.** The target may appear in a body. Its tuples are taken from the positive examples, so coverage is
+  computed extensionally and needs no recursive proof. FOIL only accepts a recursive literal when an ordering of the
+  argument values guarantees that the recursion terminates.
+- **Determinate literals.** When no literal has positive gain, later versions add **determinate** literals, whose new
+  variables have exactly one value for each tuple, because they can make useful literals possible at the next step
+  <Cite id="quinlan1993foil" />.
+- **Simplification.** A learnt clause is pruned by dropping each literal whose removal keeps it covering no negatives
+  and no fewer positives.
+
+### The algorithm
+
+1. Let $P$ be the positive examples, $N$ the negatives. While $P$ is not empty:
+2. Start the clause $C$ with the target head and an empty body; its tuples are $P \cup N$.
+3. While $C$ has negative tuples: score every candidate literal by its gain, add the best, and extend the tuples.
+4. Simplify $C$, add it to the program, and remove from $P$ the examples it covers.
+
+## Worked example
+
+The family has seven people: Ann is the parent of Bob and Cid, Bob of Dee and Eve, Cid of Fay, Eve of Gus. Ann, Cid,
+Dee, Eve and Fay are female. The target is grandparent with the positives (ann, dee), (ann, eve), (ann, fay) and
+(bob, gus). The closed world gives $7^2 - 4 = 45$ negatives. Variables are named $A, B, C, \dots$ in the order FOIL
+creates them; the head is $\text{grandparent}(A, B)$.
+
+1. **Start.** The empty body has $p_0 = 4$ positive and $n_0 = 45$ negative tuples, one per example.
+   $I_0 = -\log_2 \frac{4}{49} = 3.615$ bits.
+2. **Candidate $\text{parent}(A, C)$.** Ann has two children, so each of her three positives becomes two tuples; Bob
+   has two children, so (bob, gus) becomes two. $p_1 = 8$. On the negative side, the four negatives starting with Ann
+   and the six starting with Bob double, and the seven starting with Cid and with Eve stay single: $n_1 = 8 + 12 + 7 + 7
+   = 34$. Every positive survives, so $t = 4$. The gain is $4 \paren{\log_2 \frac{8}{42} + 3.615} = 4 \times 1.222 =
+   4.89$.
+3. **Candidate $\text{parent}(C, B)$.** Each person in the second argument with a parent keeps one tuple:
+   $p_1 = 4$, $n_1 = 38$, $t = 4$, gain $4 \log_2 \frac{49}{42} = 0.89$. $\text{female}(A)$ keeps only Ann's three
+   positives and gains $0.21$. Of the 13 candidates, $\text{parent}(A, C)$ wins.
+4. **Second literal.** Now $p_0 = 8$, $n_0 = 34$ and $I_0 = -\log_2 \frac{8}{42} = 2.392$ bits. The candidate
+   $\text{parent}(C, B)$ keeps exactly the tuples in which Ann's or Bob's child is the parent of $B$: (ann, dee, bob),
+   (ann, eve, bob), (ann, fay, cid) and (bob, gus, eve). $p_1 = 4$, $n_1 = 0$, $t = 4$, and the gain is
+   $4 \times (0 + 2.392) = 9.57$, the best of 25 candidates. The runner-up, $\text{parent}(C, D)$, gains 6.35 and
+   leaves 18 negative tuples.
+5. **Clause complete.** $\text{grandparent}(A, B) \leftarrow \text{parent}(A, C) \land \text{parent}(C, B)$ has no
+   negative tuple. It covers all four positives, so the outer loop stops with a one-clause program.
+
+The ancestor task in the figure shows sequential covering and recursion. The first clause,
+$\text{ancestor}(A, B) \leftarrow \text{parent}(A, B)$, covers the 6 parent pairs among the 11 positives. The second
+clause grows $\text{parent}(A, C)$, then $\text{parent}(C, D)$ with gain 9.51 ahead of the recursive literal
+$\text{ancestor}(C, B)$ with gain 8.39, then $\text{ancestor}(C, B)$. Simplification drops the useless
+$\text{parent}(C, D)$ and returns $\text{ancestor}(A, B) \leftarrow \text{parent}(A, C) \land \text{ancestor}(C, B)$.
+Switching recursion off shows what FOIL learns without it.
+
+<FoilStepper />
+
+## Cost
+
+- **Candidates per step.** The number of argument patterns grows polynomially in the number of variables and
+  exponentially in the arity of the relations. The family task scores 13 literals at the first step and 25 at the
+  second.
+- **Tuples per candidate.** Scoring a literal joins its relation with the current tuples. Each new variable multiplies
+  the tuples by the fan-out of the relation, so a clause with several new variables can hold many more tuples than
+  there are examples.
+- **Closed-world negatives.** A binary target over $c$ constants has $c^2$ negative tuples; for a ternary target it is
+  $c^3$. Large problems sample the negatives.
+- **One pass per clause.** FOIL never backtracks over a chosen literal, so its total work is the number of literals
+  learnt times the cost of one scoring step, far less than <Gloss name="ilp" /> systems that search more of the
+  space.
+
+## Trade-offs
+
+- **Greedy against complete search.** Hill climbing on gain is fast and misses clauses whose literals pay off only
+  together. <NoteLink to="inverse-entailment-and-progol">Progol and Aleph</NoteLink> search a lattice bounded by a
+  bottom clause and find such clauses at higher cost.
+- **Extensional against intensional coverage.** Taking recursive calls from the positives makes coverage cheap and
+  exact on the training data. It can accept recursive programs that fail when run as a program, because the training
+  positives fill gaps that the learnt clauses do not.
+- **Bits of information against coverage counts.** The gain measures information about tuples, not examples. It
+  prefers literals that increase precision while keeping coverage, like propositional heuristics, and it is biased
+  towards literals that multiply positive tuples.
+- **FOIL's descendants.** The gain and the grow-then-simplify pattern carried over to
+  <NoteLink to="ripper">RIPPER</NoteLink> for propositional rules <Cite id="cohen1995" />, and to differentiable rule
+  learners that relax the literal choice (<NoteLink to="differentiable-inductive-logic-programming">differentiable
+  inductive logic programming</NoteLink>).
+
+## Pitfalls
+
+- **Literals with new variables look useless.** $\text{parent}(A, C)$ alone separates grandparents only weakly; its
+  value appears one step later. In tasks where such a literal removes no negatives at all its gain is close to zero,
+  and FOIL can stop or take a misleading literal. Determinate literals and lookahead address it.
+- **Tuple inflation.** A literal that adds a new variable with many values multiplies positive tuples and can earn a
+  high gain without discriminating. In the ancestor task, $\text{parent}(C, D)$ beats the correct recursive literal
+  before simplification removes it.
+- **Non-terminating recursion.** A clause such as $\text{ancestor}(A, B) \leftarrow \text{ancestor}(A, C) \land
+  \text{parent}(C, B)$ scores well extensionally and loops under Prolog's depth-first execution. Recursive literals need
+  a well-founded ordering check.
+- **Open-world data.** Closed-world negatives are wrong when the background or the positives are incomplete, as in
+  knowledge graphs; <NoteLink to="knowledge-graph-rule-mining">knowledge-graph rule mining</NoteLink> uses the partial
+  completeness assumption instead.
+- **Reading gain across clauses.** Gains are relative to the parent clause, so the gain of literals in different
+  clauses or different tasks cannot be compared.

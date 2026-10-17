@@ -1,0 +1,171 @@
+---
+title: 'Predicate invention'
+kind: concept
+summary: 'Predicate invention introduces predicates absent from the background knowledge, such as parent when learning grandparent from mother and father facts. Invented predicates shorten programs and enable recursion; Metagol and Popper invent them by search.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['invented predicates', 'intra-construction', 'W-operator']
+requires: [meta-interpretive-learning]
+related: [learning-from-failures, inductive-logic-programming, program-synthesis-from-examples, inverse-entailment-and-progol, statistical-relational-learning, differentiable-inductive-logic-programming, minimum-description-length]
+references: [muggleton1988cigol, stahl1993, kramer2020history, muggleton2015mil, cropper2021poppi, hocquette2020bottomup, kok2007spi, cropper2022ilp30, ellis2021dreamcoder]
+status: draft
+updated: 2026-10-17
+---
+
+import { InventionCompare } from './InventionCompare'
+
+<Definition>
+In an <NoteLink to="inductive-logic-programming">inductive logic programming</NoteLink> problem with background
+knowledge $B$ and examples $E^+$ and $E^-$, a hypothesis $H$ **invents a predicate** when it uses a predicate symbol
+that occurs neither in $B$ nor in the examples <Cite id="cropper2021poppi" />. The invented predicate is defined by
+clauses of $H$ and used in the bodies of other clauses of $H$. **Predicate invention** is the search for such
+hypotheses: the learner chooses the new predicate's arity, its definition and where it is called, with no examples of
+it.
+</Definition>
+
+## Intuition
+
+A learner is given the mother and father facts of a family and examples of grandparent. Without a parent predicate,
+the definition needs one clause for each way two generations can combine:
+
+$$
+\begin{aligned}
+\text{grandparent}(A, B) &\leftarrow \text{mother}(A, C) \land \text{mother}(C, B), \\
+\text{grandparent}(A, B) &\leftarrow \text{mother}(A, C) \land \text{father}(C, B),
+\end{aligned}
+$$
+
+and two more for father followed by mother and father followed by father. Four clauses of three literals make 12
+literals. A learner that may invent a predicate writes
+
+$$
+\begin{aligned}
+\text{grandparent}(A, B) &\leftarrow \text{inv}(A, C) \land \text{inv}(C, B), \\
+\text{inv}(A, B) &\leftarrow \text{mother}(A, B), \\
+\text{inv}(A, B) &\leftarrow \text{father}(A, B),
+\end{aligned}
+$$
+
+three clauses and 7 literals. The new symbol $\text{inv}$ is parent, a concept nobody supplied
+<Cite id="cropper2021poppi" />. The program is shorter because $\text{inv}$ is defined once and used twice.
+
+Shorter programs are easier to find. The number of programs an <Gloss name="ilp" /> learner considers grows
+exponentially with the size of the smallest solution, so a change of vocabulary that shrinks the solution shrinks the
+search. An invented predicate is also a new concept that later tasks can reuse, the logic-programming form of learning
+a representation <Cite id="kramer2020history" />.
+
+## Details
+
+### What invention buys
+
+- **Compression.** A definition used $u$ times saves the length of its body $u - 1$ times, at the cost of its own
+  clauses. The grandparent program saves 5 literals.
+- **Expressivity under a bias.** A language bias that limits clause bodies, such as the two-literal chain metarule
+  $P(A, B) \leftarrow Q(A, C) \land R(C, B)$, cannot express great-grandparent, which needs three parent steps. With an
+  invented grandparent it can: $\text{greatgrandparent}(A, B) \leftarrow \text{parent}(A, C) \land \text{inv}(C, B)$.
+- **Recursion through helpers.** Many recursive programs need an auxiliary predicate, such as reversing a list with an
+  accumulator. When the helper is not in $B$, it must be invented.
+- **Exponential compression by chaining.** Moving $k$ steps along a line with a single clause needs $k$ body literals.
+  Invented predicates that each double the previous one need about $\log_2 k$ clauses. Cropper and Morel report a
+  program of 10 literals that moves right 16 times, against the 17 literals of the single clause
+  <Cite id="cropper2021poppi" />.
+
+### Why it is hard
+
+Without invention, the vocabulary of the hypotheses is fixed by $B$. With invention, each new symbol adds a choice of
+arity, of argument positions and of definition, and none of its facts are observed, so it cannot be scored on its own.
+A learner that scores clauses one at a time, such as <NoteLink to="foil">FOIL</NoteLink> or
+<NoteLink to="inverse-entailment-and-progol">Progol</NoteLink>, has nothing to score an invented clause against. Early
+surveys list the open questions as when to invent, what arguments to give the new predicate and how to keep the
+enlarged space searchable <Cite id="stahl1993" />, and predicate invention remains one of the main open problems of the
+field <Cite id="cropper2022ilp30" />.
+
+### Inverse resolution
+
+The first systems invented predicates by running resolution backwards. CIGOL's **intra-construction**, one of the
+W-operators, takes two clauses with the same head and a shared part of the body, $p \leftarrow A \land B$ and
+$p \leftarrow A \land C$, and replaces them with $p \leftarrow A \land q$, $q \leftarrow B$ and $q \leftarrow C$, where
+$q$ is new <Cite id="muggleton1988cigol" />. Resolving the new clauses on $q$ gives back the originals, so the rewrite
+keeps every consequence. The operator compresses when the shared part is long, but it offered no complete search: the
+learner applied it where a user or a heuristic pointed.
+
+### Invention as search
+
+Modern systems put invented symbols into the hypothesis space and let the search decide.
+
+- **Meta-interpretive learning.** In Metagol, a predicate variable in a metarule's body may be bound to a fresh symbol,
+  whose definition is then built by further metarule instances while the examples are proved
+  (<NoteLink to="meta-interpretive-learning">meta-interpretive learning</NoteLink>). Iterative deepening on the number
+  of clauses returns a program with the fewest clauses, so invention happens when it saves clauses
+  <Cite id="muggleton2015mil" />. Hocquette and Muggleton give a bottom-up form of invention for
+  meta-interpretive learning and prove it complete <Cite id="hocquette2020bottomup" />.
+- **Learning from failures.** Poppi extends <NoteLink to="learning-from-failures">Popper</NoteLink> by allowing invented
+  symbols in the heads and bodies of generated programs, with no metarules and no user-given arity. Popper's
+  elimination constraint prunes non-recursive programs that contain a clause proving no positive. An invented
+  predicate always appears in a body, so Poppi replaces it with a redundancy constraint over clause dependencies that
+  is sound for optimal solutions <Cite id="cropper2021poppi" />.
+
+### Beyond logic programs
+
+Statistical predicate invention clusters the objects and relations of a database jointly and uses the clusters as new
+predicates in a <NoteLink to="markov-logic-networks">Markov logic network</NoteLink> <Cite id="kok2007spi" />. Library
+learning in program synthesis does the same for functions: DreamCoder adds subprograms shared by many solutions to its
+language (<NoteLink to="program-synthesis-from-examples">program synthesis from examples</NoteLink>)
+<Cite id="ellis2021dreamcoder" />. The hidden units of a neural network play a similar role without names or
+definitions that a person can read <Cite id="kramer2020history" />.
+
+## Worked example
+
+The figure uses the family database extended by two generations: Ann is the mother of Bob and Cid, Bob the father of
+Dee and Eve, Cid the mother of Fay, Eve the mother of Gus, Gus the father of Hal and Hal the father of Ivy. The
+metarules are ident and chain, and the clause bound is 4.
+
+1. **Mother and father facts.** Splitting the eight parent facts by the parent's sex gives four mother facts and four
+   father facts. The grandparent positives are (ann, dee), (ann, eve), (ann, fay), (bob, gus), (eve, hal) and (gus,
+   ivy). They use all four combinations: mother then father (Ann, Bob, Dee), mother then mother (Ann, Cid, Fay), father
+   then mother (Bob, Eve, Gus) and father then father (Gus, Hal, Ivy).
+2. **Without invention.** No program of 1, 2 or 3 clauses proves all six positives, because each chain clause covers one
+   combination. At 4 clauses Metagol finds the four combinations after 1160 search events: 12 literals.
+3. **With invention.** At 3 clauses, the chain clause $\text{grandparent}(A, B) \leftarrow \text{inv1}(A, C) \land
+   \text{inv1}(C, B)$ with $\text{inv1}$ defined by ident twice, once on mother and once on father, proves every
+   positive and none of the five negatives. Iterative deepening reaches it before the 4-clause bound: 3 clauses, 7
+   literals. The search takes 12616 events, ten times more than without invention, because every open predicate now has
+   one more possible binding.
+4. **Intra-construction gives the same program.** The four clauses of step 2 share the head. Pairing the two that start
+   with $\text{mother}(A, C)$ factors out $\text{inv}(C, B) \leftarrow \text{mother}(C, B)$ and
+   $\text{inv}(C, B) \leftarrow \text{father}(C, B)$; the father pair factors the same way with the same
+   $\text{inv}$. The two remaining grandparent clauses differ only in their first literal. A second intra-construction
+   factors it out into a new predicate defined by mother and by father, the same definition as $\text{inv}$, and
+   merging the two gives the 3-clause program.
+5. **Great-grandparent.** With positives (ann, gus), (bob, hal) and (eve, ivy), no program of at most 4 clauses over
+   parent exists without invention: chain bodies have two literals, and recursive programs prove negatives such as
+   (ann, eve). With invention, the program $\text{greatgrandparent}(A, B) \leftarrow \text{parent}(A, C) \land
+   \text{inv1}(C, B)$, $\text{inv1}(A, B) \leftarrow \text{parent}(A, C) \land \text{parent}(C, B)$ is found after 314
+   events. $\text{inv1}$ is grandparent.
+6. **Great-great-grandparent.** The invented grandparent is used twice: $\text{greatgreatgrandparent}(A, B) \leftarrow
+   \text{inv1}(A, C) \land \text{inv1}(C, B)$. Two clauses of three literals describe four generations.
+
+<InventionCompare />
+
+## Assumptions
+
+- **The bias admits the useful predicate.** An invented predicate is built from the same metarules or declarations as
+  every other clause. If parent could only be defined by a clause shape the bias excludes, it is never invented.
+- **Exact examples.** Metagol and Popper accept a program only if it proves every positive and no negative. An invented
+  predicate that fits a mislabelled example is accepted as readily as a correct one.
+- **The size measure matches the preference.** Metagol minimises clauses and Popper literals. Invention happens when it
+  lowers that measure, not when it would yield a more general or more readable program.
+
+## Pitfalls
+
+- **Invention when nothing forces it.** Drop (gus, ivy) from the grandparent positives and the father-then-father
+  combination disappears from the examples. Three chain clauses without invention then prove every remaining positive,
+  and Metagol returns them although invention is allowed, because the invented program also has three clauses and the
+  search tries background predicates first. The returned program misses every father-then-father pair.
+- **Search cost.** Each invented symbol adds bindings at every open predicate. In the grandparent task the search grows
+  from 1160 to 12616 events. Systems bound the number of invented symbols and their arity.
+- **Uninterpretable symbols.** The learner names its predicates inv1 and inv2. An invented predicate can fit the
+  training examples without matching any concept a person would recognise, and two runs can invent different
+  predicates for one task.
+- **Redundant inventions.** A predicate defined only as a renaming of a background predicate, $\text{inv}(A, B)
+  \leftarrow \text{parent}(A, B)$, adds a clause and saves nothing. Such a definition is never part of a smallest
+  program, but the search still generates and tests the programs that contain it unless a constraint excludes them.

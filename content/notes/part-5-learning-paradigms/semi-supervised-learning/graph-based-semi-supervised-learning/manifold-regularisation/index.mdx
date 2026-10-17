@@ -1,0 +1,253 @@
+---
+title: 'Manifold regularisation'
+kind: technique
+summary: 'Manifold regularisation adds $\fvec^\top \Lmat \fvec$, with $\Lmat$ the graph Laplacian over labelled and unlabelled points, to a supervised kernel loss, so the function varies little along the data. A representer theorem gives Laplacian least squares and SVMs that predict new points.'
+tags: [semi-supervised, graphs, kernel-methods, classification, worked-example]
+aliases:
+  - Laplacian regularised least squares
+  - LapRLS
+  - Laplacian support vector machine
+  - LapSVM
+  - graph Laplacian regularisation
+requires: [label-propagation, reproducing-kernel-hilbert-space]
+related:
+  [
+    kernel-ridge-regression,
+    representer-theorem,
+    laplacian-eigenmaps,
+    label-spreading,
+    graph-construction-for-semi-supervised-learning,
+    semi-supervised-regression,
+    transductive-support-vector-machine,
+  ]
+references: [belkin2006manifold, melacci2011lapsvm, nadler2009infinite, weston2008embedding, kipf2017]
+status: draft
+updated: 2026-10-17
+---
+
+import { LaplacianBoundary } from './LaplacianBoundary'
+
+<Definition>
+Given $l$ labelled pairs $(\xvec_i, y_i)$, $u$ unlabelled inputs, a kernel $k$ with <Gloss name="rkhs">reproducing
+kernel Hilbert space</Gloss> $\Hcal$, and the Laplacian $\Lmat = \Dmat - \Wmat$ of a
+<NoteLink to="spectral-clustering">similarity graph</NoteLink> over all $n = l + u$ inputs, **manifold regularisation**
+chooses
+
+$$
+f^* = \argmin_{f \in \Hcal}\; \frac{1}{l}\sum_{i=1}^{l} V(y_i, f(\xvec_i)) + \gamma_A\norm{f}_{\Hcal}^2
++ \frac{\gamma_I}{n^2}\,\fvec^\top\Lmat\fvec,
+$$
+
+where $V$ is a loss, $\fvec = (f(\xvec_1), \dots, f(\xvec_n))$ holds the function's values at all $n$ inputs, and
+$\gamma_A > 0$ and $\gamma_I \ge 0$ weigh the two penalties. The minimiser is
+$f^*(\xvec) = \sum_{i=1}^{n}\alpha_i k(\xvec_i, \xvec)$, a function defined on the whole input space
+<Cite id="belkin2006manifold" />.
+</Definition>
+
+## Problem
+
+Graph methods such as <NoteLink to="label-propagation">label propagation</NoteLink> and
+<NoteLink to="label-spreading">label spreading</NoteLink> assign scores to the nodes of a graph and nothing else. They
+are transductive: a point that arrives after the graph is built has no score until it is added to the graph and the
+propagation is run again. Supervised kernel methods such as <NoteLink to="kernel-ridge-regression">kernel ridge
+regression</NoteLink> and the <NoteLink to="support-vector-machine">support vector machine</NoteLink> produce a function
+of any input, but they see only the labelled points. With two labels, their decision boundary is set by where those two
+points happen to lie.
+
+Manifold regularisation, introduced by Belkin, Niyogi and Sindhwani, combines the two
+<Cite id="belkin2006manifold" />. It keeps the supervised kernel model, its loss and its penalty on the function's norm.
+It adds one term, the graph penalty of label propagation evaluated on the function's values at the labelled and
+unlabelled points. The result is a classifier or regressor that uses the unlabelled data and predicts new inputs.
+
+## Mechanism
+
+### Two penalties
+
+The **ambient penalty** $\gamma_A\norm{f}_{\Hcal}^2$ is the usual kernel regulariser. It measures how rough $f$ is over
+the whole input space, whatever the data look like.
+
+The **intrinsic penalty** measures how much $f$ changes along the data. Expanding the quadratic form,
+
+$$
+\fvec^\top\Lmat\fvec = \frac{1}{2}\sum_{i, j = 1}^{n} W_{ij}\paren{f(\xvec_i) - f(\xvec_j)}^2,
+$$
+
+the energy of <NoteLink to="label-propagation">label propagation</NoteLink>. It is large when $f$ takes different values
+at points joined by a strong edge, and it ignores how $f$ behaves away from the data. When the inputs lie on a
+low-dimensional manifold $\Mcal$ and the graph is built with Gaussian weights from a growing sample, the normalised form
+$\fvec^\top\Lmat\fvec/n^2$ approximates $\int_{\Mcal}\norm{\nabla_{\Mcal}f}^2\, dP$, the squared gradient of $f$ along
+the manifold averaged over the input density <Cite id="belkin2006manifold" />. The factor $1/n^2$ keeps $\gamma_I$ on
+the same scale as the sample grows. A function with a small intrinsic penalty is nearly constant on each dense region
+and changes in the gaps between them, which is the <NoteLink to="semi-supervised-assumptions">cluster
+assumption</NoteLink>.
+
+The two penalties split the work. With $\gamma_I = 0$ the method is the supervised kernel method. As $\gamma_A \to 0$,
+the values of $f$ at the $n$ points are free, and the problem becomes label propagation with the labels as a soft
+constraint: fit the labels, penalise the graph energy. As $\gamma_I$ grows, $f$ becomes nearly constant on every
+connected component of the graph.
+
+### A representer theorem
+
+The objective depends on $f$ through three things: its values at the $l$ labelled points, its values at all $n$
+points, and its norm. The argument of the <NoteLink to="representer-theorem">representer theorem</NoteLink> applies with
+the training set enlarged to all $n$ points. Split $f = f_\parallel + f_\perp$, with $f_\parallel$ in the span of
+$k(\xvec_1, \cdot), \dots, k(\xvec_n, \cdot)$ and $f_\perp$ orthogonal to it. The reproducing property gives
+$f(\xvec_j) = \inner{f}{k(\xvec_j, \cdot)}_{\Hcal} = f_\parallel(\xvec_j)$ at every one of the $n$ points, so the loss
+and the intrinsic penalty do not see $f_\perp$. The norm satisfies
+$\norm{f}_{\Hcal}^2 = \norm{f_\parallel}_{\Hcal}^2 + \norm{f_\perp}_{\Hcal}^2$, so any $f_\perp \ne 0$ raises the
+objective. The minimiser therefore has the form
+
+$$
+f^*(\xvec) = \sum_{i=1}^{n}\alpha_i\, k(\xvec_i, \xvec)
+$$
+
+with one coefficient for each labelled **and** unlabelled point <Cite id="belkin2006manifold" />. The unlabelled points
+become centres of the expansion, and the learning problem reduces to $n$ numbers.
+
+### Laplacian regularised least squares
+
+With the squared loss $V(y, f) = (y - f)^2$ the coefficients have a closed form. Let $\Kmat$ be the $n \times n$ Gram
+matrix over all inputs, so $\fvec = \Kmat\alphavec$ and $\norm{f}_{\Hcal}^2 = \alphavec^\top\Kmat\alphavec$. Let
+$\Jmat = \diag(1, \dots, 1, 0, \dots, 0)$ mark the $l$ labelled points (listed first) and let $\yvec$ hold their
+targets, padded with zeros for the unlabelled points. The objective is
+
+$$
+J(\alphavec) = \frac{1}{l}\norm{\yvec - \Jmat\Kmat\alphavec}^2 + \gamma_A\,\alphavec^\top\Kmat\alphavec
++ \frac{\gamma_I}{n^2}\,\alphavec^\top\Kmat\Lmat\Kmat\alphavec.
+$$
+
+It is a convex quadratic in $\alphavec$. Its gradient, using $\Jmat^\top\Jmat = \Jmat$ and the symmetry of $\Kmat$ and
+$\Lmat$, is
+
+$$
+\nabla J = \frac{2}{l}\Kmat\paren{\Jmat\Kmat\alphavec - \yvec} + 2\gamma_A\Kmat\alphavec
++ \frac{2\gamma_I}{n^2}\Kmat\Lmat\Kmat\alphavec
+= \frac{2}{l}\Kmat\brack{\Jmat\Kmat\alphavec - \yvec + \gamma_A l\,\alphavec + \frac{\gamma_I l}{n^2}\Lmat\Kmat\alphavec}.
+$$
+
+Setting the bracket to zero gives the **Laplacian regularised least squares** (LapRLS) solution
+<Cite id="belkin2006manifold" />:
+
+$$
+\alphavec^* = \paren{\Jmat\Kmat + \gamma_A l\,\I + \frac{\gamma_I l}{n^2}\Lmat\Kmat}^{-1}\yvec.
+$$
+
+With $\gamma_I = 0$, the rows of the unlabelled points read $\gamma_A l\,\alpha_i = 0$, so their coefficients vanish,
+and the labelled rows reduce to $(\Kmat_{LL} + \gamma_A l\,\I)\alphavec_L = \yvec_L$: kernel ridge regression with
+penalty $\lambda = \gamma_A l$. For two classes the targets are $\pm 1$ and a new input is assigned the sign of
+$f^*(\xvec)$.
+
+<Derivation title="Laplacian support vector machine">
+With the <Gloss name="hinge-loss">hinge loss</Gloss> $V(y, f) = \max(0, 1 - yf)$ the same representer theorem holds, and
+the problem becomes a support vector machine with a modified kernel. Belkin et al. derive the dual: the $l$ multipliers
+$\betavec$ solve the standard SVM quadratic programme
+
+$$
+\betavec^* = \argmax_{\betavec}\; \sum_{i=1}^{l}\beta_i - \frac{1}{2}\betavec^\top\Qmat\betavec
+\quad\text{subject to}\quad \sum_{i=1}^{l}\beta_i y_i = 0,\; 0 \le \beta_i \le \frac{1}{l},
+$$
+
+with $\Qmat = \Ymat\Jmat_l\Kmat\paren{2\gamma_A\I + \frac{2\gamma_I}{n^2}\Lmat\Kmat}^{-1}\Jmat_l^\top\Ymat$, where
+$\Jmat_l = [\I \;\; \zeros]$ is the $l \times n$ selector of the labelled points and $\Ymat = \diag(y_1, \dots, y_l)$.
+The $n$ expansion coefficients follow from the linear system
+$\alphavec^* = \paren{2\gamma_A\I + \frac{2\gamma_I}{n^2}\Lmat\Kmat}^{-1}\Jmat_l^\top\Ymat\betavec^*$
+<Cite id="belkin2006manifold" />. A standard SVM solver therefore trains a Laplacian SVM once $\Qmat$ is formed. With
+$\gamma_I = 0$, $\Qmat$ is the usual SVM matrix and the unlabelled coefficients vanish.
+</Derivation>
+
+## Worked example
+
+Six inputs lie on a line: a left cluster at $0, 1, 2$ and a right cluster at $3.5, 4.5, 5.5$. The point at 0 is
+labelled $+1$ and the point at 3.5 is labelled $-1$; the other four are unlabelled. The kernel is Gaussian with
+lengthscale 1, $k(x, x') = \exp(-(x - x')^2/2)$, and $\gamma_A = 0.05$.
+
+**Step 1: kernel ridge regression ($\gamma_I = 0$).** Only the two labelled points get coefficients. Their kernel value
+is $k(0, 3.5) = e^{-6.125} = 0.002$, so $(\Kmat_{LL} + 0.1\,\I)\alphavec_L = (1, -1)$ gives
+$\alphavec_L \approx (0.911, -0.911)$. The value at the unlabelled point 2 is
+
+$$
+f(2) = 0.911\,k(0, 2) - 0.911\,k(3.5, 2) = 0.911 \times (0.135 - 0.325) = -0.173.
+$$
+
+Point 2 sits in the left cluster but is 1.5 from the negative label and 2 from the positive one, so it is classified
+$-1$. The boundary is at $x = 1.75$, halfway between the labels: $f(1.75) = 0$.
+
+**Step 2: the graph.** Join each point to its nearest neighbour with weight 1. The edges are $0 - 1$, $1 - 2$,
+$3.5 - 4.5$ and $4.5 - 5.5$; there is no edge across the gap of 1.5 between 2 and 3.5. The Laplacian is block diagonal,
+one block per cluster:
+
+$$
+\Lmat = \begin{pmatrix}\Bmat & \zeros \\ \zeros & \Bmat\end{pmatrix}, \qquad
+\Bmat = \begin{pmatrix} 1 & -1 & 0 \\ -1 & 2 & -1 \\ 0 & -1 & 1\end{pmatrix},
+$$
+
+and $\fvec^\top\Lmat\fvec$ is the sum of the four squared differences along the edges.
+
+**Step 3: LapRLS.** Take $\gamma_I/n^2 = 1$ ($\gamma_I = 36$ for $n = 6$). Solving the LapRLS system gives fitted values
+
+$$
+\fvec = (0.820,\; 0.781,\; 0.710,\; -0.819,\; -0.803,\; -0.757)
+$$
+
+at $0, 1, 2, 3.5, 4.5, 5.5$. Point 2 is now $+1$, with nearly the same value as its cluster. The labelled values have
+dropped from 0.909 to about 0.82 in magnitude: the graph term traded a little fit at the labels for agreement along
+the edges.
+
+**Step 4: new inputs.** The function predicts points that were not in the graph. At $x = 1.75$, where kernel ridge
+regression gave exactly 0, LapRLS gives $f(1.75) = 0.806$. At $x = 2.75$, in the gap, it gives $-0.063$, close to the
+new boundary. Raising $\gamma_I/n^2$ to 100 makes the values within each cluster equal to two decimals
+($0.810, 0.809, 0.808$), the limit in which the graph term is zero.
+
+The figure runs the same method on two moons with one label per class and tests it on fresh points.
+
+<LaplacianBoundary />
+
+## Cost
+
+- **Fitting.** LapRLS solves one dense $n \times n$ system, $O(n^3)$ time and $O(n^2)$ memory, with $n$ the number of
+  labelled plus unlabelled points. Forming $\Lmat\Kmat$ costs $O(n^2 k)$ on a $k$-nearest-neighbour graph. LapSVM adds
+  a quadratic programme in only $l$ variables.
+- **Training in the primal.** Melacci and Belkin solve LapSVM in the primal by preconditioned <Gloss name="cg">conjugate
+  gradient</Gloss> with <NoteLink to="early-stopping">early stopping</NoteLink>, which cuts the cost from $O(n^3)$ to
+  $O(kn^2)$ with an empirically small number of steps $k$ <Cite id="melacci2011lapsvm" />.
+- **Prediction.** A new input costs $n$ kernel evaluations, one per labelled or unlabelled point, against $l$ for a
+  supervised kernel machine. The unlabelled points are part of the model.
+
+## Trade-offs
+
+- **Induction against simplicity.** Label propagation needs only a graph and a solve; manifold regularisation adds a
+  kernel and a second penalty, and in return predicts new inputs. When all test points are known in advance,
+  propagation over the full graph is cheaper and needs no kernel.
+- **Three hyperparameters plus a graph.** $\gamma_A$, $\gamma_I$ and the kernel width are tuned with few labels. Belkin
+  et al. split one supervised penalty between the two terms in a fixed ratio, $\gamma_A l = 0.005$ and
+  $\gamma_I l/n^2 = 0.045$ on handwritten digits, and report that the conclusions held across a wide range of values
+  <Cite id="belkin2006manifold" />.
+- **Any loss.** The intrinsic penalty is added to the objective, not built into the solver. Squared loss gives LapRLS,
+  hinge loss gives LapSVM, and other losses give other members of the family, each extended to new points by the same
+  representer theorem.
+
+**Use today.** The graph penalty outlived the kernel machines. Weston, Ratle and Collobert add a graph-based embedding
+penalty on unlabelled pairs to the loss of a deep network, at the output or at every layer, and train it by
+<Gloss name="sgd">stochastic gradient descent</Gloss> <Cite id="weston2008embedding" />. Kipf and Welling list label
+propagation and manifold regularisation as the graph-Laplacian regularisation family that the
+<NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> replaced on citation graphs, by
+conditioning the model on the graph instead of penalising it <Cite id="kipf2017" />. In its kernel form, LapRLS is a
+common method for <NoteLink to="semi-supervised-regression">semi-supervised regression</NoteLink>.
+
+## Pitfalls
+
+- **The graph decides the boundary.** The intrinsic term pulls the boundary into regions where the graph has weak
+  edges. If an edge joins two classes, the penalty pulls them together; see
+  <NoteLink to="graph-construction-for-semi-supervised-learning">graph construction</NoteLink>.
+- **The graph term alone degenerates with many unlabelled points.** With a fixed number of labels, the graph-Laplacian
+  solution becomes uninformative as the number of unlabelled points grows in input dimension 2 or more: it tends to a
+  function that is nearly constant except for spikes at the labelled points <Cite id="nadler2009infinite" />. The
+  result applies to label propagation and to manifold regularisation with a small $\gamma_A$.
+- **Scaling of $\gamma_I$.** The paper's $1/n^2$ factor and the alternative $1/\sum_{ij}W_{ij}$ for sparse graphs
+  change the meaning of a given $\gamma_I$ by orders of magnitude <Cite id="belkin2006manifold" />. A value copied from
+  another implementation is only meaningful with its normalisation.
+- **Memory.** The model stores all $n$ training inputs, and the dense solve limits the exact method to tens of thousands
+  of points.
+- **Assumption.** The method helps only when the classes follow the graph's dense regions, the cluster or manifold
+  assumption. When a class boundary crosses a dense region, the intrinsic term pushes the boundary out of it and
+  misclassifies the region.

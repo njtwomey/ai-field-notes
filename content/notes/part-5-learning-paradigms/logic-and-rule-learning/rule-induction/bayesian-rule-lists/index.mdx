@@ -1,0 +1,211 @@
+---
+title: 'Bayesian rule lists'
+kind: technique
+summary: 'Bayesian rule lists place a prior over decision lists that favours few rules with few conditions, built from pre-mined frequent antecedents, and sample lists from the posterior by Metropolis-Hastings moves that add, remove or swap rules (Letham et al.).'
+tags: [logic, rule-learning, bayesian, interpretability, worked-example]
+aliases: [BRL, Bayesian rule list, scalable Bayesian rule lists, SBRL, BRL-point]
+requires: [decision-lists-and-rule-sets, markov-chain-monte-carlo]
+related:
+  [
+    certifiably-optimal-rule-lists,
+    metropolis-hastings,
+    dirichlet-distribution,
+    pattern-mining,
+    association-rule-classification,
+    marginal-likelihood-and-bayesian-occams-razor,
+    intrinsically-interpretable-models,
+  ]
+references: [letham2015, yang2017sbrl, angelino2018, rudin2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { BrlSampler } from './BrlSampler'
+
+<Definition>
+**<Gloss name="brl">Bayesian rule lists</Gloss>** treat a decision list as an unknown with a prior and a posterior
+<Cite id="letham2015" />. The rules' antecedents come from a fixed collection $\Acal$ mined in advance, every
+conjunction of attribute values with enough support. The prior on a list $d = (a_1, \dots, a_m)$ of distinct antecedents
+favours small $m$ and short antecedents; each rule's class distribution has a Dirichlet prior and is integrated out,
+which gives a closed-form <NoteLink to="marginal-likelihood-and-bayesian-occams-razor">marginal likelihood</NoteLink>.
+Metropolis-Hastings samples lists from the posterior by moving, adding and removing antecedents. Each rule of a sampled
+list reports a posterior class probability with a credible interval.
+</Definition>
+
+## Problem
+
+Greedy rule learners such as <NoteLink to="sequential-covering">CN2</NoteLink> and
+<NoteLink to="ripper">RIPPER</NoteLink> return one list, built one rule at a time, with no measure of how much better
+it is than the lists they did not try. Their size is controlled by stopping heuristics rather than by a stated
+preference. Their rules carry class labels, not calibrated probabilities. A clinician who replaces a risk score with a
+learned list needs a short list, probabilities with uncertainty, and a search that is not trapped by its first rule.
+
+Bayesian rule lists answer each point with standard Bayesian machinery. The preference for short lists becomes a
+prior with two interpretable parameters. Accuracy becomes a likelihood that rewards rules whose captured rows are
+homogeneous. The search becomes sampling, which visits lists in proportion to their posterior probability, so a
+better list found later replaces an early one. The cost is a search space of permutations, which is made tractable by
+restricting rules to a pre-mined collection of antecedents. The method keeps the model form of
+<NoteLink to="decision-lists-and-rule-sets">decision lists</NoteLink> and the pre-mined rules of
+<NoteLink to="association-rule-classification">associative classifiers</NoteLink>; it changes how a list is chosen.
+
+## Mechanism
+
+### Pre-mined antecedents
+
+The candidates $\Acal$ are all conjunctions of at most $C$ conditions whose support, the fraction of training rows they
+cover, is at least a threshold. For binary or categorical features this is frequent itemset mining (see
+<NoteLink to="pattern-mining">frequent itemsets and association rules</NoteLink>); any complete miner returns the same
+set. Numeric features are first cut at interpretable thresholds or quantiles <Cite id="letham2015" />. In the stroke
+study of Letham et al., a support of 10% and $C = 2$ left about 2200 antecedents.
+
+### The prior
+
+A list is generated in three steps, with $\lambda > 0$ and $\eta > 0$ the prior means of the list length and of the
+number of conditions per antecedent:
+
+1. Draw the length $m$ from a Poisson($\lambda$) truncated to $\{0, \dots, \abs{\Acal}\}$.
+2. For each position $j$, draw the antecedent's cardinality $c_j$ from a Poisson($\eta$) truncated to the
+   cardinalities $R_j$ that still have unused antecedents.
+3. Draw the antecedent $a_j$ uniformly among the unused antecedents of cardinality $c_j$.
+
+The prior probability of a list is the product of these choices:
+
+$$
+p(d \mid \Acal, \lambda, \eta) = \frac{\lambda^m / m!}{\sum_{k=0}^{\abs{\Acal}} \lambda^k/k!}
+\prod_{j=1}^{m} \frac{\eta^{c_j} / c_j!}{\sum_{k \in R_j} \eta^k / k!} \cdot \frac{1}{\#\{a \in \Acal \setminus
+\{a_1, \dots, a_{j-1}\} : \abs{a} = c_j\}}.
+$$
+
+Long lists pay a Poisson factor for $m$ and a uniform choice factor for each antecedent. Long antecedents pay a Poisson
+factor for $c_j$, and their choice factor is larger because there are more of them.
+
+### The likelihood
+
+Rule $j$ of the list captures the rows its antecedent covers that no earlier antecedent covers; the default rule $j = 0$
+captures the rest. Write $N_{j,l}$ for the number of rows of class $l \in \{1, \dots, L\}$ captured by rule $j$,
+$\nvec_j = (N_{j,1}, \dots, N_{j,L})$ for its count vector, and
+$\thetavec_j$ for the class distribution of rule $j$, with prior $\thetavec_j \sim \Dir(\alphavec)$. Given $d$, the
+captured labels are independent categorical draws, so
+
+$$
+p(\yvec \mid \Xmat, d, \thetavec) = \prod_{j=0}^{m} \prod_{l=1}^{L} \theta_{j,l}^{N_{j,l}}.
+$$
+
+Integrating each $\thetavec_j$ against its Dirichlet density, whose normaliser is the multivariate Beta function
+$B(\alphavec) = \prod_l \Gamma(\alpha_l)/\Gamma(\sum_l \alpha_l)$, gives
+
+$$
+\int \prod_l \theta_{j,l}^{N_{j,l}} \,\frac{\prod_l \theta_{j,l}^{\alpha_l - 1}}{B(\alphavec)}\, d\thetavec_j
+= \frac{B(\alphavec + \nvec_j)}{B(\alphavec)},
+$$
+
+because the integrand is an unnormalised Dirichlet density with parameters $\alphavec + \nvec_j$. The marginal
+likelihood of a list is the product over its rules:
+
+$$
+p(\yvec \mid \Xmat, d, \alphavec) = \prod_{j=0}^{m} \frac{\Gamma(\sum_l \alpha_l)}{\prod_l \Gamma(\alpha_l)}
+\cdot \frac{\prod_l \Gamma(N_{j,l} + \alpha_l)}{\Gamma(\sum_l (N_{j,l} + \alpha_l))}.
+$$
+
+A rule whose captured rows are all of one class has a large factor; a rule whose rows are evenly mixed has a small
+one. Splitting rows into more homogeneous groups always raises the likelihood. The prior is what makes extra rules
+pay. Letham et al. set $\alpha_l = 1$, a uniform prior on each $\thetavec_j$ <Cite id="letham2015" />.
+
+### Sampling
+
+The posterior $p(d \mid \Xmat, \yvec) \propto p(\yvec \mid \Xmat, d, \alphavec)\, p(d \mid \Acal, \lambda, \eta)$ is
+known up to a constant, which is what <NoteLink to="metropolis-hastings">Metropolis-Hastings</NoteLink> needs. From the
+current list $d$ of length $m$, one of three proposals is chosen uniformly:
+
+- **move**: take one antecedent and put it at another position, probability $1/(m(m - 1))$ for a given result;
+- **add**: insert an unused antecedent at one of $m + 1$ positions, probability $1/((\abs{\Acal} - m)(m + 1))$;
+- **remove**: delete one antecedent, probability $1/m$.
+
+The proposed list $d^*$ is accepted with probability
+$\min\big(1, \frac{p(d^* \mid \Xmat, \yvec)\, Q(d \mid d^*)}{p(d \mid \Xmat, \yvec)\, Q(d^* \mid d)}\big)$, where $Q$ is
+the proposal probability. An add and the remove that undoes it are each other's reverse, so their probabilities enter
+the ratio together <Cite id="letham2015" />. Letham et al. run three chains from prior draws, discard the first half
+of each and check convergence with the Gelman-Rubin statistic.
+
+### Predictions and a point estimate
+
+Given a list, the posterior of rule $j$'s class distribution is $\Dir(\alphavec + \nvec_j)$. The predicted probability
+of class $l$ for an input captured by rule $j$ is its mean, $(\alpha_l + N_{j,l})/\sum_k(\alpha_k + N_{j,k})$, and the
+Dirichlet gives a credible interval. Averaging predictions over all sampled lists gives the most accurate classifier,
+BRL-post, which is no longer one readable list. For a single list, Letham et al. take BRL-point: the sampled list of
+highest posterior among those whose length and average cardinality are closest to their posterior means. They prefer it
+to the <Gloss name="map-estimate">maximum a posteriori</Gloss> list, which the prior pushes towards fewer rules than the
+posterior average <Cite id="letham2015" />.
+
+## Worked example
+
+Use the Titanic data (2201 people, 711 survivors) with the 26 antecedents of at most two conditions on class, sex and
+age that cover at least 1% of the people: 8 single conditions and 18 pairs. Set $\lambda = 3$, $\eta = 1$ and
+$\alpha_l = 1$.
+
+**The empty list** predicts the overall rate for everyone. Its prior is the probability of length 0,
+$e^{-3}$ up to the truncation, so $\log p(d) = -3.00$. Its likelihood has one factor,
+$B(1491, 712)/B(1, 1)$, and $\log p(\yvec \mid d) = -1388.42$, which is $-0.631$ nats per person.
+
+**One rule: "sex = male ∧ age = adult".** The prior has three factors.
+
+- Length 1: $\log(3^1/1!) - \log\sum_{k=0}^{26} 3^k/k! = 1.099 - 3.000 = -1.901$.
+- Cardinality 2 out of the available $\{1, 2\}$: $\log\frac{1^2/2!}{1^1/1! + 1^2/2!} = \log\frac13 = -1.099$.
+- One of 18 antecedents of cardinality 2: $\log\frac{1}{18} = -2.890$.
+
+The log prior is $-5.890$, 2.9 nats below the empty list. The rule captures 1329 deaths and 338 survivals; the default
+captures 161 and 373. The log likelihood is $-1174.09$, a gain of 214.3 nats. The rule's survival probability is
+$(338 + 1)/(1667 + 2) = 0.203$ and the default's $(373 + 1)/(534 + 2) = 0.698$.
+
+**Three rules: adult men, then 3rd class, then 1st class.** The captured counts (died, survived) are $(1329, 338)$,
+$(141, 103)$, $(4, 146)$ and, for the default, $(16, 124)$. The log prior is $-10.32$, 4.4 nats below the one-rule
+list; the log likelihood is $-1087.20$, a further gain of 86.9 nats. The list reads
+
+1. if male and adult, survival probability 0.203 (95% interval 0.184 to 0.223),
+2. else if 3rd class, 0.423 (0.362 to 0.485),
+3. else if 1st class, 0.967 (0.934 to 0.989),
+4. else 0.880 (0.822 to 0.928).
+
+Letham et al. give a list of this form for these data <Cite id="letham2015" />.
+
+**The chain** run for 2000 steps (the figure's default) finds a five-rule list with log posterior $-1093.94$:
+3rd-class men 0.17, other 3rd class 0.46, children 0.97, women 0.92, 2nd-class men 0.09, everyone else (1st-class and
+crew men) 0.24. Its log likelihood is 8.6 nats higher than the three-rule list's and its log prior 5.0 nats lower. The
+posterior odds are $e^{-1093.94 + 1097.52} = e^{3.58} \approx 36$ in its favour. With 2201 rows the likelihood
+decides between lists of similar size, and the prior decides only how many rules a gain of a few nats has to buy.
+
+<BrlSampler />
+
+## Cost
+
+Mining costs one pass of a frequent itemset miner. Each Metropolis-Hastings step evaluates one proposed list, which
+assigns every training row to its first matching rule: $O(m\,n)$ for $n$ rows, or $O(m\,n/64)$ with bit vectors.
+Chains of tens of thousands of steps are typical. Letham et al. report about 21 minutes per fold on 12,586 patients and
+about 2200 antecedents <Cite id="letham2015" />. Scalable Bayesian rule lists keep the model, restrict it to two
+classes, cache the captured bit vectors of list prefixes and bound which antecedents can appear, and run about two
+orders of magnitude faster <Cite id="yang2017sbrl" />.
+
+## Trade-offs
+
+- **Against greedy learners.** BRL can find lists that greedy covering misses, because a sampled list is judged as a
+  whole. It needs a chain and convergence checks instead of one pass.
+- **Against certifiably optimal lists.** <NoteLink to="certifiably-optimal-rule-lists">CORELS</NoteLink> optimises
+  training error plus a penalty per rule and proves optimality. BRL scores lists by the marginal likelihood, which
+  rewards homogeneous captured groups and gives probabilities, but offers no guarantee that the chain has found the
+  best list <Cite id="angelino2018" />.
+- **Probabilities.** Each rule reports a calibrated probability with an interval, which a classification list does
+  not. On stroke risk after atrial fibrillation, BRL-point reached a mean AUC of 0.756 against 0.721 for the CHADS2
+  score, with a list of similar size <Cite id="letham2015" />.
+- **Hyperparameters.** $\lambda$ and $\eta$ have a direct meaning, the expected number of rules and of conditions per
+  rule, and the support threshold and $C$ bound what can be learned at all.
+
+## Pitfalls
+
+- **Mixing.** The space of ordered subsets is huge and the posterior is multimodal; local moves can stay in one mode
+  for many steps. Run several chains from different starts and compare them.
+- **The pre-mined collection.** A rule whose antecedent is not in $\Acal$ cannot be learned. A support threshold that
+  is too high removes small, precise rules; one that is too low makes $\Acal$ large and the chain slow.
+- **Rules that capture nothing.** A rule placed after rules that cover all its rows captures no row, adds nothing to
+  the likelihood and costs only prior. Report captured counts with every rule.
+- **The large-data regime.** With many rows the likelihood swamps the prior, and the posterior favours long lists.
+  The prior means $\lambda$ and $\eta$ then have to be set small, or a point estimate chosen for size.

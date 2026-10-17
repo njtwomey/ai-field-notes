@@ -1,0 +1,223 @@
+---
+title: 'Gated linear recurrences'
+kind: concept
+summary: 'A gated linear recurrence $h_t=a_t\odot h_{t-1}+b_t$ computes its decay $a_t$ from the input but not from the state, so the update stays linear and runs as a parallel scan. minGRU, HGRN, gated linear attention and Griffin''s RG-LRU with $a_t=a^{c\,r_t}$ are instances.'
+tags: [sequence-models, long-context, state-space-models, worked-example]
+aliases:
+  [
+    'gated linear attention',
+    'GLA',
+    'HGRN',
+    'RG-LRU',
+    'real-gated linear recurrent unit',
+    'Griffin',
+    'Hawk',
+    'minGRU',
+    'minLSTM',
+    'data-dependent decay',
+    'input-dependent decay',
+  ]
+requires: [parallel-scan, linear-attention]
+related:
+  [
+    linear-recurrent-unit-and-s5,
+    mamba,
+    gated-recurrent-unit,
+    hybrid-sequence-models,
+    rwkv-and-retentive-networks,
+    mamba-2-and-state-space-duality,
+    xlstm,
+    expressiveness-of-linear-recurrences,
+  ]
+references: [de2024griffin, qin2023hgrn, yang2024gla, feng2024minrnn, orvieto2023, martin2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { GatedDecayExplorer } from './GatedDecayExplorer'
+
+<Definition>
+A **gated linear recurrence** updates a state $\hvec_t \in \reals^D$ by
+
+$$
+\hvec_t = \avec_t \odot \hvec_{t-1} + \bvec_t,
+$$
+
+where $\odot$ is the elementwise product, the decay $\avec_t \in (0, 1)^D$ and the input $\bvec_t \in \reals^D$ are
+functions of the current token $\xvec_t$ only, and neither depends on $\hvec_{t-1}$. The decay acts as a forget gate
+chosen by the token. Because the update is linear in the state, every $\hvec_t$ can be computed at once by a
+<NoteLink to="parallel-scan">parallel scan</NoteLink> <Cite id="martin2018" />.
+</Definition>
+
+## Intuition
+
+Two older designs sit on either side of this one. A <NoteLink to="gated-recurrent-unit">GRU</NoteLink> or an
+<NoteLink to="long-short-term-memory">LSTM</NoteLink> computes its gates from the previous hidden state, so it can
+decide what to keep from what it has already stored. That dependence on $\hvec_{t-1}$ makes each step wait for the one
+before it, and training runs one token at a time. A time-invariant linear recurrence, as in
+<NoteLink to="rwkv-and-retentive-networks">RetNet</NoteLink>, <Gloss name="s4" /> or the
+<NoteLink to="linear-recurrent-unit-and-s5">linear recurrent unit</NoteLink>, applies the same decay at every step. It
+trains in parallel, but it forgets a noise token and an important token at the same rate.
+
+A gated linear recurrence keeps the gate and drops its dependence on the state. The token decides how much of the past
+survives it: a large decay ($a_t \approx 1$) holds the state through filler, and a small decay overwrites the state
+with the current token. The gates for all positions are computed in parallel from the inputs, and the recurrence that
+remains is the linear one that a scan evaluates in $O(\log T)$ depth. What is lost is the ability to gate on memory
+content within one layer; stacking layers recovers part of it, because each layer's gates read the previous layer's
+states.
+
+## Details
+
+### Why the gates must not read the state
+
+Write step $t$ as the affine map $f_t(\hvec) = \avec_t \odot \hvec + \bvec_t$. The scan of the
+<NoteLink to="parallel-scan">parallel-scan note</NoteLink> composes these maps in any bracketing, which requires every
+$f_t$ to be known before the scan starts. When $\avec_t$ and $\bvec_t$ depend on $\xvec_t$ alone, a matrix product over
+the whole sequence gives all of them first. If $\avec_t$ depended on $\hvec_{t-1}$, the map $f_t$ would not exist until
+$\hvec_{t-1}$ had been computed, and the computation would be sequential again. The diagonal form matters too: a
+combination of two steps costs $D$ multiplications, and its result is again diagonal.
+
+### The family
+
+The models below differ in how they form $\avec_t$ and $\bvec_t$ and in the shape of the state.
+
+- **minGRU and minLSTM.** Feng et al. strip the GRU and LSTM of their hidden-state inputs. minGRU uses
+  $\zvec_t = \sigma(\Wmat_z\xvec_t)$, a candidate $\tilde\hvec_t = \Wmat_h\xvec_t$ and
+  $\hvec_t = (1 - \zvec_t) \odot \hvec_{t-1} + \zvec_t \odot \tilde\hvec_t$, so $\avec_t = 1 - \zvec_t$
+  <Cite id="feng2024minrnn" />. minLSTM normalises its forget and input gates to sum to one. Trained by a scan, minGRU
+  is about 175 times faster per training step than a GRU at sequence length 512.
+- **HGRN.** The forget gate has a learned lower bound that grows with depth:
+  $\lambdavec_t = \gamma_k + (1 - \gamma_k)\,\sigma(\Wmat_\mu\xvec_t + \bvec_\mu)$ in layer $k$, with input weight
+  $1 - \lambdavec_t$. Low layers can forget fast and model local structure; high layers are forced to remember
+  <Cite id="qin2023hgrn" />.
+- **RG-LRU (Griffin and Hawk).** The decay is a power of a learned base decay, set by a recurrence gate. It is described
+  in full below <Cite id="de2024griffin" />.
+- **Gated linear attention.** <Gloss name="gla" /> keeps a matrix state, as in <NoteLink to="linear-attention">linear
+  attention</NoteLink>, and its gate decays each key dimension separately:
+  $\Smat_t = \operatorname{diag}(\alphavec_t)\,\Smat_{t-1} + \kvec_t\vvec_t^\tr$ with
+  $\alphavec_t = \sigma(\xvec_t\Wmat_{\alpha 1}\Wmat_{\alpha 2} + \bvec_\alpha)^{1/\tau}$ and $\tau = 16$, and the
+  output is $\Smat_t^\tr\qvec_t$ <Cite id="yang2024gla" />. The low-rank gate map ($d \to 16 \to d_k$) keeps the gate
+  cheap, and the temperature pushes decays towards 1.
+- **Mamba.** The selective state-space layer is the same pattern with $\avec_t = e^{\Delta_t\Amat}$ for a step
+  $\Delta_t$ computed from the token, and with input and output maps that also depend on it. The
+  <NoteLink to="mamba">Mamba note</NoteLink> shows that its scalar case is a gated update of this form. RWKV-6 and
+  <NoteLink to="mamba-2-and-state-space-duality">Mamba-2</NoteLink> also belong here; they are treated in their own
+  notes.
+
+### The RG-LRU
+
+Griffin's recurrent block uses the real-gated linear recurrent unit. For an input $\xvec_t \in \reals^D$,
+
+$$
+\rvec_t = \sigma(\Wmat_a\xvec_t + \bvec_a), \qquad \ivec_t = \sigma(\Wmat_x\xvec_t + \bvec_x), \qquad
+\avec_t = \avec^{c\,\rvec_t}, \qquad
+\hvec_t = \avec_t \odot \hvec_{t-1} + \sqrt{1 - \avec_t^2} \odot (\ivec_t \odot \xvec_t),
+$$
+
+with the power and the square root taken elementwise <Cite id="de2024griffin" />. The **recurrence gate** $\rvec_t$
+sets the decay and the **input gate** $\ivec_t$ filters the token. The base decay is $\avec = \sigma(\Lambdab)$ for a
+learned $\Lambdab \in \reals^D$, so $0 < a < 1$ and the recurrence is stable. The constant is $c = 8$, and
+$\Lambdab$ is initialised so that $a^c$ is uniform in $[0.9, 0.999]$. The decay is computed in log space,
+$\log a_t = -c\,r_t\,\operatorname{softplus}(-\Lambda)$, which keeps decays near 1 accurate.
+
+The recurrence gate interpolates between two behaviours. At $r_t = 1$ the decay is $a^c$, the fastest forgetting the
+channel allows. As $r_t \to 0$ the decay tends to 1 and the input weight $\sqrt{1 - a_t^2}$ tends to 0, so the token is
+ignored and the state is carried forward unchanged.
+
+**Memory half-life.** A token written at step $s$ is multiplied by $a_{s+1}a_{s+2}\cdots a_t$ by step $t$. With a
+constant gate $r$ the factor per step is $a^{c r}$, and the weight halves after
+
+$$
+k_{1/2} = \frac{\ln 2}{-c\,r\ln a} = \frac{\ln 2}{-r\ln a^c}
+$$
+
+tokens. A channel with $a^c = 0.9$ has a half-life of 6.6 tokens at $r = 1$ and 66 tokens at $r = 0.1$. The gate
+stretches or shrinks each channel's memory by the factor $1/r_t$ at every token.
+
+**Why $\sqrt{1 - a_t^2}$.** The input weight keeps the state on the scale of the input whatever the decay. Take a fixed
+decay $a$ and inputs $u_t$ with mean 0 and variance $\sigma^2$, independent across steps. In the stationary regime
+$\var(h_t) = \var(h_{t-1}) = v$, so
+
+$$
+v = a^2 v + (1 - a^2)\sigma^2 \quad\Longrightarrow\quad v = \sigma^2.
+$$
+
+With the weight $1 - a$ of an <Gloss name="ema">exponential moving average</Gloss>, the same argument gives
+$v = \sigma^2(1 - a)^2/(1 - a^2) = \sigma^2(1 - a)/(1 + a)$, which falls towards 0 as $a \to 1$. Slow channels would
+then carry tiny states, and their contribution to the next layer would depend on their memory length. The LRU, the
+time-invariant ancestor of the RG-LRU, introduced this normalisation <Cite id="orvieto2023" />.
+
+### Computing it
+
+Training has two phases. All gates, decays and inputs are computed for the whole sequence by matrix products, then the
+recurrence runs as a scan over the pairs $(\avec_t, \bvec_t)$. A diagonal recurrence does little arithmetic per byte it
+reads, so its speed is set by memory traffic. On <Gloss name="tpu" plural />, Griffin's authors found a fused sequential
+scan almost 3 times faster than the native JAX one, and the associative scan slower than both
+<Cite id="de2024griffin" />. GLA's matrix state is trained chunk by chunk: matrix products within a chunk and the
+recurrence between chunks, with the cumulative gates kept in log space <Cite id="yang2024gla" />.
+
+Inference is the recurrence itself. The state has $D$ numbers for the RG-LRU and $d_k \times d_v$ per head for GLA,
+whatever the context length, and each token costs a constant amount of work.
+
+### In practice
+
+Hawk stacks RG-LRU blocks alone. Griffin alternates two recurrent blocks with one block of
+<NoteLink to="sliding-window-and-sparse-attention">local attention</NoteLink> over a window of 1024 tokens. Hawk exceeds
+the reported downstream performance of Mamba, and Griffin matches Llama-2 with more than six times fewer training tokens
+<Cite id="de2024griffin" />. The <NoteLink to="hybrid-sequence-models">hybrid-models note</NoteLink> covers this mixing
+of recurrent and attention layers. A vector state stores few associations: the RG-LRU keeps one number per channel,
+while a GLA head keeps $d_k \times d_v$. The matrix-state layers of this family (GLA, Mamba-2, and the gated
+<NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink>) trade a larger state for more recall.
+
+## Worked example
+
+Take one RG-LRU channel with $c = 8$ and base decay $a = 0.25^{1/8} = 0.8409$, so $a^c = 0.25$. Four tokens arrive,
+$x = (2,\ 0.5,\ 0.5,\ -1)$. Suppose the gates, computed from the tokens, mark tokens 1 and 4 as important:
+$r = (1,\ 0.1,\ 0.1,\ 1)$ and $i = (1,\ 0.1,\ 0.1,\ 1)$. Start from $h_0 = 0$.
+
+1. **Decays.** $a_t = 0.25^{r_t}$ gives $0.25$ for $r_t = 1$ and $0.25^{0.1} = 0.8706$ for $r_t = 0.1$. The half-lives
+   are $\ln 2 / \ln 4 = 0.5$ tokens and $\ln 2 / (0.1 \ln 4) = 5$ tokens.
+2. **Input weights.** $\sqrt{1 - 0.25^2} = 0.9682$ and $\sqrt{1 - 0.8706^2} = 0.4921$.
+3. **Writes.** $b_t = \sqrt{1 - a_t^2}\,i_t x_t$ gives $b = (1.9365,\ 0.0246,\ 0.0246,\ -0.9682)$.
+4. **States.**
+   - $h_1 = 1.9365$.
+   - $h_2 = 0.8706 \times 1.9365 + 0.0246 = 1.7104$.
+   - $h_3 = 0.8706 \times 1.7104 + 0.0246 = 1.5136$.
+   - $h_4 = 0.25 \times 1.5136 - 0.9682 = -0.5898$.
+
+After the two filler tokens the state still holds $0.8706^2 = 76\%$ of token 1's contribution. Token 4 then replaces
+most of it.
+
+Compare the same channel with its gates held open ($r_t = i_t = 1$ at every step), a fixed decay of 0.25. The states are
+$(1.9365,\ 0.9682,\ 0.7262,\ -0.7867)$. Only $0.25^2 = 6.25\%$ of token 1 survives the filler, and the filler tokens
+themselves make up most of $h_3$. The gate turned a memory of half a token into a memory of five tokens exactly where
+the input called for it.
+
+The figure runs six such channels, with $a^c$ spread over Griffin's initial range, on a longer input.
+
+<GatedDecayExplorer />
+
+## Assumptions
+
+- **Gates read only the input.** The decay and the write are functions of $\xvec_t$. A layer cannot condition its
+  forgetting on what it holds; deeper layers can, through the states of the layers below.
+- **Diagonal or scalar transitions.** Each channel, or each key dimension of a matrix state, decays independently.
+  Mixing channels inside the recurrence would make each scan combination a matrix product.
+- **Decays in $(0, 1)$.** Positive decays below 1 keep the recurrence stable and the gradients bounded.
+
+## Pitfalls
+
+- **No state tracking from positive decays.** A diagonal recurrence with decays in $(0, 1)$ cannot track the parity of
+  a bit string at any fixed depth in finite precision. The
+  <NoteLink to="expressiveness-of-linear-recurrences">expressiveness note</NoteLink> covers the limit and the fixes
+  (negative eigenvalues, non-diagonal transitions such as the <NoteLink to="delta-rule-and-test-time-training">delta
+  rule</NoteLink>).
+- **Recall is bounded by the state.** A vector state of $D$ numbers holds far fewer key-value associations than an
+  attention cache. Retrieval tasks expose the gap; see the
+  <NoteLink to="long-range-and-recall-benchmarks">recall benchmarks</NoteLink>.
+- **Underflow of long products.** The cumulative decays $a_{s+1}\cdots a_t$ underflow in low precision over long
+  chunks. Implementations keep cumulative log decays and subtract them, as GLA's chunked kernel does.
+- **Initialisation sets the memory.** With $a^c$ initialised far below 0.9, every channel starts with a memory of a few
+  tokens, and gradients through long spans vanish before the gate learns to close.
+- **The leak of $\sqrt{1 - a_t^2}$.** Near $a_t = 1$ the input weight is about $\sqrt{2(1 - a_t)}$, much larger than
+  $1 - a_t$. A decay close to 1 alone does not block a token; the input gate $\ivec_t$ must also close.

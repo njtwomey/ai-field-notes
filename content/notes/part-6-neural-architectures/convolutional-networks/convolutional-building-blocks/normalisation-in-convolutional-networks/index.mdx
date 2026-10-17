@@ -1,0 +1,152 @@
+---
+title: 'Normalisation in convolutional networks'
+kind: concept
+summary: 'Batch, layer, instance and group normalisation differ only in which axes of an $[N,C,H,W]$ activation tensor share one mean and variance. Group normalisation is independent of batch size; instance normalisation removes per-image contrast and style.'
+tags: [convolutional-networks, normalisation, training, deep-learning, worked-example]
+aliases: [group normalisation, group normalization, GroupNorm, InstanceNorm, normalisation axes]
+requires: [batch-normalisation, layer-normalisation, convolutional-layer]
+related: [series-normalisation, residual-network, modern-convolutional-networks, depthwise-and-grouped-convolution]
+references: [ioffe2015, ba2016, wu2018groupnorm, ulyanov2016instance, huang2017adain, kolesnikov2020, liu2022, ho2020, brock2021nfnet]
+status: draft
+updated: 2026-10-17
+---
+
+import { NormalisationAxes } from './NormalisationAxes'
+
+<Definition>
+Let $x_{n,c,h,w}$ be an activation tensor of shape $[N, C, H, W]$: $N$ examples, $C$ channels and an $H \times W$ grid.
+A normalisation layer partitions the tensor's entries into sets $\Scal$, computes each set's mean $\mu_\Scal$ and
+biased variance $\sigma^2_\Scal$, and outputs
+
+$$
+y_{n,c,h,w} = \gamma_c\, \frac{x_{n,c,h,w} - \mu_\Scal}{\sqrt{\sigma^2_\Scal + \epsilon}} + \beta_c
+$$
+
+for the set $\Scal$ that contains the entry, with a learned scale $\gamma_c$ and shift $\beta_c$ per channel and a small
+$\epsilon$. **Batch normalisation** takes one set per channel, over $(N, H, W)$. **Layer normalisation** takes one set
+per example, over $(C, H, W)$. **<NoteLink to="series-normalisation">Instance normalisation</NoteLink>** takes one set
+per example and channel, over $(H, W)$. **Group normalisation** with $G$ groups takes one set per example and group of
+$C/G$ consecutive channels, over $(C/G, H, W)$.
+</Definition>
+
+## Intuition
+
+All four layers do the same arithmetic. They differ in which numbers they average together. Picture the activations as
+a box with axes $N$, $C$ and the spatial plane. Batch normalisation slices the box by channel and averages each slice
+across the whole mini-batch. The other three slice it by example first, so no example's output depends on another
+example, and then differ in how many channels they pool.
+
+That choice decides what the layer removes and what it depends on.
+
+- Statistics over the batch depend on which other examples are in it. Large batches estimate them well; batches of one
+  or two do not.
+- Statistics over one example's channels and positions remove that example's overall scale and offset, and leave the
+  relations between its channels.
+- Statistics over one channel of one example remove that channel's mean and contrast, which for a
+  <NoteLink to="convolutional-layer">feature map</NoteLink> of an image is much of its style.
+
+<NormalisationAxes />
+
+## Details
+
+### The four sets
+
+<NoteLink to="batch-normalisation">Batch normalisation</NoteLink> on a convolutional layer treats each channel as one
+feature and pools its values over every example and every position, $NHW$ values per set <Cite id="ioffe2015" />.
+Pooling over positions keeps the layer consistent with weight sharing: the same channel is normalised the same way
+everywhere in the image. At inference the batch statistics are replaced by running averages, and the layer becomes a
+fixed affine map.
+
+<NoteLink to="layer-normalisation">Layer normalisation</NoteLink> pools all $CHW$ values of one example
+<Cite id="ba2016" />. It has no batch dependence and behaves the same in training and inference. It forces every
+channel of an example through one mean and variance, so a channel with large activations sets the scale for the rest.
+
+Instance normalisation pools the $HW$ values of one channel of one example <Cite id="ulyanov2016instance" />. Ulyanov,
+Vedaldi and Lempitsky introduced it for fast style transfer, where the contrast of the content image should not reach
+the output. Adaptive instance normalisation sets $\gamma$ and $\beta$ of each channel to the standard deviation and mean
+of the same channel in a style image, and so transfers one image's feature statistics onto another
+<Cite id="huang2017adain" />.
+
+<Gloss name="group-normalisation" /> sits between them. With $G$ groups it pools $(C/G)HW$ values per set
+<Cite id="wu2018groupnorm" />. $G = 1$ is layer normalisation over $(C, H, W)$ and $G = C$ is instance normalisation.
+Wu and He used $G = 32$ by default. They argued that channels form groups that are naturally normalised together, as
+the orientation bins of hand-designed descriptors such as histograms of oriented gradients are.
+
+### Batch size
+
+The batch mean of a channel is an average of $NHW$ values, but values from one image are strongly correlated, so its
+noise falls mainly with $N$. With a few images per device the batch statistics change from step to step, and the running
+averages used at inference no longer match what the network saw in training. Wu and He trained
+<NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink> on <Gloss name="imagenet" /> with 2
+images per device: group normalisation had 10.6% lower error than batch normalisation, and its error stayed nearly the
+same from 32 images per device down to 2 <Cite id="wu2018groupnorm" />.
+
+This is why the normalisation depends on the task. Classification on large batches uses batch normalisation. Detection
+and segmentation, with large images and a few per device, use group normalisation or batch normalisation with statistics
+frozen from pretraining. Transfer from large pretrained networks in Big Transfer used group normalisation with weight
+standardisation instead of batch normalisation <Cite id="kolesnikov2020" />.
+<NoteLink to="denoising-diffusion-probabilistic-models">Denoising diffusion</NoteLink> models use
+<Gloss name="u-net" plural /> with group normalisation throughout <Cite id="ho2020" />.
+
+### Layer normalisation in ConvNeXt
+
+<NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> replaced batch normalisation by layer normalisation
+<Cite id="liu2022" />. Its layer normalisation is the transformer's: it normalises the $C$ channels of each pixel
+separately, one set per $(n, h, w)$. That is a fifth choice of axes, over $C$ alone. It is not group normalisation with
+$G = 1$, which pools over the whole $(C, H, W)$ block of an example. Library layers named LayerNorm differ on this
+point, so the axes have to be checked.
+
+### Without normalisation
+
+Normalisation is not required for training. Brock et al. trained normaliser-free <Gloss name="resnet" plural /> that
+matched the accuracy of EfficientNet-B7 while training up to 8.7 times faster. Their residual branches are scaled to
+keep activations controlled, and <NoteLink to="gradient-clipping">adaptive gradient clipping</NoteLink> limits each
+layer's gradient relative to the size of its weights <Cite id="brock2021nfnet" />. The normalisation layer's main job,
+keeping activations at a controlled scale through depth, can be done by initialisation and clipping instead.
+
+## Worked example
+
+Take $N = 2$ examples, $C = 4$ channels and $2 \times 2$ grids, with $\epsilon = 0$ and no scale or shift. Each
+channel's four values are listed in row order.
+
+| channel | example 0      | example 1        |
+| ------- | -------------- | ---------------- |
+| 0       | $1, 3, 5, 7$   | $9, 11, 13, 15$  |
+| 1       | $2, 2, 4, 4$   | $0, 0, 2, 2$     |
+| 2       | $0, 4, 0, 4$   | $3, 3, 5, 5$     |
+| 3       | $6, 6, 6, 10$  | $2, 4, 6, 8$     |
+
+Normalise the first value, $x_{0,0,0,0} = 1$, four ways.
+
+1. **Batch.** The set is channel 0 of both examples: $1, 3, 5, 7, 9, 11, 13, 15$. Its mean is $8$. The squared
+   deviations are $49, 25, 9, 1, 1, 9, 25, 49$, which sum to $168$, so the variance is $168/8 = 21$. The output is
+   $(1 - 8)/\sqrt{21} = -1.528$.
+2. **Layer.** The set is all 16 values of example 0, which sum to $64$, so the mean is $4$. The squared deviations sum
+   to $108$, so the variance is $108/16 = 6.75$. The output is $(1 - 4)/\sqrt{6.75} = -1.155$.
+3. **Instance.** The set is channel 0 of example 0: $1, 3, 5, 7$, mean $4$, variance $(9 + 1 + 1 + 9)/4 = 5$. The
+   output is $(1 - 4)/\sqrt{5} = -1.342$.
+4. **Group, $G = 2$.** The set is channels 0 and 1 of example 0: $1, 3, 5, 7, 2, 2, 4, 4$, mean $28/8 = 3.5$. The
+   squared deviations sum to $26$, so the variance is $3.25$. The output is $(1 - 3.5)/\sqrt{3.25} = -1.387$.
+
+Now replace example 1 by a copy of example 0. Channel 0 across the batch becomes $1, 3, 5, 7, 1, 3, 5, 7$, with mean 4
+and variance 5, and batch normalisation now gives $-1.342$ for the same value. The other three outputs do not change,
+because their sets never contain example 1. The figure shows both cases.
+
+## Assumptions
+
+- The values in one set share a scale worth removing. Batch normalisation assumes a channel's statistics are similar
+  across images; instance normalisation assumes a channel's mean and contrast in one image carry no needed information.
+- For batch normalisation, the examples in a batch are drawn independently from the same distribution as at test time,
+  and the batch is large enough to estimate the statistics.
+
+## Pitfalls
+
+- **Small batches.** Batch normalisation with one or two images per device gives noisy statistics in training and a
+  mismatch at inference. Group normalisation does not have this failure <Cite id="wu2018groupnorm" />.
+- **Instance normalisation removes information.** Contrast and overall brightness of each channel are gone after
+  instance normalisation, which helps style transfer and hurts classification when those cues matter.
+- **Too few values per set.** On a $1 \times 1$ map, instance normalisation has one value per set and outputs zero.
+  Group normalisation needs $(C/G)HW$ well above 1.
+- **Divisibility.** Group normalisation needs $C$ divisible by $G$; narrow layers may need fewer groups.
+- **Names hide axes.** A layer called LayerNorm may normalise over $(C, H, W)$ or over $C$ at each pixel. The two give
+  different networks.

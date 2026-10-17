@@ -1,0 +1,195 @@
+---
+title: Message passing neural network
+kind: concept
+summary: A message passing neural network updates each node's vector from its own vector and an order-independent aggregate, such as a sum, of messages from its neighbours. Stacking $K$ rounds lets information travel $K$ hops. The layers commute with any relabelling of the nodes.
+tags: [deep-learning, graph-neural-networks, worked-example]
+aliases: [MPNN, message passing, GNN, neighbourhood aggregation, readout]
+requires: [backpropagation, graphs-as-neural-network-inputs]
+related:
+  [
+    graph-convolutional-network,
+    graph-attention-network,
+    gated-and-edge-conditioned-message-passing,
+    graph-isomorphism-network,
+    graph-pooling-and-readout,
+    expressive-power-of-message-passing,
+    transformer,
+  ]
+references: [gilmer2017, xu2019, morris2019weisfeiler, alon2021, battaglia2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { MessagePassingStepper } from './MessagePassingStepper'
+
+<Definition>
+A message passing neural network acts on a graph with node set $\Vcal$, edge set $\Ecal$, node vectors $\hvec_v^{(0)}$
+and optional edge vectors $\evec_{vw}$. In round $t$, every node $v$ collects messages from its neighbours $\Ncal(v)$
+and updates its vector:
+$$
+\mvec_v^{(t+1)} = \sum_{w \in \Ncal(v)} M_t\paren{\hvec_v^{(t)}, \hvec_w^{(t)}, \evec_{vw}}, \qquad
+\hvec_v^{(t+1)} = U_t\paren{\hvec_v^{(t)}, \mvec_v^{(t+1)}},
+$$
+where the message function $M_t$ and the update function $U_t$ are neural networks shared by all nodes. After $T$
+rounds, a readout $R$ maps the set of node vectors to a graph-level output <Cite id="gilmer2017" />.
+</Definition>
+
+## Intuition
+
+Molecules, social networks, road maps and citation networks are graphs. They have no grid, no fixed number of neighbours
+per node and no natural ordering of nodes. A <NoteLink to="convolutional-layer">convolutional layer</NoteLink> relies on
+all three.
+
+Message passing keeps the two ideas of convolution that do not need a grid. Each update is **local**: a node reads only
+its neighbours. The functions are **shared**: every node uses the same $M_t$ and $U_t$. A node's vector after one
+round describes its neighbourhood. After $K$ rounds it describes everything within $K$ hops.
+
+The sum in the definition can be replaced by any aggregator that ignores the order of its inputs, such as a mean or an
+elementwise maximum. Gilmer et al. showed that many earlier <NoteLink to="graph-neural-networks">graph
+networks</NoteLink>, including graph convolutional networks, gated graph networks and interaction networks, are special
+cases of this scheme <Cite id="gilmer2017" />. Battaglia et al. describe the same family, with edge and graph-level
+vectors also updated, as graph networks <Cite id="battaglia2018" />.
+
+## Permutation equivariance
+
+A graph has no preferred order of nodes. Number the nodes $1, \dots, N$, stack the node vectors as rows of
+$\Hmat \in \reals^{N \times d}$, and let $\Pmat$ be a permutation matrix that relabels them. The relabelled graph has
+node matrix $\Pmat \Hmat$ and adjacency matrix $\Pmat \Amat \Pmat^{\tr}$. A layer $F$ is equivariant if relabelling the
+input relabels the output in the same way:
+
+$$
+F(\Pmat \Hmat, \Pmat \Amat \Pmat^{\tr}) = \Pmat\, F(\Hmat, \Amat).
+$$
+
+Message passing satisfies this. Node $v$'s new vector depends on its own vector and on the multiset
+$\set{(\hvec_w, \evec_{vw}) : w \in \Ncal(v)}$. Relabelling moves node $v$ to a new index but does not change its own
+vector, its set of neighbours or their vectors. A sum over a set does not depend on the order in which its terms are
+listed. So node $v$ computes the same vector under its new index, which is the equation above.
+
+The readout must be **invariant**, $R(\Pmat \Hmat) = R(\Hmat)$, so that a graph-level prediction does not depend on
+the labelling. A sum, mean or maximum over nodes is invariant for the same reason. The
+<NoteLink to="graph-pooling-and-readout">graph pooling and readout</NoteLink> note compares the readouts and the
+hierarchical alternatives.
+
+## Worked example
+
+Take four nodes with edges $1{-}2$, $1{-}3$, $2{-}3$ and $3{-}4$, a triangle with a tail. Give each node a scalar
+feature, $h^{(0)} = (1, 2, 3, 4)$. Use the message $M(h_v, h_w) = h_w$, sum aggregation and the update
+$U(h_v, m_v) = h_v + m_v$.
+
+- Node 1 has neighbours 2 and 3: $m_1 = 2 + 3 = 5$, so $h_1^{(1)} = 6$.
+- Node 2 has neighbours 1 and 3: $m_2 = 1 + 3 = 4$, so $h_2^{(1)} = 6$.
+- Node 3 has neighbours 1, 2 and 4: $m_3 = 1 + 2 + 4 = 7$, so $h_3^{(1)} = 10$.
+- Node 4 has neighbour 3: $m_4 = 3$, so $h_4^{(1)} = 7$.
+
+After one round, node 4's value contains node 3's feature. After two rounds it contains the features of nodes 1 and 2,
+which are two hops away: $h_4^{(2)} = h_4^{(1)} + h_3^{(1)} = 7 + 10 = 17$, and $h_3^{(1)}$ already includes $h_1^{(0)}$
+and $h_2^{(0)}$. A sum readout gives the graph a single number after round 1, $6 + 6 + 10 + 7 = 29$, whatever order the
+nodes are listed in.
+
+The same round with the other two aggregators, keeping the message and the update, gives:
+
+| node | neighbours' values | sum $m_v$ | $h_v^{(1)}$ (sum) | mean $m_v$ | $h_v^{(1)}$ (mean) | max $m_v$ | $h_v^{(1)}$ (max) |
+| ---- | ------------------ | --------- | ----------------- | ---------- | ------------------ | --------- | ----------------- |
+| 1    | 2, 3               | 5         | 6                 | 2.5        | 3.5                | 3         | 4                 |
+| 2    | 1, 3               | 4         | 6                 | 2          | 4                  | 3         | 5                 |
+| 3    | 1, 2, 4            | 7         | 10                | 2.33       | 5.33               | 4         | 7                 |
+| 4    | 3                  | 3         | 7                 | 3          | 7                  | 3         | 7                 |
+
+The sum grows with the number of neighbours: node 3, with three neighbours, receives the largest message. The mean
+divides that growth away, so node 3's message (2.33) is smaller than node 4's (3). The max keeps only the largest
+neighbour value, so nodes 1 and 2 receive the same message, 3, from different neighbourhoods.
+
+<MessagePassingStepper />
+
+## Choice of aggregator
+
+The aggregate must be order-independent. Sum, mean and maximum are the common choices. They are not equally
+expressive <Cite id="xu2019" />:
+
+- **Sum** distinguishes multisets of different sizes. A node with neighbours $\set{1, 1}$ receives $2$; a node with
+  neighbours $\set{1}$ receives $1$.
+- **Mean** gives $1$ in both cases. It sees the distribution of neighbour values, not their number.
+- **Max** also gives $1$ in both cases, and it also cannot tell $\set{1, 2}$ from $\set{1, 2, 2}$.
+
+Sum is the most expressive of the three, but its output grows with the degree, which makes training on graphs with hubs
+less stable. Mean suits tasks where the proportion of neighbour types matters, such as a node's label in a citation
+graph. Max suits tasks that ask whether some neighbour has a property. The
+<NoteLink to="graph-isomorphism-network">graph isomorphism network</NoteLink> uses sum with an injective update, and
+<NoteLink to="principal-neighbourhood-aggregation">principal neighbourhood aggregation</NoteLink> combines several
+aggregators scaled by degree.
+
+## Edge features
+
+The message function takes the edge vector $\evec_{vw}$ as an argument, so the same pair of node vectors can send
+different messages along different kinds of edges. In a molecule, $\evec_{vw}$ can encode the bond type and the distance
+between the atoms. The simplest use is a scalar weight: $M(\hvec_v, \hvec_w, e_{vw}) = e_{vw} \hvec_w$.
+
+Give the worked example's edges bond orders $e_{12} = 1$, $e_{13} = 2$, $e_{23} = 1$ and $e_{34} = 2$, and keep sum
+aggregation and the update $h_v + m_v$:
+
+- Node 1: $m_1 = 1 \cdot 2 + 2 \cdot 3 = 8$, so $h_1^{(1)} = 9$.
+- Node 2: $m_2 = 1 \cdot 1 + 1 \cdot 3 = 4$, so $h_2^{(1)} = 6$.
+- Node 3: $m_3 = 2 \cdot 1 + 1 \cdot 2 + 2 \cdot 4 = 12$, so $h_3^{(1)} = 15$.
+- Node 4: $m_4 = 2 \cdot 3 = 6$, so $h_4^{(1)} = 10$.
+
+Nodes 1 and 2 had equal values without edge features and differ with them. Richer forms generate a whole weight matrix
+from $\evec_{vw}$ or gate each message by it; the
+<NoteLink to="gated-and-edge-conditioned-message-passing">gated and edge-conditioned message passing</NoteLink> note
+develops them.
+
+## Expressive power
+
+A message passing network can distinguish two graphs only if the Weisfeiler–Leman colour refinement test can, and with
+sum aggregation and injective update functions it matches the test <Cite id="xu2019" />
+<Cite id="morris2019weisfeiler" />. A 6-cycle and two disjoint triangles, with the same feature on every node, are an
+example: every node in both graphs has two neighbours with identical views, so every such network gives the two graphs
+the same output, although one has no triangle and the other has two. The
+<NoteLink to="weisfeiler-leman-test">Weisfeiler–Leman test</NoteLink> and
+<NoteLink to="expressive-power-of-message-passing">expressive power of message passing</NoteLink> notes develop the
+bound and the models that pass it.
+
+## Message passing in practice
+
+The common layers differ in $M$, the aggregator and $U$:
+
+| layer | message from $w$ to $v$ | aggregator | update |
+| --- | --- | --- | --- |
+| <NoteLink to="graph-convolutional-network">GCN</NoteLink> | $\Wmat^{\tr}\hvec_w / \sqrt{\tilde d_v \tilde d_w}$ | sum over $\Ncal(v) \cup \set{v}$ | nonlinearity |
+| <NoteLink to="graphsage">GraphSAGE</NoteLink> | $\hvec_w$ | mean, max-pool or <Gloss name="lstm" /> over a sample | $\sigma(\Wmat [\hvec_v \Vert \mvec_v])$ |
+| <NoteLink to="graph-attention-network">GAT</NoteLink> | $\alpha_{vw} \Wmat \hvec_w$, $\alpha$ a softmax over $\Ncal(v)$ | sum | nonlinearity |
+| <NoteLink to="graph-isomorphism-network">GIN</NoteLink> | $\hvec_w$ | sum | $\mathrm{MLP}((1 + \epsilon)\hvec_v + \mvec_v)$ |
+| <NoteLink to="gated-and-edge-conditioned-message-passing">gated graph network</NoteLink> | $\Amat(\evec_{vw}) \hvec_w$ | sum | <Gloss name="gru" /> cell |
+
+Here $\tilde d_v$ is the degree of $v$ counting a self-loop and $\Vert$ is concatenation. Practical networks use 2 to 6
+rounds, each with its own parameters, a <NoteLink to="residual-connections">residual connection</NoteLink> and a
+normalisation layer, and hidden widths from a few tens to a few hundred. A full layer on a large graph is a sparse
+matrix product over the edge list.
+
+## Cost
+
+One round computes one message per directed edge and one update per node, so it costs $O(\abs{\Ecal} + \abs{\Vcal})$
+function evaluations. This is linear in the size of the graph, whereas a dense layer over all node pairs would cost
+$O(\abs{\Vcal}^2)$. A node's output after $K$ rounds depends on its whole $K$-hop neighbourhood, which on a large
+graph can hold most of the nodes; <NoteLink to="neighbour-sampling-and-scalable-graph-networks">neighbour
+sampling</NoteLink> bounds that cost.
+
+## Assumptions
+
+- The relevant structure is local: a node's label depends mostly on its $K$-hop neighbourhood.
+- The graph given as input is the right one. Missing or spurious edges change every downstream vector.
+
+## Pitfalls
+
+- **Oversmoothing.** Many rounds of averaging make all node vectors in a connected graph similar, so deep message
+  passing networks often perform worse than shallow ones. The <NoteLink to="oversmoothing">oversmoothing</NoteLink>
+  note gives the rate.
+- **Oversquashing.** Information from an exponentially growing number of distant nodes must fit into a fixed-size
+  vector. Long-range dependencies are hard to learn <Cite id="alon2021" />. The
+  <NoteLink to="oversquashing-and-graph-rewiring">oversquashing and graph rewiring</NoteLink> note covers the fixes.
+- **Limited expressiveness.** Plain message passing cannot count triangles or detect some cycles.
+  <NoteLink to="positional-and-structural-encodings">Positional or structural features</NoteLink> added to the input
+  help.
+- **Heterophily.** Averaging helps when neighbours share labels. On graphs where they tend to differ, a mean aggregator
+  can do worse than a model that ignores the edges; see
+  <NoteLink to="graph-neural-networks-under-heterophily">graph neural networks under heterophily</NoteLink>.

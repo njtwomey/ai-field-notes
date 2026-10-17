@@ -1,0 +1,237 @@
+---
+title: 'Delta rule and test-time training layers'
+kind: concept
+summary: 'DeltaNet updates a fast-weight state by $\Smat_t=\Smat_{t-1}(\eye-\beta_t\kvec_t\kvec_t^\tr)+\beta_t\vvec_t\kvec_t^\tr$, one gradient step of online regression from keys to values. Gated DeltaNet adds decay; TTT layers and Titans train a small network on the sequence as it is read.'
+tags: [sequence-models, long-context, online-learning, worked-example]
+aliases:
+  [
+    'DeltaNet',
+    'delta rule',
+    'Gated DeltaNet',
+    'gated delta rule',
+    'test-time training layer',
+    'TTT layer',
+    'TTT-Linear',
+    'TTT-MLP',
+    'Titans',
+    'fast weights',
+    'fast weight programmer',
+  ]
+requires: [linear-attention]
+related:
+  [
+    xlstm,
+    gated-linear-recurrence,
+    rwkv-and-retentive-networks,
+    expressiveness-of-linear-recurrences,
+    long-range-and-recall-benchmarks,
+    modern-hopfield-network,
+    online-gradient-descent,
+    least-mean-squares-filter,
+    test-time-adaptation,
+    hybrid-sequence-models,
+  ]
+references:
+  [schlag2021, yang2024deltanet, yang2025gateddeltanet, sun2024ttt, behrouz2024titans, grazzi2024, qwen2025next]
+status: draft
+updated: 2026-10-17
+---
+
+import { AssociativeRecall } from './AssociativeRecall'
+
+<Definition>
+A **delta-rule layer** (DeltaNet) keeps a matrix state $\Smat_t \in \reals^{d_v \times d_k}$ that maps keys to values.
+For each token it computes a query $\qvec_t$, a key $\kvec_t$ of unit length, a value $\vvec_t$ and a writing strength
+$\beta_t \in (0, 1)$, and updates
+
+$$
+\Smat_t = \Smat_{t-1} + \beta_t\paren{\vvec_t - \Smat_{t-1}\kvec_t}\kvec_t^\tr
+= \Smat_{t-1}\paren{\eye - \beta_t\kvec_t\kvec_t^\tr} + \beta_t\vvec_t\kvec_t^\tr, \qquad \ovec_t = \Smat_t\qvec_t.
+$$
+
+The update is one step of <NoteLink to="gradient-descent">gradient descent</NoteLink> on the regression loss
+$\tfrac12\norm{\Smat\kvec_t - \vvec_t}^2$ <Cite id="schlag2021" /> <Cite id="yang2024deltanet" />. **Gated DeltaNet**
+multiplies $\Smat_{t-1}$ by a decay $\alpha_t \in (0, 1)$ first <Cite id="yang2025gateddeltanet" />. A
+**<NoteLink to="test-time-adaptation">test-time training</NoteLink> layer** replaces the matrix by the parameters of any
+small model, trained by gradient steps on the same kind of loss while the sequence is read <Cite id="sun2024ttt" />.
+</Definition>
+
+## Intuition
+
+The state of causal <NoteLink to="linear-attention">linear attention</NoteLink> is a lookup table built by addition.
+Each token adds the outer product of its value and key, and a query reads the values whose keys it matches. This is the
+Hebbian rule of associative memories, and it has two defects. Reading a stored key returns its value plus every other
+value weighted by the overlap of their keys. Writing a key a second time adds the new value to the old one instead of
+replacing it.
+
+The delta rule writes only the correction. Before storing $\vvec_t$ under $\kvec_t$, it asks the memory what it already
+returns for that key, $\Smat_{t-1}\kvec_t$, and stores the difference. This is the Widrow-Hoff rule of the
+<NoteLink to="least-mean-squares-filter">least-mean-squares filter</NoteLink>, applied to a memory instead of a filter.
+Schlag, Irie and Schmidhuber read the state as a **fast weight** matrix: a linear layer whose weights are programmed by
+the sequence, one key-value instruction at a time <Cite id="schlag2021" />.
+
+Test-time training takes the same view one step further. The state is a model, the sequence is its training set, and
+every token is one step of <NoteLink to="online-gradient-descent">online gradient descent</NoteLink>. The output reads
+the model as trained so far.
+
+## Details
+
+### The update is a gradient step
+
+Define the loss of the memory on the current pair, $\ell_t(\Smat) = \tfrac12\norm{\Smat\kvec_t - \vvec_t}^2$. Its
+gradient with respect to the matrix is the outer product of the error and the input,
+
+$$
+\nabla_{\Smat}\,\ell_t(\Smat) = \paren{\Smat\kvec_t - \vvec_t}\kvec_t^\tr.
+$$
+
+One step of size $\beta_t$ from $\Smat_{t-1}$ gives
+$\Smat_t = \Smat_{t-1} - \beta_t(\Smat_{t-1}\kvec_t - \vvec_t)\kvec_t^\tr$, which is the delta rule. Rearranging the
+terms in $\Smat_{t-1}$ gives the product form
+$\Smat_{t-1}(\eye - \beta_t\kvec_t\kvec_t^\tr) + \beta_t\vvec_t\kvec_t^\tr$.
+
+The additive update of linear attention is a gradient step on a different loss. For
+$\ell_t^{\text{lin}}(\Smat) = -\vvec_t^\tr\Smat\kvec_t$ the gradient is $-\vvec_t\kvec_t^\tr$, and a unit step adds
+$\vvec_t\kvec_t^\tr$. That loss rewards alignment between $\Smat\kvec_t$ and $\vvec_t$ without limit, so it never
+saturates: writing the same pair twice doubles it.
+
+### What one write does
+
+Take $\norm{\kvec_t} = 1$. Reading the new key after the write gives
+
+$$
+\Smat_t\kvec_t = \Smat_{t-1}\kvec_t + \beta_t\paren{\vvec_t - \Smat_{t-1}\kvec_t}\kvec_t^\tr\kvec_t
+= (1 - \beta_t)\,\Smat_{t-1}\kvec_t + \beta_t\,\vvec_t,
+$$
+
+an interpolation between the old read and the new value. With $\beta_t = 1$ the memory returns $\vvec_t$ exactly. For
+any direction $\uvec$ orthogonal to $\kvec_t$, $\kvec_t^\tr\uvec = 0$ and $\Smat_t\uvec = \Smat_{t-1}\uvec$: the write
+leaves every orthogonal direction untouched. The delta rule is the smallest change to $\Smat$, in the Frobenius norm,
+that moves the read at $\kvec_t$ by the fraction $\beta_t$ of the way to $\vvec_t$.
+
+The transition $\eye - \beta_t\kvec_t\kvec_t^\tr$ has eigenvalue 1 on the $d_k - 1$ directions orthogonal to $\kvec_t$
+and $1 - \beta_t$ along it. For $\beta_t \in (0, 2)$ every eigenvalue has magnitude at most 1 and the recurrence is
+stable. At $\beta_t = 2$ the transition is a Householder reflection. Values of $\beta_t$ above 1 give a negative
+eigenvalue, which positive-decay recurrences lack; with it a linear recurrence can track parity, and products of such
+matrices can recognise any regular language <Cite id="grazzi2024" /> (see the
+<NoteLink to="expressiveness-of-linear-recurrences">expressiveness note</NoteLink>).
+
+### Training in parallel
+
+The update is linear in $\Smat$ and its coefficients depend only on the tokens, so the layer can run in parallel over
+the sequence. The transition is not diagonal, however. The pair scan of the <NoteLink to="parallel-scan">parallel-scan
+note</NoteLink> would multiply $d_k \times d_k$ matrices at every combination, which costs more than the recurrence it
+replaces.
+
+Yang et al. use the structure of the transitions instead <Cite id="yang2024deltanet" />. A product of $C$ matrices of
+the form $\eye - \beta\kvec\kvec^\tr$ equals $\eye - \Wmat\Kmat^\tr$, where $\Kmat$ holds the $C$ keys and $\Wmat$ is a
+$d_k \times C$ matrix computed by a short recurrence within the block (the WY representation of products of Householder
+matrices). Their chunkwise algorithm splits the sequence into chunks, forms $\Wmat$ for each chunk, computes the
+within-chunk outputs with matrix products and passes the state between chunks. A 1.3B-parameter DeltaNet trained on
+100B tokens this way outperforms Mamba and gated linear attention in perplexity and zero-shot evaluations.
+
+### Gated DeltaNet
+
+The delta rule edits one association at a time; it cannot clear the memory quickly when the context changes. Gated
+DeltaNet adds a decay $\alpha_t \in (0, 1)$ computed from the token,
+
+$$
+\Smat_t = \alpha_t\,\Smat_{t-1}\paren{\eye - \beta_t\kvec_t\kvec_t^\tr} + \beta_t\vvec_t\kvec_t^\tr,
+$$
+
+so a small $\alpha_t$ erases everything at once and $\beta_t$ edits the association under $\kvec_t$
+<Cite id="yang2025gateddeltanet" />. It combines the gating of <NoteLink to="mamba">Mamba-2</NoteLink> and the
+<NoteLink to="gated-linear-recurrence">gated linear recurrences</NoteLink> with the targeted write of DeltaNet. The
+<NoteLink to="hybrid-sequence-models">Qwen3-Next</NoteLink> <Gloss name="language-model">language models</Gloss> (2025)
+interleave three Gated DeltaNet layers with one gated attention layer, over 48 layers <Cite id="qwen2025next" />. RWKV-7
+uses a generalised delta rule with a decay per channel and a <Gloss name="learning-rate">learning rate</Gloss> per
+channel (see <NoteLink to="rwkv-and-retentive-networks">RWKV and retentive networks</NoteLink>).
+
+### Test-time training layers
+
+A **TTT layer** makes the hidden state the parameters $\Wmat$ of a model $f(\cdot\,; \Wmat)$
+<Cite id="sun2024ttt" />. For each token, with learned projections $\thetavec_K$, $\thetavec_V$ and $\thetavec_Q$,
+
+$$
+\ell(\Wmat; \xvec_t) = \norm{f(\thetavec_K\xvec_t; \Wmat) - \thetavec_V\xvec_t}^2, \qquad
+\Wmat_t = \Wmat_{t-1} - \eta\,\nabla_{\Wmat}\,\ell(\Wmat_{t-1}; \xvec_t), \qquad
+\zvec_t = f(\thetavec_Q\xvec_t; \Wmat_t).
+$$
+
+The inner loss is self-supervised: reconstruct a view of the token from another view of it. **TTT-Linear** uses
+$f(\kvec; \Wmat) = \Wmat\kvec$; with one token per step and the loss halved, its update is the delta rule with
+$\beta = \eta$. **TTT-MLP** uses a two-layer <Gloss name="mlp" />, which stores associations nonlinearly. The MLP's
+update is no longer linear in its parameters, so TTT layers gain parallelism by taking the gradients of a mini-batch of
+tokens at the same $\Wmat$. Sun et al. evaluate both at 125M to 1.3B parameters against a transformer and Mamba.
+
+**Titans** adds momentum and forgetting to the inner optimiser <Cite id="behrouz2024titans" />. The memory $\Mcal$ is an
+MLP trained on $\norm{\Mcal(\kvec_t) - \vvec_t}^2$. A surprise term
+$\Smat_t = \eta_t\Smat_{t-1} - \theta_t\nabla\ell(\Mcal_{t-1}; \xvec_t)$ accumulates gradients with
+<NoteLink to="momentum-and-nesterov">momentum</NoteLink>, and the update $\Mcal_t = (1 - \alpha_t)\Mcal_{t-1} + \Smat_t$
+applies a data-dependent <Gloss name="weight-decay">weight decay</Gloss>. The memory is combined with attention in three
+ways: its read is extra context for attention (MAC), a gate on a
+<NoteLink to="sliding-window-and-sparse-attention">sliding-window attention</NoteLink> branch (MAG), or a layer before
+sliding-window attention (MAL). The authors report contexts beyond 2M tokens.
+
+| Layer             | Memory          | Write                                  | Inner loss                            |
+| ----------------- | --------------- | -------------------------------------- | ------------------------------------- |
+| Linear attention  | matrix          | add $\vvec\kvec^\tr$                   | $-\vvec^\tr\Smat\kvec$                |
+| DeltaNet          | matrix          | one gradient step of size $\beta_t$    | $\tfrac12\norm{\Smat\kvec - \vvec}^2$ |
+| Gated DeltaNet    | matrix          | decay $\alpha_t$, then the step        | the same                              |
+| TTT-MLP           | two-layer MLP   | gradient steps over mini-batches       | squared reconstruction error          |
+| Titans            | deep MLP        | gradient with momentum and weight decay | squared error                         |
+
+## Worked example
+
+Take $d_k = 3$ and scalar values ($d_v = 1$), so the memory is a row vector $\Smat = \wvec^\tr$ and a read is
+$\wvec^\tr\kvec$. Write four pairs with $\beta = 1$, starting from $\wvec = \zeros$. The first three keys are the
+coordinate vectors, the fourth overlaps the first two: $\kvec_4 = (1, 1, 0)/\sqrt2 = (0.7071, 0.7071, 0)$.
+
+| $t$ | $\kvec_t$             | $v_t$ | read before, $\wvec_{t-1}^\tr\kvec_t$ | error $v_t - \text{read}$ | $\wvec_t$                   |
+| --- | --------------------- | ----- | ------------------------------------- | ------------------------- | --------------------------- |
+| 1   | $(1, 0, 0)$           | 1     | 0                                     | 1                         | $(1, 0, 0)$                 |
+| 2   | $(0, 1, 0)$           | 2     | 0                                     | 2                         | $(1, 2, 0)$                 |
+| 3   | $(0, 0, 1)$           | 3     | 0                                     | 3                         | $(1, 2, 3)$                 |
+| 4   | $(0.7071, 0.7071, 0)$ | 4     | $(1 + 2) \times 0.7071 = 2.1213$      | 1.8787                    | $(2.3284, 3.3284, 3)$       |
+
+The last row adds $1.8787\,\kvec_4^\tr = (1.3284, 1.3284, 0)$ to $\wvec_3$. Now read every key from $\wvec_4$:
+
+- $\kvec_4$: $(2.3284 + 3.3284) \times 0.7071 = 4.0000$, the value just written.
+- $\kvec_3$: $3$, unchanged, because $\kvec_3$ is orthogonal to $\kvec_4$.
+- $\kvec_1$ and $\kvec_2$: $2.3284$ and $3.3284$ instead of 1 and 2. Both moved by $1.3284$, because $\kvec_4$ overlaps
+  them.
+
+The additive memory of linear attention stores $\wvec_4 = (1, 2, 3) + 4\,\kvec_4^\tr = (3.8284, 4.8284, 3)$. Its reads
+are $3.8284$, $4.8284$, $3$ and $(3.8284 + 4.8284) \times 0.7071 = 6.1213$. Even the newest pair comes back wrong, by
+2.12, and the old pairs move by 2.83 instead of 1.33.
+
+Three keys in $\reals^3$ fill the memory. The fourth pair cannot be added without disturbing an old one; the delta rule
+stores it exactly and spreads the cost over the old pairs along $\kvec_4$ only. If $\kvec_4$ had been equal to
+$\kvec_1$, the error would have been $4 - 1 = 3$ and the write would have replaced the value of key 1 with 4, leaving
+keys 2 and 3 as they were.
+
+The figure repeats the experiment with random keys as the number of stored pairs passes the dimension.
+
+<AssociativeRecall />
+
+## Assumptions
+
+- **Unit keys.** The stability range $\beta_t \in (0, 2)$ assumes $\norm{\kvec_t} = 1$; implementations L2-normalise
+  keys. For a key of norm $\rho$ the eigenvalue along it is $1 - \beta_t\rho^2$.
+- **Gates from the token.** $\beta_t$ and $\alpha_t$ are computed from $\xvec_t$, usually through a sigmoid, so the
+  recurrence stays linear in $\Smat$ and the chunkwise algorithm applies.
+- **A regression view of memory.** The rule assumes that a memory should return $\vvec$ for $\kvec$, which suits recall
+  of key-value pairs. Tasks that need a summary of many tokens, such as counting, gain less.
+
+## Pitfalls
+
+- **Capacity is still $d_k$.** A $d_v \times d_k$ matrix holds at most $d_k$ associations with linearly independent
+  keys exactly. Past that, every write disturbs old pairs; the delta rule disturbs the oldest and most overlapping ones.
+- **Greedy writes.** With $\beta_t = 1$ each write is stored exactly, whatever it costs the earlier pairs. Smaller
+  $\beta_t$ spreads the error but stores nothing exactly.
+- **Unnormalised keys diverge.** Without the L2 normalisation, a long key makes $1 - \beta_t\rho^2 < -1$ and the state
+  grows without bound.
+- **Parallel training is harder than for diagonal recurrences.** The chunkwise WY algorithm needs a triangular solve per
+  chunk and custom kernels; a plain scan does not apply.
+- **Nonlinear inner models cost more.** TTT-MLP and Titans compute a gradient of a network per token or per mini-batch.
+  Their state is larger and their throughput lower than DeltaNet's at the same width.

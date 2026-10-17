@@ -1,0 +1,211 @@
+---
+title: 'Semi-supervised variational autoencoders'
+kind: technique
+summary: 'Kingma et al.''s M2 model is a variational autoencoder with the class label as a second latent variable, observed for labelled points and inferred by a classifier network for unlabelled ones. An extra classification loss on labelled points lets the classifier learn from both.'
+tags: [semi-supervised, generative-models, variational-inference, worked-example]
+aliases: ['M2 model', 'semi-supervised VAE', 'M1+M2', 'deep generative semi-supervised model']
+requires: [variational-autoencoder, generative-semi-supervised-learning]
+related:
+  [
+    conditional-variational-autoencoder,
+    evidence-lower-bound,
+    amortised-inference,
+    reparameterisation-trick,
+    semi-supervised-generative-adversarial-networks,
+    entropy-minimisation,
+  ]
+references: [kingma2014semi, kingma2014, maaloe2016auxiliary, jang2017]
+status: draft
+updated: 2026-10-17
+---
+
+import { M2Explorer } from './M2Explorer'
+
+<Definition>
+The **M2 model** of Kingma, Rezende, Mohamed and Welling is a <NoteLink to="variational-autoencoder">variational
+autoencoder</NoteLink> with two latent variables: a class label $y \in \{1, \dots, K\}$ and a continuous code
+$\zvec \in \reals^m$ <Cite id="kingma2014semi" />. The generative model draws $y \sim \Cat(\pivec)$ and
+$\zvec \sim \Gauss(\zeros, \Imat)$ independently and then $\xvec \sim p_{\thetavec}(\xvec \mid y, \zvec)$. The inference
+model has two networks: a classifier $q_{\phivec}(y \mid \xvec)$ and an encoder $q_{\phivec}(\zvec \mid \xvec, y)$. For
+a labelled point the label is observed and only $\zvec$ is inferred; for an unlabelled point both are inferred. The
+networks maximise the sum of the two kinds of evidence lower bound plus $\alpha$ times the log-likelihood of the
+classifier on the labelled points, and the classifier is the model's prediction rule.
+</Definition>
+
+## Problem
+
+<NoteLink to="generative-semi-supervised-learning">Generative semi-supervised learning</NoteLink> fits a model of
+$p(\xvec, y)$ and lets unlabelled points contribute their marginal likelihood. With a Gaussian or multinomial class
+model, the fit is exact <NoteLink to="expectation-maximisation">EM</NoteLink>, but the model is too simple for images,
+audio or any input whose classes are not blobs. A <Gloss name="vae" /> supplies a flexible density for such inputs: a
+neural decoder, an amortised encoder and a bound that is trained by stochastic gradients. M2 combines the two. It keeps
+the semi-supervised recipe (labels observed for some points, summed out for others) and replaces the class-conditional
+Gaussian by a decoder network.
+
+Kingma and coauthors first tried a simpler route, M1: train an ordinary VAE on all inputs, then fit a classifier to the
+encoder means of the labelled points. M1 uses unlabelled data only to learn features. M2 makes the label part of the
+generative model, so the decoder must explain each input through its class, and the unlabelled points train the
+classifier directly <Cite id="kingma2014semi" />.
+
+The extra variable separates two kinds of variation. The label carries what distinguishes the classes, and the code
+carries everything else, which Kingma and coauthors call style: for handwritten digits, whether the writing is upright
+or slanted. Fixing $\zvec$ and changing $y$ draws the same style in every class.
+
+## Mechanism
+
+### The labelled bound
+
+For a labelled pair $(\xvec, y)$ only $\zvec$ is latent. The bound is the conditional
+<NoteLink to="evidence-lower-bound">ELBO</NoteLink> of a <NoteLink to="conditional-variational-autoencoder">conditional
+VAE</NoteLink> plus the log-prior of the label. Writing it as a loss to minimise,
+
+$$
+\Lcal(\xvec, y) = -\expect_{q_{\phivec}(\zvec \mid \xvec, y)}\brack{\log p_{\thetavec}(\xvec \mid y, \zvec)}
++ \KL\paren{q_{\phivec}(\zvec \mid \xvec, y) \,\|\, \Gauss(\zeros, \Imat)} - \log \pi_y \;\ge\; -\log p(\xvec, y).
+$$
+
+The encoder is Gaussian,
+$q_{\phivec}(\zvec \mid \xvec, y) = \Gauss(\muvec_{\phivec}(\xvec, y), \diag \sigmavec^2_{\phivec}(\xvec))$, so the
+<Gloss name="kl" /> term has a closed form and the expectation is estimated with the
+<NoteLink to="reparameterisation-trick">reparameterisation trick</NoteLink>.
+
+### The unlabelled bound
+
+For an unlabelled input, $y$ is latent too. Take the variational posterior
+$q_{\phivec}(y, \zvec \mid \xvec) = q_{\phivec}(y \mid \xvec)\, q_{\phivec}(\zvec \mid \xvec, y)$. The bound on
+$-\log p(\xvec)$ is
+
+$$
+\Ucal(\xvec) = \sum_{y=1}^{K} q_{\phivec}(y \mid \xvec)\, \Lcal(\xvec, y) - \entropy\brack{q_{\phivec}(y \mid \xvec)}.
+$$
+
+The classifier weights the labelled bound of each candidate class, and the entropy term rewards spreading probability
+over classes. The sum over $y$ is exact: each unlabelled input passes through the encoder and decoder once per class.
+
+<Derivation title="The unlabelled bound from the evidence lower bound">
+Apply the ELBO to the joint latent $(y, \zvec)$ with
+$q(y, \zvec \mid \xvec) = q(y \mid \xvec)\, q(\zvec \mid \xvec, y)$:
+
+$$
+\log p(\xvec) \ge \expect_{q(y, \zvec \mid \xvec)}\brack{\log p(\xvec \mid y, \zvec) + \log \pi_y + \log p(\zvec)
+- \log q(y \mid \xvec) - \log q(\zvec \mid \xvec, y)}.
+$$
+
+Take the expectation over $y$ outside, as a sum weighted by $q(y \mid \xvec)$. For each $y$, the inner expectation over
+$\zvec$ of every term except $-\log q(y \mid \xvec)$ is $-\Lcal(\xvec, y)$. The remaining term gives
+$-\sum_y q(y \mid \xvec) \log q(y \mid \xvec) = \entropy[q(y \mid \xvec)]$. So
+$\log p(\xvec) \ge \sum_y q(y \mid \xvec)\,(-\Lcal(\xvec, y)) + \entropy[q(y \mid \xvec)] = -\Ucal(\xvec)$
+<Cite id="kingma2014semi" />.
+</Derivation>
+
+### What the unlabelled bound asks of the classifier
+
+Hold the per-class bounds $\Lcal(\xvec, y)$ fixed and minimise $\Ucal$ over the class probabilities $q_y$. The function
+$\sum_y q_y \Lcal_y + \sum_y q_y \log q_y$ is a free energy, minimised under $\sum_y q_y = 1$ by
+
+$$
+q_y^\star = \frac{\exp(-\Lcal(\xvec, y))}{\sum_{k} \exp(-\Lcal(\xvec, k))}, \qquad
+\Ucal^\star = -\log \sum_{k} \exp(-\Lcal(\xvec, k)).
+$$
+
+The derivative of the Lagrangian in $q_y$ is $\Lcal_y + \log q_y + 1 + \nu$, and setting it to zero gives
+$q_y \propto e^{-\Lcal_y}$. Since $-\Lcal(\xvec, y)$ is a lower bound on $\log p(\xvec, y)$, $q^\star$ is the generative
+model's estimate of the posterior $p(y \mid \xvec)$. The unlabelled term therefore trains the classifier towards the
+class under which the decoder explains the input best. This is the semi-supervised signal, in the same way that the
+E-step of semi-supervised EM sets an unlabelled point's responsibilities to its posterior.
+
+### The objective
+
+Summed over the labelled set $L$ and the unlabelled set $U$, the bounds give
+$\Jcal = \sum_{(\xvec, y) \in L} \Lcal(\xvec, y) + \sum_{\xvec \in U} \Ucal(\xvec)$. In $\Jcal$ the classifier appears
+only in the unlabelled term, so it never learns from the labels directly. Kingma and coauthors add a classification
+loss:
+
+$$
+\Jcal^{\alpha} = \Jcal + \alpha\, \expect_{(\xvec, y) \sim L}\brack{-\log q_{\phivec}(y \mid \xvec)},
+$$
+
+with $\alpha = 0.1 N$ for $N$ training points in all their experiments <Cite id="kingma2014semi" />. All three networks
+are trained jointly on $\Jcal^\alpha$ by <Gloss name="sgd">stochastic gradient descent</Gloss>, without alternating
+steps.
+
+M1 and M2 can be stacked. **M1+M2** trains M1 first and then fits M2 to the M1 codes instead of the raw inputs, so the
+class-plus-style model works in a space where classes are already better separated.
+
+## Worked example
+
+Take one unlabelled input and two classes. Suppose the encoder and decoder give the per-class bounds
+$\Lcal(\xvec, 0) = 3.1$ and $\Lcal(\xvec, 1) = 5.4$ nats: the decoder explains the input better as class 0. Suppose the
+classifier currently says $q = (0.8, 0.2)$.
+
+**The bound.** The weighted bounds are $0.8 \times 3.1 = 2.48$ and $0.2 \times 5.4 = 1.08$. The entropy is
+$-(0.8 \log 0.8 + 0.2 \log 0.2) = 0.178 + 0.322 = 0.500$ nats. So $\Ucal = 2.48 + 1.08 - 0.500 = 3.06$.
+
+**The direction of the classifier's update.** With $q_0 = 1 - q_1$, the derivative of $\Ucal$ in $q_1$ is
+$\Lcal_1 - \Lcal_0 + \log(q_1 / q_0) = 2.3 + \log 0.25 = 2.3 - 1.386 = 0.914$. It is positive, so
+<NoteLink to="gradient-descent">gradient descent</NoteLink> lowers $q_1$: the classifier moves further towards class 0.
+
+**Where it stops.** The derivative is zero when $\log(q_1/q_0) = -2.3$, that is
+$q = (1/(1 + e^{-2.3}),\; e^{-2.3}/(1 + e^{-2.3})) = (0.909, 0.091)$. There
+$\Ucal^\star = -\log(e^{-3.1} + e^{-5.4}) = 3.004$, below the $3.06$ at the start.
+
+The classifier does not become certain. A gap of 2.3 nats between the class bounds gives odds of $e^{2.3} \approx 10$ to
+1.  The entropy term keeps it from claiming more confidence than the decoder supports. If the decoder ignored the label,
+   $\Lcal(\xvec, 0) = \Lcal(\xvec, 1)$, the minimiser would be $q = (\tfrac12, \tfrac12)$ and the unlabelled point would
+   teach the classifier nothing.
+
+The figure trains M2 on a data set built with exactly the structure the model assumes: one discrete factor, the class,
+and one continuous factor shared by both classes.
+
+<M2Explorer />
+
+With 4 labels per class and the default seed, M2 labels 99% of the unlabelled points correctly after 400 steps and the
+same classifier trained on the labels alone reaches 80%. With 1 label per class the gap widens to 99% against 51%. The
+decoder curves show why: the model has learned one wave per label, so the class of a point is decided by which wave
+explains it, not by its distance to the few labelled points.
+
+## Cost
+
+Each unlabelled input costs $K$ passes through the encoder and decoder, one per class, against one pass for a labelled
+input. Kingma and coauthors give the cost of an M2 update as $K$ times that of the plain VAE
+<Cite id="kingma2014semi" />. For ten classes this is affordable; for hundreds it is not. Jang and coauthors replace the
+sum over $y$ by a single reparameterised sample of $y$ with the Gumbel-softmax relaxation, which made training twice as
+fast for 10 classes and 9.9 times as fast for 100, with the same classification accuracy on <Gloss name="mnist" />
+<Cite id="jang2017" />.
+
+In the figure, one M2 step takes about 4 ms, about six times the cost of a step of the classifier alone.
+
+## Trade-offs
+
+- **Against semi-supervised EM.** M2 keeps the logic of generative semi-supervised learning and drops the Gaussian class
+  model. The decoder can describe curved or high-dimensional classes, and the classifier gives predictions for new
+  inputs in one forward pass. The price is a bound instead of the exact likelihood, stochastic gradients instead of
+  closed-form updates, and many more hyperparameters.
+- **<NoteLink to="stacking">Stacking</NoteLink> and auxiliary variables.** On permutation-invariant MNIST with 100
+  labels, M2 on raw pixels had 11.97% test error, and M1+M2 3.33% <Cite id="kingma2014semi" />. Maaløe and coauthors
+  added an auxiliary latent variable that makes the classifier and encoder more expressive, and reached 0.96% on the
+  same task <Cite id="maaloe2016auxiliary" />. The gains came from better inference networks, not from a different
+  semi-supervised principle.
+- **Against discriminative methods.** Semi-supervised VAEs model every pixel of every input, most of which is irrelevant
+  to the class. <NoteLink to="consistency-regularisation">Consistency regularisation</NoteLink> and
+  <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> spend no capacity on generation and lead the image
+  benchmarks. Semi-supervised VAEs remain useful when the generative model is wanted for itself: conditional generation,
+  style-content separation, or data where a decoder with the right structure is easy to write down.
+
+## Pitfalls
+
+- **A decoder that ignores the label.** If the code $\zvec$ alone can explain the inputs, the per-class bounds are equal
+  and the unlabelled term carries no class information, as the worked example shows. A flexible decoder and a wide code
+  make this likely. On two moons (200 points, 4 labels per class), whose classes one curve can trace end to end, the
+  figure's networks with $\alpha/N = 0.1$ learned decoders that were nearly the same for both labels, and M2 labelled
+  70% of the unlabelled points correctly against 91% for the classifier alone.
+- **Classes attached the wrong way round.** The unlabelled term is symmetric in the class names. If the labelled terms
+  are too weak, the model can learn the right clusters and name them backwards. On the figure's data with
+  $\alpha/N = 0.1$, Kingma and coauthors' setting, seed 1 still reaches 93%, but seed 5 learns both waves and names them
+  the wrong way round: 5% accuracy, with a labelled cross-entropy of 5.7 nats. At $\alpha/N = 5$ both seeds exceed 98%.
+  Small problems need a larger $\alpha$ than the paper's.
+- **The class prior is fixed.** M2 uses a fixed $\pivec$, usually uniform. If the unlabelled data are imbalanced, the
+  entropy term and the uniform prior push the classifier towards balanced predictions.
+- **Bounds are not accuracies.** A lower $\Jcal^\alpha$ means a better generative fit.
+  <NoteLink to="model-selection">Model selection</NoteLink> by the bound can choose a model with a worse classifier, so
+  <NoteLink to="early-stopping">early stopping</NoteLink> and hyperparameters should use held-out labelled points.

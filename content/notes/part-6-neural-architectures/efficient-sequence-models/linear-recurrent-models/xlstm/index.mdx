@@ -1,0 +1,229 @@
+---
+title: 'xLSTM'
+kind: concept
+summary: 'xLSTM extends the LSTM with exponential input gates and a max-based stabiliser state (sLSTM), and with a matrix memory updated by outer products $\Cmat_t=f_t\Cmat_{t-1}+i_t\vvec_t\kvec_t^\tr$ (mLSTM). The mLSTM has no hidden-to-hidden weights, so it trains in parallel like gated linear attention.'
+tags: [sequence-models, long-context, worked-example]
+aliases: ['extended LSTM', 'sLSTM', 'mLSTM', 'exponential gating', 'matrix memory', 'covariance update rule']
+requires: [long-short-term-memory, linear-attention]
+related:
+  [
+    gated-linear-recurrence,
+    delta-rule-and-test-time-training,
+    rwkv-and-retentive-networks,
+    softmax-and-log-sum-exp,
+    floating-point-arithmetic,
+    expressiveness-of-linear-recurrences,
+  ]
+references: [beck2024xlstm, hochreiter1997]
+status: draft
+updated: 2026-10-17
+---
+
+import { MlstmStabiliser } from './MlstmStabiliser'
+
+<Definition>
+**xLSTM** is a family of recurrent layers that extend the <NoteLink to="long-short-term-memory">LSTM</NoteLink> in two
+ways <Cite id="beck2024xlstm" />. **Exponential gating** replaces the sigmoid input gate by
+$i_t = \exp(\tilde\imath_t)$, with a normaliser state that keeps the output bounded and a stabiliser state that keeps
+the numbers finite. **New memories** give two cells: the **sLSTM**, with a scalar memory per unit and recurrent
+connections between units, and the **mLSTM**, with a matrix memory $\Cmat_t \in \reals^{d_v \times d_k}$ written by
+outer products of values and keys and read by a query. The mLSTM has no recurrent connections from its hidden state, so
+it can be computed in parallel over the sequence.
+</Definition>
+
+## Intuition
+
+Beck et al. name three limits of the LSTM <Cite id="beck2024xlstm" />.
+
+- **It cannot revise a storage decision.** The input gate is a sigmoid, at most 1. When a more relevant token arrives
+  after the cell has filled, the new value can only enter as fast as the forget gate lets the old one leave. An
+  exponential input gate lets a single token outweigh everything stored before it.
+- **Its memory is small.** A scalar cell per unit compresses the past into $d$ numbers. A $d_v \times d_k$ matrix
+  stores a value for each key direction, as in <NoteLink to="linear-attention">linear attention</NoteLink>.
+- **It is sequential.** The gates read the previous hidden state $\hvec_{t-1}$ (memory mixing), so training cannot run
+  in parallel over time. The mLSTM drops these connections and becomes a linear recurrence.
+
+The sLSTM keeps memory mixing and takes the first fix only. The mLSTM takes all three, and the result is close to gated
+linear attention with an exponential input gate and a normaliser.
+
+## Details
+
+### Exponential gates and the normaliser
+
+The sLSTM cell state $c_t$ and a **normaliser state** $n_t$ follow the same gates,
+
+$$
+c_t = f_t\,c_{t-1} + i_t\,z_t, \qquad n_t = f_t\,n_{t-1} + i_t, \qquad h_t = o_t\,\frac{c_t}{n_t},
+$$
+
+with candidate $z_t = \tanh(\tilde z_t)$, input gate $i_t = \exp(\tilde\imath_t)$, forget gate
+$f_t = \sigma(\tilde f_t)$ or $\exp(\tilde f_t)$, and output gate $o_t = \sigma(\tilde o_t)$. Each pre-activation, such
+as $\tilde\imath_t = \wvec_i^\tr\xvec_t + r_i h_{t-1} + b_i$, reads the input and the previous hidden state
+<Cite id="beck2024xlstm" />.
+
+Unrolling both recurrences from zero shows what the normaliser does. With the weight
+
+$$
+w_{ts} = i_s \prod_{j=s+1}^{t} f_j = \exp\paren{\tilde\imath_s + \sum_{j=s+1}^{t} \log f_j},
+$$
+
+the states are $c_t = \sum_{s \le t} w_{ts} z_s$ and $n_t = \sum_{s \le t} w_{ts}$. Their ratio
+
+$$
+\frac{c_t}{n_t} = \sum_{s \le t} \frac{w_{ts}}{\sum_{r \le t} w_{tr}}\,z_s
+$$
+
+is a weighted average of the past candidates, so it stays in $[-1, 1]$ whatever the size of the gates. The weights are
+a <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> over past positions of the scores
+$\tilde\imath_s + \sum_{j > s} \log f_j$: each token bids for memory with its input gate, and its bid shrinks by the log
+forget gate at every later step. A token whose $\tilde\imath$ exceeds its neighbours' by 5 takes $e^5 \approx 148$ times
+their share. This is the revision the sigmoid gate could not make.
+
+### The stabiliser
+
+Exponential gates overflow. A pre-activation $\tilde\imath_t = 100$ gives $e^{100} \approx 2.7 \times 10^{43}$, beyond
+the largest float32, $3.4 \times 10^{38}$. xLSTM adds a **stabiliser state**
+
+$$
+m_t = \max\paren{\log f_t + m_{t-1},\ \tilde\imath_t},
+$$
+
+and replaces the gates by $i'_t = \exp(\tilde\imath_t - m_t)$ and $f'_t = \exp(\log f_t + m_{t-1} - m_t)$
+<Cite id="beck2024xlstm" />. The stabilised states are the true ones scaled by $e^{-m_t}$. By induction, if
+$c'_{t-1} = e^{-m_{t-1}}c_{t-1}$, then
+
+$$
+c'_t = f'_t c'_{t-1} + i'_t z_t
+= e^{\log f_t + m_{t-1} - m_t}\,e^{-m_{t-1}}c_{t-1} + e^{\tilde\imath_t - m_t}z_t
+= e^{-m_t}\paren{f_t c_{t-1} + i_t z_t} = e^{-m_t}c_t,
+$$
+
+and the same holds for $n'_t$. The ratio $c'_t / n'_t$ equals $c_t / n_t$, so the output and its gradients are
+unchanged. Unrolling the max shows that $m_t = \max_{s \le t}\log w_{ts}$: the stabiliser is the log of the largest
+weight, the stabilised largest weight is exactly 1, and nothing grows. This is the running-maximum trick of the online
+softmax, applied to a recurrence.
+
+### sLSTM: memory mixing
+
+The sLSTM keeps recurrent weights $r$ from $h_{t-1}$ into every gate, block-diagonal over heads so that units mix only
+within a head <Cite id="beck2024xlstm" />. Its gates depend on the state, so the cell is a nonlinear recurrence that
+must run token by token; xLSTM implements it as a fused <Gloss name="gpu" /> kernel. In exchange it keeps the
+state-dependent gating that tasks such as counting and parity need (see the
+<NoteLink to="expressiveness-of-linear-recurrences">expressiveness note</NoteLink>).
+
+### mLSTM: a matrix memory
+
+The mLSTM stores key-value associations. For each token it computes a query $\qvec_t$, a key $\kvec_t$ (scaled by
+$1/\sqrt{d_k}$) and a value $\vvec_t$ by linear maps of $\xvec_t$, and
+
+$$
+\Cmat_t = f_t\,\Cmat_{t-1} + i_t\,\vvec_t\kvec_t^\tr, \qquad
+\nvec_t = f_t\,\nvec_{t-1} + i_t\,\kvec_t, \qquad
+\hvec_t = \ovec_t \odot \frac{\Cmat_t\qvec_t}{\max\set{\abs{\nvec_t^\tr\qvec_t},\ 1}}.
+$$
+
+The gates $i_t = \exp(\tilde\imath_t)$ and $f_t$ are scalars per head computed from $\xvec_t$ alone, and
+$\ovec_t = \sigma(\Wmat_o\xvec_t + \bvec_o)$ <Cite id="beck2024xlstm" />. The sum of outer products $\vvec\kvec^\tr$ is
+the **covariance update rule** of associative memories. Reading with a query gives
+
+$$
+\Cmat_t\qvec_t = \sum_{s \le t} w_{ts}\,(\kvec_s^\tr\qvec_t)\,\vvec_s,
+$$
+
+values weighted by how well their keys match the query and by the gate weight $w_{ts}$. The denominator
+$\nvec_t^\tr\qvec_t = \sum_s w_{ts}\kvec_s^\tr\qvec_t$ is the total weight. The lower bound 1 prevents a division by a
+near-zero total when the query matches nothing.
+
+This is causal linear attention with an identity <NoteLink to="convolutional-layer">feature map</NoteLink>, a scalar
+decay per step (the forget gate), an exponential weight per written token (the input gate) and a normaliser. With the
+stabiliser the threshold 1 becomes $e^{-m_t}$, because both the numerator and the normaliser are scaled by $e^{-m_t}$.
+
+### The parallel form
+
+The mLSTM's gates do not depend on its state, so the unrolled sums can be written as one masked matrix product. Let
+$F_t = \sum_{j \le t} \log f_j$ be the cumulative log forget gate. Then $\log w_{ts} = F_t - F_s + \tilde\imath_s$ for
+$s \le t$, and stacking the reads over $t$ gives
+
+$$
+\tilde\Hmat = \frac{(\Qmat\Kmat^\tr \circ \Dmat)\,\Vmat}{\max\set{\abs{(\Qmat\Kmat^\tr \circ \Dmat)\ones},\ e^{-\mvec}}},
+\qquad D_{ts} = \begin{cases} e^{F_t - F_s + \tilde\imath_s - m_t} & s \le t, \\ 0 & s > t, \end{cases}
+$$
+
+with the rows of $\Qmat$, $\Kmat$, $\Vmat$ the queries, keys and values, $m_t = \max_{s \le t}(F_t - F_s +
+\tilde\imath_s)$ the row maximum, and the division row by row <Cite id="beck2024xlstm" />. This is the attention form of
+the layer: $O(T^2)$ time, made of matrix products. Practical kernels split the sequence into chunks, use the parallel
+form within each chunk and carry $\Cmat$, $\nvec$ and $m$ between chunks, as for
+<NoteLink to="rwkv-and-retentive-networks">retention</NoteLink> and
+<NoteLink to="gated-linear-recurrence">gated linear attention</NoteLink>.
+
+### Blocks and stacks
+
+xLSTM wraps each cell in a <NoteLink to="residual-network">residual block</NoteLink>. The sLSTM block follows the
+transformer layout: the cell, then a gated feed-forward up-projection. The mLSTM block follows the state-space layout of
+<Gloss name="mamba" />: an up-projection by a factor of 2, a short <NoteLink to="wavenet-and-causal-convolution">causal
+convolution</NoteLink>, the cell, an output gate and a down-projection. A stack is written xLSTM$[a{:}b]$ for the ratio
+of mLSTM to sLSTM blocks; xLSTM$[7{:}1]$ uses seven mLSTM blocks for every sLSTM block <Cite id="beck2024xlstm" />. The
+<Gloss name="language-model">language models</Gloss> of the paper were trained on 300B tokens of SlimPajama and compared
+with transformers, Mamba and RWKV of the same sizes.
+
+## Worked example
+
+Take one mLSTM head with $d_k = d_v = 2$, an exponential forget gate, and three tokens. Keys are taken as already
+scaled. The output gate is left out ($\ovec_t = \ones$).
+
+| $t$ | $\kvec_t$ | $\vvec_t$ | $\qvec_t$ | $\tilde\imath_t$ | $i_t$ | $f_t$ |
+| --- | --------- | --------- | --------- | ---------------- | ----- | ----- |
+| 1   | $(1, 0)$  | $(1, 0)$  | $(1, 0)$  | 0                | 1     | (any) |
+| 2   | $(0, 1)$  | $(0, 2)$  | $(0, 1)$  | 0                | 1     | 1     |
+| 3   | $(1, 0)$  | $(3, 1)$  | $(1, 0)$  | $\ln 4$          | 4     | 0.5   |
+
+1. **Step 1.** $\Cmat_1 = \vvec_1\kvec_1^\tr = \begin{pmatrix} 1 & 0 \\ 0 & 0 \end{pmatrix}$ and
+   $\nvec_1 = (1, 0)$. The read is $\Cmat_1\qvec_1 = (1, 0)$ with $\nvec_1^\tr\qvec_1 = 1$, so $\hvec_1 = (1, 0)$.
+2. **Step 2.** $\Cmat_2 = \Cmat_1 + \vvec_2\kvec_2^\tr = \begin{pmatrix} 1 & 0 \\ 0 & 2 \end{pmatrix}$ and
+   $\nvec_2 = (1, 1)$. The query $(0, 1)$ matches only key 2: $\Cmat_2\qvec_2 = (0, 2)$, $\nvec_2^\tr\qvec_2 = 1$, and
+   $\hvec_2 = (0, 2) = \vvec_2$.
+3. **Step 3.** Key 1 is written again with a new value and an input gate of 4, after a forget gate of 0.5:
+   $$
+   \Cmat_3 = 0.5\,\Cmat_2 + 4\,\vvec_3\kvec_3^\tr
+   = \begin{pmatrix} 0.5 & 0 \\ 0 & 1 \end{pmatrix} + \begin{pmatrix} 12 & 0 \\ 4 & 0 \end{pmatrix}
+   = \begin{pmatrix} 12.5 & 0 \\ 4 & 1 \end{pmatrix},
+   \qquad \nvec_3 = (0.5, 0.5) + (4, 0) = (4.5, 0.5).
+   $$
+   The query $(1, 0)$ reads $\Cmat_3\qvec_3 = (12.5, 4)$ and $\nvec_3^\tr\qvec_3 = 4.5$, so
+   $\hvec_3 = (2.778, 0.889)$.
+
+The output is the weighted average $(0.5\,\vvec_1 + 4\,\vvec_3)/4.5$ of the two values stored under key 1: the new value
+takes $4/4.5 = 89\%$. A sigmoid input gate caps $i_3$ at 1, which with the same first write and forget gate would give
+the new value at most $1/1.5 = 67\%$.
+
+**The stabiliser on the same tokens.** $m_1 = \tilde\imath_1 = 0$, $m_2 = \max(0 + 0, 0) = 0$ and
+$m_3 = \max(\ln 0.5 + 0, \ln 4) = \ln 4$. At step 3 the stabilised gates are $i'_3 = e^{\ln 4 - \ln 4} = 1$ and
+$f'_3 = e^{\ln 0.5 + 0 - \ln 4} = 0.125$. The stabilised memory is $\Cmat'_3 = 0.125\,\Cmat_2 + \vvec_3\kvec_3^\tr =
+\Cmat_3/4$ and $\nvec'_3 = (1.125, 0.125) = \nvec_3/4$. The denominator is $\max(1.125, e^{-\ln 4}) = 1.125$, and the
+output $(3.125, 1)/1.125 = (2.778, 0.889)$ is the same.
+
+The figure runs the stabilised recurrence and the parallel form on random tokens and tracks $m_t$.
+
+<MlstmStabiliser />
+
+## Assumptions
+
+- **Gates from the input (mLSTM).** The mLSTM's gates read only $\xvec_t$; this is what makes the recurrence linear in
+  $(\Cmat, \nvec)$ and the parallel form exact.
+- **Scalar gates per head.** One forget and one input gate per head scale the whole matrix memory. Every association in
+  a head fades at the same rate.
+- **Keys of moderate size.** The read $\Cmat\qvec$ sums values weighted by key overlaps. Keys are scaled by
+  $1/\sqrt{d_k}$ so that overlaps of random keys stay of order 1.
+
+## Pitfalls
+
+- **Overflow without the stabiliser.** The unstabilised weights are $e^{m_t}$. An input-gate pre-activation above 88, or
+  an exponential forget gate with a positive pre-activation over a few dozen tokens, passes the float32 range; float16
+  overflows above $e^{11}$. The stabiliser removes the problem only if $m_t$ is carried exactly as defined.
+- **Interference in the matrix memory.** The additive write never removes an old association except through the forget
+  gate. Keys that overlap blur their values, as in linear attention; the
+  <NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink> subtracts the old value instead.
+- **The normaliser threshold.** When $\abs{\nvec_t^\tr\qvec_t} < 1$ the output is the raw read $\Cmat_t\qvec_t$, not an
+  average, so its scale depends on how much has been stored.
+- **The sLSTM is sequential.** Its memory mixing rules out the parallel form. Stacks with many sLSTM blocks train more
+  slowly than mLSTM-only stacks of the same size.

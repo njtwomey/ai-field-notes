@@ -1,0 +1,204 @@
+---
+title: 'Long-range and recall benchmarks'
+kind: concept
+summary: 'Long Range Arena and Path-X test dependencies over thousands of steps; selective copying, induction heads and multi-query associative recall test retrieval from context. Fixed-state recurrences do well on the first kind and lose to attention on recall as state size shrinks.'
+tags: [sequence-models, long-context, evaluation, worked-example]
+aliases:
+  [
+    'Long Range Arena',
+    'LRA',
+    'Path-X',
+    'multi-query associative recall',
+    'MQAR',
+    'selective copying',
+    'associative recall',
+    'recall-memory tradeoff',
+  ]
+requires: [structured-state-space-models, linear-attention]
+related:
+  [
+    delta-rule-and-test-time-training,
+    hybrid-sequence-models,
+    attention-head-analysis,
+    induction-heads-and-circuits,
+    expressiveness-of-linear-recurrences,
+    effective-context-length,
+    mamba,
+    mamba-2-and-state-space-duality,
+  ]
+references:
+  [tay2021lra, gu2022s4, amos2024, gu2023mamba, olsson2022, fu2023h3, arora2024zoology, arora2024based, jelassi2024, de2024griffin, dao2024]
+status: draft
+updated: 2026-10-17
+---
+
+import { RecallByStateSize } from './RecallByStateSize'
+
+<Definition>
+**Long-range benchmarks** give a model a long input, thousands to tens of thousands of steps, and one label that depends
+on elements far apart; the Long Range Arena (LRA) and its hardest task, Path-X, are the standard suite
+<Cite id="tay2021lra" />. **Recall benchmarks** ask the model to reproduce a token seen earlier in the context, chosen
+by its content: copying, selective copying, induction heads, and multi-query associative recall (MQAR), in which the
+model reads $N$ key-value pairs and must answer every key with its value <Cite id="arora2024zoology" />. The two kinds
+separate sequence layers along different axes: how far information can travel, and how much of it a fixed-size state can
+hold.
+</Definition>
+
+## Intuition
+
+A sequence layer can fail on a long input in two ways. It can lose the signal before it reaches the output, as an
+<NoteLink to="recurrent-neural-network">RNN</NoteLink> with <NoteLink to="backpropagation-through-time">vanishing
+gradients</NoteLink> does. Or it can carry information across the whole input but not enough of it, as any layer with a
+state of fixed size must once the input holds more facts than the state has room for.
+
+Long-range benchmarks test the first. A classifier of a 16,384-pixel image of two dots and a winding path needs to
+integrate evidence along the path, but the answer is one bit. A <NoteLink to="structured-state-space-models">structured
+state-space layer</NoteLink> with a long, smooth convolution kernel is built for this, and S4 was the first model to
+solve Path-X <Cite id="gu2022s4" />.
+
+Recall benchmarks test the second. To answer "C?" after reading "A 4 B 3 C 6 F 1", a model must have kept the pair
+(C, 6) and every other pair, because it did not know which would be asked. Attention keeps every token in its cache
+and looks the answer up. A recurrent layer with a state of $s$ numbers can store only so many pairs, and its accuracy
+falls as the number of pairs grows against $s$ <Cite id="arora2024based" />.
+
+## Details
+
+### Long Range Arena
+
+Long Range Arena has six tasks, each a classification of one long sequence (or two, for retrieval)
+<Cite id="tay2021lra" />:
+
+| Task       | Input                                                    | Length       | Classes |
+| ---------- | -------------------------------------------------------- | ------------ | ------- |
+| ListOps    | nested expressions with MAX, MEAN, MEDIAN and SUM <Gloss name="mod" />    | up to 2,048  | 10      |
+| Text       | IMDb movie reviews as bytes                              | 4,096        | 2       |
+| Retrieval  | two papers as bytes; do they cite each other?            | 4,096 each   | 2       |
+| Image      | <Gloss name="cifar-10" /> images as sequences of grey-level pixels        | 1,024        | 10      |
+| Pathfinder | a 32 × 32 image: are the two dots joined by a dashed path? | 1,024      | 2       |
+| Path-X     | the same at 128 × 128                                    | 16,384       | 2       |
+
+The tasks forbid what would make them easy: no pretraining, byte or pixel inputs instead of words or patches, and no
+cross-attention between the two documents of the retrieval task. In the original paper a transformer averaged 54.4 over
+the first five tasks, the best <NoteLink to="efficient-attention">efficient transformer</NoteLink> 55.0, and every model
+was at chance (50%) on Path-X <Cite id="tay2021lra" />. S4 averaged 80.5 and reached 88% on Path-X; an updated S4
+averaged 86.1 and reached 96.4% <Cite id="gu2022s4" />. The <NoteLink to="linear-recurrent-unit-and-s5">linear recurrent
+unit and S5</NoteLink> reached similar scores with diagonal recurrences.
+
+These results measure more than the layer. Amos, Berant and Gupta pretrained each model on the training inputs of the
+task itself with a denoising objective before fine-tuning. Pretrained this way, a plain transformer matched S4 on LRA,
+and the gaps between architectures shrank <Cite id="amos2024" />. Training from random weights on 16,000-step inputs
+rewards a good initialisation of long-range memory, which S4's <Gloss name="hippo" /> matrices supply, as much as it
+rewards the capacity to represent the task.
+
+### Recall tasks
+
+- **Copying.** Reproduce a string of $n$ random tokens after a separator. A two-layer transformer can copy strings of
+  length exponential in its size, while a model with a fixed-size state cannot copy strings whose information exceeds
+  the state; trained transformers learned copying faster and generalised to longer strings than
+  <Gloss name="state-space-model">state-space models</Gloss> of the same size <Cite id="jelassi2024" />.
+- **Selective copying.** A few content tokens at random positions among noise tokens; output the content tokens in
+  order. The gaps vary, so a time-invariant kernel cannot pick the tokens out. S4 solved about 18% and Mamba's selective
+  layer about 97% <Cite id="gu2023mamba" /> (see <NoteLink to="mamba" />).
+- **Induction heads.** After "… Harry Potter …", predict "Potter" the next time "Harry" appears. The task names the
+  attention circuit of two heads that does this in transformers <Cite id="olsson2022" /> (see
+  <NoteLink to="induction-heads-and-circuits" />).
+- **Associative recall.** Pairs of a key and a value, then one key; output its value. H3 solved it with 99.8% accuracy
+  against 86.0% for S4D, which matched attention <Cite id="fu2023h3" />.
+- **Multi-query associative recall (MQAR).** All keys are queried, at several positions, in one sequence: "A 4 B 3 C
+  6 F 1 E 2 → A ? C ? F ? E ? B ?" has answers 4, 6, 1, 2, 3 <Cite id="arora2024zoology" />. Language models answer
+  many recall queries per sequence, and single-query associative recall had stopped separating architectures: the
+  convolutional and recurrent models that solved it still trailed attention in perplexity.
+
+### What MQAR explains
+
+Arora et al. measured the perplexity gap between attention and gated-convolution models (H3, Hyena, RWKV) on the Pile
+<Cite id="arora2024zoology" />. Tokens that complete an earlier n-gram, which a recall step predicts, were about 6.4%
+of the tokens and accounted for 82% of the gap. On synthetic MQAR, attention solved every sequence length with a model
+width of 64, while two-layer gated convolutions needed a width at least as large as the sequence length.
+
+A follow-up made the cost a tradeoff <Cite id="arora2024based" />. Across attention, Mamba, RWKV, linear attention and
+others, recall accuracy on MQAR rose with the size of the recurrent state, and attention, whose state is its whole
+cache, sat at the end of the curve. Their model, Based, combines linear attention with a short sliding window. Its two
+sizes, the feature dimension and the window, move it along the recall-memory curve. A 1.3B Based model matched Mamba in
+perplexity and beat it by 6.22 points on recall-intensive tasks. Mamba-2's larger state was measured the same way: on
+MQAR, raising its state from 16 to 64 and to 256 improved accuracy each time <Cite id="dao2024" />.
+
+### Why a fixed state limits recall
+
+A counting argument sets the limit. Storing $N$ pairs whose values come from a vocabulary of $V$ tokens takes at least
+$N\log_2 V$ bits. A state of $s$ numbers with $b$ bits each holds $sb$ bits, so no recurrent layer, however trained, can
+answer every query once $N\log_2 V > sb$. Attention escapes the bound because its cache grows by one key and one value
+per token.
+
+A linear memory meets a sharper limit. The state of causal <NoteLink to="linear-attention">linear attention</NoteLink>
+is $\Smat = \sum_i \vvec_i\kvec_i^\tr \in \reals^{d_v \times d_k}$, and its read for a query $\qvec$ is
+$\Smat\qvec = \sum_i (\kvec_i^\tr\qvec)\,\vvec_i$. With orthonormal keys, reading key $j$ returns $\vvec_j$ exactly,
+and at most $d_k$ keys can be orthonormal. Any further key overlaps some stored key and its read picks up a share of
+that key's value. The <NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink> chooses which
+associations to keep, but its state is the same $d_v \times d_k$ matrix and holds at most $d_k$ exact associations.
+
+<Derivation title="A d_v × d_k matrix stores at most d_k exact associations">
+Suppose a matrix $\Smat \in \reals^{d_v \times d_k}$ returns $\Smat\kvec_i = \vvec_i$ for $N$ pairs. Stack the keys as
+the columns of $\Kmat \in \reals^{d_k \times N}$ and the values as the columns of $\Vmat \in \reals^{d_v \times N}$, so
+$\Smat\Kmat = \Vmat$. The rank of $\Smat\Kmat$ is at most $\min(\operatorname{rank}\Smat, \operatorname{rank}\Kmat)
+\le d_k$. When the values are in general position and $N \le d_v$, $\operatorname{rank}\Vmat = N$, so $N \le d_k$.
+Conversely, for $N \le d_k$ linearly independent keys, $\Smat = \Vmat(\Kmat^\tr\Kmat)^{-1}\Kmat^\tr$ satisfies
+$\Smat\Kmat = \Vmat$: a $d_k$-dimensional key space stores exactly $d_k$ arbitrary associations, and no more.
+</Derivation>
+
+The figure measures how fast accuracy falls when the memories are given ideal keys rather than trained ones.
+
+<RecallByStateSize />
+
+## Worked example
+
+Take MQAR with $N = 8$ pairs and scalar values ($d_v = 1$): keys A to H with values 4, 3, 6, 1, 2, 7, 5, 9. A read is
+decoded to the nearest value token in $\{1, \dots, 9\}$.
+
+**Keys of dimension 4.** Embed the first four keys as the coordinate vectors $\evec_1, \dots, \evec_4$ of $\reals^4$
+and the last four as the rows of a $4 \times 4$ Hadamard matrix divided by 2: $\tfrac12(1, 1, 1, 1)$,
+$\tfrac12(1, -1, 1, -1)$, $\tfrac12(1, 1, -1, -1)$ and $\tfrac12(1, -1, -1, 1)$. Every key has unit length. Each of
+the last four has dot product $\pm\tfrac12$ with each of the first four, and the last four are orthonormal among
+themselves.
+
+1. **Linear memory.** The state is the row vector $\wvec = \sum_i v_i\kvec_i$. Its first entry collects $v_1 = 4$ from
+   $\evec_1$ and $\tfrac12(2 + 7 + 5 + 9) = 11.5$ from the Hadamard keys: $w_1 = 15.5$. In full,
+   $\wvec = (15.5, -1.5, 3.5, 0.5)$.
+2. **Reads.** Key A reads $\wvec^\tr\evec_1 = 15.5$ instead of 4, key B reads $-1.5$ instead of 3, key C 3.5 instead
+   of 6, and key D 0.5 instead of 1. Key E reads $\tfrac12(15.5 - 1.5 + 3.5 + 0.5) = 9$ instead of 2; F, G and H read
+   10, 5 and 7 instead of 7, 5 and 9. Decoded, only G (5) and D (0.5, nearest token 1) are right. Eight associations
+   do not fit in four numbers.
+3. **<NoteLink to="scaled-dot-product-attention">Softmax attention</NoteLink>.** The cache keeps all 8 keys and values.
+   A query equal to key A has score 1 with A, 0 with B, C and D, and $\tfrac12$ with E to H. With a score scale of 10
+   the softmax weights are proportional to $e^{10} =
+   22{,}026$ for A, $e^{5} = 148.4$ for each of E to H, and $e^{0} = 1$ for B to D. Their sum is 22,623, so A gets
+   weight 0.974. The read is $0.974 \times 4 + 0.00656 \times (2 + 7 + 5 + 9) + 0.00004 \times (3 + 6 + 1) = 4.05$,
+   decoded as 4. Every other key reads within 0.1 of its value, and all 8 answers are right.
+4. **A flat softmax.** With the default scale $1/\sqrt{d_k} = 0.5$ the weights are nearly uniform and every read lies
+   between 4.26 and 4.96, the mean of the values pulled slightly towards the right one. Recall needs a sharp softmax:
+   queries and keys with large norms, or a large learned scale.
+
+Attention's memory here is $2 \times 8 \times 4 = 64$ numbers and grows with every pair; the linear memory is 4 numbers
+and stays 4. The figure repeats the comparison with random keys over many sequences.
+
+## Assumptions
+
+- **Synthetic tasks stand for real ones.** MQAR, copying and selective copying isolate one ability. Their value rests on
+  evidence such as the 82% of the Pile perplexity gap that recall accounted for <Cite id="arora2024zoology" />.
+- **Training from scratch.** LRA assumes models are trained from random weights on the task alone; with
+  self-pretraining the ranking changes <Cite id="amos2024" />.
+- **Equal sizes.** Comparisons hold model width or parameters fixed. A recurrent layer's state size is then set by its
+  width and state dimension, and an attention layer's cache by the sequence length.
+
+## Pitfalls
+
+- **LRA is not language.** S4 solved LRA about two years before state-space models matched transformers on language,
+  because LRA rewards long smooth kernels and does not test recall of many facts.
+- **Passkey retrieval is weak evidence.** Finding one random number hidden in filler text needs only one stored item;
+  a recurrent state can carry it across any length. Samba retrieved passkeys at 256K tokens with 2,048-token windows
+  (see <NoteLink to="hybrid-sequence-models" />). Many-item tasks such as phone-book lookup or MQAR separate the models.
+- **Window lengths hide failures.** A model with <NoteLink to="sliding-window-and-sparse-attention">sliding-window
+  attention</NoteLink> recalls perfectly up to its window and fails beyond it: Griffin's phone-book accuracy dropped at
+  its window of 1,024 tokens <Cite id="de2024griffin" />. Evaluate past every window in the model.
+- **Accuracy is not the only axis.** A recurrent model that recalls worse may still be the better choice at a fixed
+  memory or throughput budget; Based and the hybrids are points on that curve, not winners or losers.

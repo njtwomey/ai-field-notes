@@ -1,0 +1,235 @@
+---
+title: 'Neighbour sampling and scalable graph networks'
+kind: technique
+summary: 'Full-batch GCN keeps the whole graph in memory, and an $L$-layer minibatch touches up to $d^L$ neighbours per node. Neighbour sampling, Cluster-GCN partitions, GraphSAINT subgraph sampling and precomputed propagation (SGC, SIGN) bound the cost.'
+tags: [graph-neural-networks, deep-learning, parallel-computing, worked-example]
+aliases: ['neighbourhood explosion', 'Cluster-GCN', 'GraphSAINT', 'simplified graph convolution', 'SGC', 'SIGN']
+requires: [graphsage, graph-convolutional-network]
+related:
+  [
+    pinsage,
+    graph-splits-and-sampling,
+    message-passing-neural-network,
+    untrained-graph-propagation,
+    graph-learning-benchmarks,
+    importance-sampling,
+    minibatching-and-batch-size,
+  ]
+references:
+  [
+    hamilton2017graphsage,
+    chiang2019clustergcn,
+    zeng2020graphsaint,
+    wu2019sgc,
+    frasca2020sign,
+    chen2018fastgcn,
+    zou2019ladies,
+    fey2021gnnautoscale,
+    hu2020ogb,
+    ying2018pinsage,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { NeighbourhoodExplosion } from './NeighbourhoodExplosion'
+
+<Definition>
+Scalable training of a graph network computes each gradient step on a small part of a large graph. **Neighbour
+sampling** keeps at most $S_k$ neighbours of each node at layer $k$. **Subgraph sampling** (Cluster-GCN, GraphSAINT)
+runs the full network on a partitioned or sampled subgraph. **Precomputed propagation** (SGC, SIGN) moves the graph
+products out of training, so the trained model is a <Gloss name="mlp">multilayer perceptron</Gloss> on precomputed node
+features. Each family trades exactness of the neighbourhood aggregate for memory and time per step.
+</Definition>
+
+## Problem
+
+A <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> trained full-batch multiplies the
+whole $N \times N$ normalised adjacency matrix $\hat\Amat$ into the whole $N \times F$ feature matrix at every layer.
+Backpropagation stores every intermediate $N \times F$ matrix, so memory grows as $O(LNF)$ for $L$ layers
+<Cite id="chiang2019clustergcn" />. The paper-citation graph ogbn-papers100M has 111,059,956 nodes
+<Cite id="hu2020ogb" />. At $F = 256$ features in 32-bit floats, one layer of its node matrix takes about 114 GB, more
+than a single accelerator holds.
+
+Minibatches of target nodes do not help by themselves. A node's output after $L$ rounds of
+<NoteLink to="message-passing-neural-network">message passing</NoteLink> depends on every node within $L$ hops. With
+average degree $d$, that **<NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink>** holds up
+to $1 + d + d^2 + \dots + d^L$ nodes. The growth is called the **neighbourhood explosion**. On a graph with $d = 30$ and
+$L = 3$, one target can need $1 + 30 + 900 + 27{,}000 = 27{,}931$ node vectors. Hubs make it worse: one neighbour of
+degree $10{,}000$ adds $10{,}000$ nodes at the next hop.
+
+## Mechanism
+
+### Neighbour sampling
+
+<NoteLink to="graphsage">GraphSAGE</NoteLink> replaces each node's neighbourhood at layer $k$ by a uniform sample of at
+most $S_k$ neighbours, drawn afresh for every layer and every minibatch <Cite id="hamilton2017graphsage" />. The sampled
+sets are built from the targets outwards. The targets draw $S_1$ neighbours each, those draw $S_2$ each, and so on. The
+layers are then computed from the outermost set inwards. One target needs at most
+
+$$
+1 + S_1 + S_1 S_2 + \dots + \prod_{k=1}^{L} S_k
+$$
+
+node vectors, whatever the degrees. With fan-outs $(S_1, S_2, S_3) = (15, 10, 5)$ the bound is
+$1 + 15 + 150 + 750 = 916$, against $27{,}931$ for the full neighbourhood at $d = 30$.
+
+The sampled mean is an unbiased estimate of the full mean: each neighbour enters the sample with probability $S/d$, so
+$\expect\brack{\tfrac{1}{S}\sum_{u \in \text{sample}} \hvec_u} = \tfrac{1}{d}\sum_{u \in \Ncal(v)} \hvec_u$. A uniform
+sample of $S$ out of $d$ values without replacement has variance
+
+$$
+\var\brack{\hat m} = \frac{\sigma^2}{S} \cdot \frac{d - S}{d - 1},
+$$
+
+where $\sigma^2$ is the variance of the $d$ neighbour values. The factor $(d - S)/(d - 1)$ is the finite-population
+correction: a node with $d \le S$ keeps all its neighbours and has no sampling error.
+
+**Layer-wise sampling** draws one shared set of nodes per layer, instead of a sample per node, so the cost grows
+linearly in $L$. FastGCN draws each layer's nodes independently by
+<NoteLink to="importance-sampling">importance sampling</NoteLink> <Cite id="chen2018fastgcn" />. LADIES restricts the
+draw at each layer to neighbours of the nodes in the layer above, which keeps the sampled adjacency from being almost
+empty <Cite id="zou2019ladies" />.
+
+### Subgraph sampling
+
+**Cluster-GCN** partitions the graph once into $p$ clusters with a graph-clustering algorithm such as METIS, which
+keeps most edges inside clusters. Each step trains the full $L$-layer network on the subgraph induced by $q$ randomly
+chosen clusters, with the edges between the chosen clusters added back <Cite id="chiang2019clustergcn" />. Nothing
+outside the batch is touched, so memory is $O(bLF)$ for $b$ nodes per batch. The paper's ablation partitions Reddit into
+1,500 clusters and combines 5 per batch <Cite id="chiang2019clustergcn" />. Picking several small clusters at random
+reduces the bias of training on one community at a time.
+
+**GraphSAINT** samples a subgraph per step by random nodes, random edges or short <NoteLink to="random-walk">random
+walks</NoteLink>, and trains the full network on it <Cite id="zeng2020graphsaint" />. Nodes and edges in the sampled
+subgraph appear with unequal probabilities, so the aggregation and the loss are reweighted. With $p_v$ the probability
+that node $v$ is sampled and $p_{u,v}$ the probability that edge $(u, v)$ is, the aggregation divides the message from
+$u$ to $v$ by $\alpha_{u,v} = p_{u,v}/p_v$, and the loss at $v$ is divided by $\lambda_v = N p_v$. Each layer's
+aggregation is then an unbiased estimate of the full-graph aggregation, and the minibatch loss is an unbiased estimate
+of the full loss <Cite id="zeng2020graphsaint" />. The probabilities are estimated by running the sampler before
+training and counting.
+
+### Precomputed propagation
+
+The **simplified graph convolution** (SGC) removes the nonlinearities between GCN layers. The $K$ propagation matrices
+then collapse into one power,
+
+$$
+\hat\Ymat = \mathrm{softmax}\paren{\hat\Amat^{K} \Xmat \Thetamat},
+$$
+
+where $\Xmat \in \reals^{N \times F}$ holds the input features and $\Thetamat \in \reals^{F \times C}$ the weights for
+$C$ classes <Cite id="wu2019sgc" />. The product $\hat\Amat^{K} \Xmat$ has no parameters. It is computed once, by $K$
+sparse products costing $O(K\abs{\Ecal}F)$, and training is then <NoteLink to="logistic-regression">logistic
+regression</NoteLink> on independent rows.
+
+**SIGN** keeps several precomputed operators side by side, so the model can weigh near and far hops:
+
+$$
+\Zmat = \sigma\paren{\brack{\Xmat\Thetamat_0, \Amat_1 \Xmat \Thetamat_1, \dots, \Amat_r \Xmat \Thetamat_r}}, \qquad
+\hat\Ymat = \xi(\Zmat \Omegamat),
+$$
+
+with $\Amat_1, \dots, \Amat_r$ fixed diffusion operators (powers of $\hat\Amat$, personalised PageRank or
+triangle-based adjacency), learned $\Thetamat_j$ and $\Omegamat$, and an output nonlinearity $\xi$
+<Cite id="frasca2020sign" />. The products $\Amat_j \Xmat$ are precomputed, so training and inference cost what a
+multilayer perceptron costs. SIGN reported state-of-the-art accuracy on ogbn-papers100M when it was published
+<Cite id="frasca2020sign" />.
+
+**Historical embeddings** are a fourth option. GNNAutoScale keeps every node's vector from earlier steps in a cache on
+the host. Nodes outside the batch read their cached vectors instead of being recomputed, so no edge is dropped
+<Cite id="fey2021gnnautoscale" />.
+
+## Worked example
+
+**Sampling variance.** A node has four neighbours with scalar features $1, 2, 3, 6$. Their mean is $3$ and their
+variance is $\sigma^2 = \tfrac14\paren{4 + 1 + 0 + 9} = 3.5$. Sample $S = 2$ of them without replacement. The six
+possible pairs give the means
+
+| pair | $\set{1, 2}$ | $\set{1, 3}$ | $\set{1, 6}$ | $\set{2, 3}$ | $\set{2, 6}$ | $\set{3, 6}$ |
+| ---- | ------------ | ------------ | ------------ | ------------ | ------------ | ------------ |
+| mean | 1.5          | 2            | 3.5          | 2.5          | 4            | 4.5          |
+
+Their average is $18/6 = 3$, the full mean. Their variance is
+$\tfrac16(2.25 + 1 + 0.25 + 0.25 + 1 + 2.25) = 7/6 \approx 1.17$, which matches
+$\tfrac{3.5}{2} \cdot \tfrac{4 - 2}{4 - 1} = 7/6$.
+
+**Bias after a nonlinearity.** Pass the aggregate through $\mathrm{ReLU}(m - 3)$. The full mean gives
+$\mathrm{ReLU}(0) = 0$. The six sampled means give $0, 0, 0.5, 0, 1, 1.5$, whose average is $0.5$. The sampled layer is
+unbiased before the nonlinearity and biased after it. In a deep sampled network, each layer's input is already a noisy
+estimate, so the bias compounds with depth. GraphSAINT's unbiasedness result treats each layer separately for this
+reason <Cite id="zeng2020graphsaint" />.
+
+**Precomputation.** Take four nodes with edges $1{-}2$, $1{-}3$, $2{-}3$ and $3{-}4$ and features
+$\xvec = (1, 2, 3, 4)$. To keep the numbers simple, use the mean operator $\Pmat = \tilde\Dmat^{-1}\tilde\Amat$, which
+averages each node with its neighbours; SGC uses the symmetric $\hat\Amat$.
+
+- $\Pmat\xvec$: node 1 averages nodes $\set{1, 2, 3}$ to $2$; node 2 also gets $2$; node 3 averages $\set{1, 2, 3, 4}$
+  to $2.5$; node 4 averages $\set{3, 4}$ to $3.5$. So $\Pmat\xvec = (2, 2, 2.5, 3.5)$.
+- $\Pmat^2\xvec$ applies the same averaging to $(2, 2, 2.5, 3.5)$: node 1 gets $(2 + 2 + 2.5)/3 \approx 2.17$, node 2
+  the same, node 3 gets $(2 + 2 + 2.5 + 3.5)/4 = 2.5$, node 4 gets $(2.5 + 3.5)/2 = 3$.
+
+A SIGN model with $\Amat_1 = \Pmat$ and $\Amat_2 = \Pmat^2$ sees node 4 as the fixed row $(4, 3.5, 3)$: its own feature,
+its one-hop average and its two-hop average. Training never touches the graph again, and any minibatch of rows is a
+valid batch.
+
+**Neighbourhood explosion on a scale-free graph.** The figure builds a Barabási–Albert graph of 2,000 nodes. With
+$m = 3$ edges per new node, the mean degree is about 6 and the largest degree about 150. For 16 targets the full
+computation graph holds 166 nodes at depth 1, 1,231 at depth 2 and 1,989 at depth 3. A fan-out of 5 keeps 81, 289 and
+812, because the sample caps every hub at 5 neighbours. The sampled outputs of a fixed three-layer mean-aggregation
+network then differ from the exact ones by about 13% in relative error; a fan-out of 10 brings that to about 9%.
+
+<NeighbourhoodExplosion />
+
+## Cost
+
+With $L$ layers, $F$ features per layer, $N$ nodes, $\abs{\Ecal}$ edges, batch size $b$ and fan-out $S$, the memory for
+node vectors during one step is <Cite id="chiang2019clustergcn" />:
+
+| method | memory for node vectors | what a step touches |
+| --- | --- | --- |
+| full-batch GCN | $O(LNF)$ | the whole graph |
+| minibatch, full neighbourhoods | $O(b\,d^{L}F)$ | the $L$-hop receptive field of the batch |
+| neighbour sampling | $O(b\,S^{L}F)$ | the sampled trees of the batch |
+| Cluster-GCN | $O(bLF)$ | the induced subgraph of the chosen clusters |
+| SGC, SIGN | $O(b(r + 1)F)$ in training | precomputed rows; the $r$ products cost $O(r\abs{\Ecal}F)$ once |
+
+Time per epoch tells a second story. Neighbour sampling recomputes shared neighbours once per target that needs them,
+so its time per epoch can exceed that of full-batch training. Cluster-GCN reuses every vector computed inside a cluster
+for all of its neighbours in the cluster, which is the paper's argument for maximising within-batch edges
+<Cite id="chiang2019clustergcn" />. A random partition into $p$ parts keeps an edge inside a part with probability
+$1/p$, so 10 random parts keep only 10% of the edges. A clustering keeps most of them.
+
+## Trade-offs
+
+- **Neighbour sampling** works with any <Gloss name="gnn">message passing</Gloss> layer and any inductive task, and its
+  cost does not depend on the graph's size. Its cost still grows exponentially in $L$, and its gradient is noisy for
+  small $S$. It is the most common minibatch loader in PyTorch Geometric and DGL, with fan-outs such as $(15, 10)$ or
+  $(25, 10)$ for two layers. <NoteLink to="pinsage">PinSage</NoteLink> replaces the uniform sample by the most-visited
+  nodes of short random walks <Cite id="ying2018pinsage" />.
+- **Cluster-GCN** computes exact aggregates inside the batch and allows deep networks, but it drops edges between
+  unchosen clusters, and a METIS partition of a billion-edge graph is itself a large job.
+- **GraphSAINT** is unbiased per layer and simple to run, but the probability estimates need a preprocessing pass, and
+  small subgraphs miss rare long-range structure.
+- **SGC and SIGN** are the fastest to train and to serve, because a prediction is one row lookup and a small network.
+  They give up nonlinear interactions between hops and learned, feature-dependent aggregation such as attention.
+- **Historical embeddings** keep every edge but read stale vectors, whose error grows with the change in the weights
+  between the step that cached a vector and the step that reads it.
+
+On ogbn-products (2.4 million nodes) and ogbn-papers100M, sampled and precomputed models are both standard baselines
+<Cite id="hu2020ogb" />. The <NoteLink to="graph-learning-benchmarks">graph learning benchmarks</NoteLink> note covers
+the datasets.
+
+## Pitfalls
+
+- **Training and inference graphs differ.** A model trained on sampled neighbourhoods sees full neighbourhoods at
+  inference unless the loader samples there too. The scale of a sum aggregator changes between the two. Mean
+  aggregation and layer-wise inference over the full graph avoid the mismatch.
+- **Hubs dominate the computation.** In a scale-free graph a few hubs appear in most receptive fields. Sampling caps
+  their degree, but every batch still contains them, so their vectors are recomputed many times.
+- **Evaluation leaks through the sampler.** In a transductive split, test nodes are in the graph during training, as
+  <NoteLink to="graph-splits-and-sampling">splitting and sampling graphs</NoteLink> describes. A link-prediction loader
+  must also remove the supervision edges from the sampled message-passing graph.
+- **Deep sampled networks.** The sampling bias compounds with depth, as the worked example shows, and the cost grows as
+  $S^L$. Two or three sampled layers are the common choice; deeper models use clusters, precomputation or
+  <NoteLink to="residual-and-jumping-knowledge-graph-networks">residual connections</NoteLink> with full aggregation.

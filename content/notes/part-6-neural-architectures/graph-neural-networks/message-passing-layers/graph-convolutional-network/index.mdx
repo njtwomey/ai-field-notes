@@ -1,0 +1,178 @@
+---
+title: Graph convolutional network
+kind: concept
+summary: A graph convolutional network updates node features by $\Hmat' = \sigma(\hat\Amat \Hmat \Wmat)$ with $\hat\Amat = \tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2}$, a degree-normalised average over each node and its neighbours. The rule is a first-order approximation of a spectral filter on the graph.
+tags: [deep-learning, graph-neural-networks, worked-example]
+aliases: [GCN, graph convolution, renormalisation trick]
+requires: [message-passing-neural-network, spectral-graph-convolution]
+related:
+  [
+    graph-attention-network,
+    oversmoothing,
+    graph-laplacian-and-graph-fourier-transform,
+    graph-isomorphism-network,
+    untrained-graph-propagation,
+    convolution-theorem,
+  ]
+references: [kipf2017, defferrard2016, li2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { Propagation } from './Propagation'
+
+<Definition>
+A graph convolutional network (GCN) layer maps node features $\Hmat \in \reals^{N \times F}$ on a graph with adjacency
+matrix $\Amat \in \set{0, 1}^{N \times N}$ to
+$$
+\Hmat' = \sigma\paren{\hat\Amat \Hmat \Wmat}, \qquad \hat\Amat = \tilde\Dmat^{-1/2} \tilde\Amat \tilde\Dmat^{-1/2},
+\qquad \tilde\Amat = \Amat + \I,
+$$
+where $\tilde\Dmat$ is the diagonal degree matrix of $\tilde\Amat$, $\Wmat \in \reals^{F \times F'}$ is a learned weight
+matrix and $\sigma$ is an elementwise nonlinearity <Cite id="kipf2017" />.
+</Definition>
+
+## Intuition
+
+Row $i$ of $\hat\Amat \Hmat$ is a weighted sum of the features of node $i$ and its neighbours. Written per node, with
+$\tilde d_i = 1 + \deg(i)$,
+
+$$
+\hvec_i' = \sigma\paren{\sum_{j \in \Ncal(i) \cup \set{i}} \frac{1}{\sqrt{\tilde d_i \tilde d_j}}\, \Wmat^{\tr} \hvec_j}.
+$$
+
+Each node averages its neighbourhood, including itself, and then applies the same
+<NoteLink to="matrix-vector-product">linear map</NoteLink>. This is a
+<NoteLink to="message-passing-neural-network">message passing</NoteLink> layer with the message
+$\Wmat^{\tr} \hvec_j / \sqrt{\tilde d_i \tilde d_j}$ and <NoteLink to="graph-isomorphism-network">sum
+aggregation</NoteLink>. The factor $1/\sqrt{\tilde d_i \tilde d_j}$ keeps the scale of features independent of degree. A
+hub with 1000 neighbours does not get a vector 1000 times larger than a leaf.
+
+## Derivation from spectral filtering
+
+The rule is the simplest member of the family of spectral graph filters, derived in
+<NoteLink to="spectral-graph-convolution">spectral graph convolution</NoteLink>. That note defines a filter on a signal
+$\xvec \in \reals^N$, one value per node, through the <NoteLink to="spectral-clustering">normalised graph
+Laplacian</NoteLink>
+
+$$
+\Lmat = \I - \Dmat^{-1/2} \Amat \Dmat^{-1/2} = \Umat \Lambdamat \Umat^{\tr},
+$$
+
+where $\Dmat$ is the degree matrix of $\Amat$, the columns of $\Umat$ are orthonormal eigenvectors (the graph Fourier
+modes) and $\Lambdamat$ holds the eigenvalues, which lie in $[0, 2]$ (see the derivation below). A filter multiplies
+each frequency by a gain, $g_\theta \star \xvec = \Umat\, g_\theta(\Lambdamat)\, \Umat^{\tr} \xvec$. The Chebyshev
+filter of Defferrard et al. takes the gain to be a polynomial of degree $K$ in the rescaled Laplacian
+$\tilde\Lmat = 2\Lmat / \lambda_{\max} - \I$, whose eigenvalues lie in $[-1, 1]$:
+
+$$
+g_\theta \star \xvec = \sum_{k=0}^{K} \theta_k T_k(\tilde\Lmat)\, \xvec, \qquad T_0(y) = 1,\; T_1(y) = y,\;
+T_k(y) = 2y\, T_{k-1}(y) - T_{k-2}(y).
+$$
+
+A polynomial in $\tilde\Lmat$ needs no eigendecomposition, and a degree-$K$ polynomial mixes only nodes at most $K$ hops
+apart <Cite id="defferrard2016" />. Kipf and Welling make three simplifications <Cite id="kipf2017" />.
+
+**One hop.** Take $K = 1$, so the filter is $\theta_0 \xvec + \theta_1 \tilde\Lmat \xvec$. Each layer then reads only
+the immediate neighbours. Stacking $L$ layers reaches $L$ hops, with a nonlinearity between every pair, in place of a
+single filter of degree $L$.
+
+**Largest eigenvalue 2.** $\lambda_{\max} \le 2$ on every graph, with equality exactly when some connected component is
+bipartite. Setting $\lambda_{\max} = 2$ avoids computing it. Then
+$\tilde\Lmat = \Lmat - \I = -\Dmat^{-1/2} \Amat \Dmat^{-1/2}$ and
+
+$$
+g_\theta \star \xvec \approx \theta_0 \xvec - \theta_1 \Dmat^{-1/2} \Amat \Dmat^{-1/2} \xvec.
+$$
+
+The error of the approximation rescales the second term, which the learned $\theta_1$ absorbs.
+
+**One parameter.** Tie the two parameters, $\theta = \theta_0 = -\theta_1$, to halve the parameters per filter and
+reduce overfitting:
+
+$$
+g_\theta \star \xvec \approx \theta\paren{\I + \Dmat^{-1/2} \Amat \Dmat^{-1/2}} \xvec.
+$$
+
+**Renormalisation.** The matrix $\I + \Dmat^{-1/2} \Amat \Dmat^{-1/2} = 2\I - \Lmat$ has eigenvalues in $[0, 2]$, and
+$2$ is always one of them. Stacking layers multiplies by it repeatedly, so some components grow like $2^k$ and others
+shrink. This causes exploding or vanishing activations and <NoteLink to="gradient">gradients</NoteLink>. Kipf and
+Welling replace it with $\tilde\Dmat^{-1/2} (\Amat + \I) \tilde\Dmat^{-1/2}$: add the self-loops to the adjacency matrix
+before normalising <Cite id="kipf2017" />. The resulting $\hat\Amat$ has largest eigenvalue exactly 1.
+
+**Many channels.** With $F$ input channels and $F'$ filters, each filter has one parameter per input channel. Collecting
+them in $\Wmat$ gives $\hat\Amat \Hmat \Wmat$, and a nonlinearity gives the layer.
+
+<Derivation title="Eigenvalues of the normalised Laplacian lie in [0, 2]">
+Let $\Amat$ be symmetric with non-negative entries and every degree $d_i > 0$. Write $y_i = x_i / \sqrt{d_i}$. Then
+$$
+\xvec^{\tr} \Lmat \xvec = \sum_i x_i^2 - \sum_{i,j} a_{ij} y_i y_j = \sum_{i,j} a_{ij} y_i^2 - \sum_{i,j} a_{ij} y_i y_j
+= \tfrac{1}{2} \sum_{i,j} a_{ij} (y_i - y_j)^2 \ge 0,
+$$
+using $x_i^2 = d_i y_i^2 = \sum_j a_{ij} y_i^2$ and symmetry of $\Amat$. In the same way,
+$$
+\xvec^{\tr} (2\I - \Lmat) \xvec = \tfrac{1}{2} \sum_{i,j} a_{ij} (y_i + y_j)^2 \ge 0.
+$$
+So every <NoteLink to="spectral-theorem">Rayleigh quotient</NoteLink> of $\Lmat$ lies in $[0, 2]$, and so do its
+eigenvalues. The value $0$ is attained by $\xvec = \Dmat^{1/2} \ones$, where all $y_i$ are equal, so
+$\I - \Lmat = \Dmat^{-1/2}\Amat\Dmat^{-1/2}$ has eigenvalue $1$ and $2\I - \Lmat$ has eigenvalue $2$. The value 2 would
+require $y_i = -y_j$ across every edge, which is impossible when a node has a self-loop ($a_{ii} > 0$ forces $y_i = 0$).
+Applied to $\tilde\Amat = \Amat + \I$, which has a self-loop at every node, this shows that the eigenvalues of
+$\hat\Amat$, the identity minus the <NoteLink to="graph-laplacian-and-graph-fourier-transform">normalised
+Laplacian</NoteLink> of $\tilde\Amat$, lie in $(-1, 1]$.
+</Derivation>
+
+## Semi-supervised node classification
+
+Kipf and Welling classify the nodes of a citation graph when only a few are labelled. A two-layer GCN computes
+
+$$
+\Zmat = \operatorname{softmax}\paren{\hat\Amat\, \operatorname{ReLU}\paren{\hat\Amat \Xmat \Wmat^{(0)}}\, \Wmat^{(1)}},
+$$
+
+with the softmax applied to each row, and minimises the cross-entropy over the labelled nodes only. Unlabelled nodes
+still shape the result, because their features flow into the labelled nodes' two-hop neighbourhoods. With 20 labelled
+nodes per class, the model reached 81.5% accuracy on Cora, 70.3% on Citeseer and 79.0% on Pubmed <Cite id="kipf2017" />.
+
+## Worked example
+
+Take the path graph $1{-}2{-}3$. Adding self-loops gives degrees $\tilde d = (2, 3, 2)$, and
+
+$$
+\hat\Amat = \begin{bmatrix}
+\tfrac{1}{2} & \tfrac{1}{\sqrt 6} & 0 \\
+\tfrac{1}{\sqrt 6} & \tfrac{1}{3} & \tfrac{1}{\sqrt 6} \\
+0 & \tfrac{1}{\sqrt 6} & \tfrac{1}{2}
+\end{bmatrix}.
+$$
+
+For example, $\hat A_{12} = 1/\sqrt{\tilde d_1 \tilde d_2} = 1/\sqrt{6} = 0.408$. A feature that is 1 on node 1 and 0
+elsewhere becomes $\hat\Amat \xvec = (0.5, 0.408, 0)$ after one layer, ignoring $\Wmat$ and $\sigma$. It spreads one
+hop. The eigenvalues of $\hat\Amat$ are $1$, $1/2$ and $-1/6$, all in $(-1, 1]$.
+
+## Depth and oversmoothing
+
+Repeated multiplication by $\hat\Amat$ converges, on a connected graph, to the projection onto its top eigenvector
+$\tilde\Dmat^{1/2} \ones$, so the features of a deep stack of GCN layers become proportional to $\sqrt{\tilde d_i}$ and
+lose the starting signal. A GCN layer is a form of Laplacian smoothing, and stacking many layers over-smooths
+<Cite id="li2018" />. GCNs are therefore usually two or three layers deep. The
+<NoteLink to="oversmoothing">oversmoothing</NoteLink> note derives the rate and the remedies. The figure contrasts this
+slow collapse with the growth caused by the first-order matrix before renormalisation.
+
+<Propagation />
+
+## Assumptions
+
+- **Homophily.** Connected nodes tend to share labels. Averaging over neighbours then helps. On graphs where neighbours
+  tend to differ, a GCN can do worse than ignoring the edges.
+- The graph is undirected; $\hat\Amat$ is symmetric.
+
+## Pitfalls
+
+- **Depth.** More layers widen the <NoteLink to="pooling-and-strides">receptive field</NoteLink> but smooth the
+  features. <NoteLink to="residual-connections">Residual connections</NoteLink> or <NoteLink to="residual-network">skip
+  connections</NoteLink> to the input are needed beyond a few layers.
+- **Transductive by default.** The original formulation uses the whole graph, including test nodes, at training time.
+  New graphs need the layer applied with their own $\hat\Amat$.
+- **Isolated nodes.** Without self-loops a node of degree 0 would divide by zero. The self-loops in $\tilde\Amat$ make
+  every $\tilde d_i \ge 1$.

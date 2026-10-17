@@ -1,0 +1,240 @@
+---
+title: 'Graph neural networks under heterophily'
+kind: concept
+summary: 'Neighbourhood averaging helps when linked nodes share labels (homophily) and hurts when they differ. Separating ego and neighbour embeddings (H2GCN), using higher-order neighbourhoods and learning signed polynomial filters (GPR-GNN) recover accuracy on heterophilous graphs.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['heterophily', 'homophily ratio', 'H2GCN', 'GPR-GNN', 'heterophilous graphs']
+requires: [graph-convolutional-network, spectral-graph-convolution]
+related:
+  [
+    graph-learning-benchmarks,
+    graph-features,
+    graphsage,
+    label-propagation,
+    semi-supervised-node-classification,
+    graph-laplacian-and-graph-fourier-transform,
+  ]
+references:
+  [
+    zhu2020h2gcn,
+    pei2020geomgcn,
+    chien2021gprgnn,
+    ma2022homophily,
+    platonov2023heterophily,
+    platonov2023characterizing,
+    lim2021linkx,
+    deshpande2018csbm,
+    kipf2017,
+    hamilton2017graphsage,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { HeterophilySweep } from './HeterophilySweep'
+
+<Definition>
+A labelled graph is **homophilous** when its edges mostly join nodes of the same class and **heterophilous** when they
+mostly join nodes of different classes. The **edge homophily** $h \in [0, 1]$ is the share of edges whose two ends
+share a class. A graph convolution that averages a node with its neighbours mixes the node's evidence with evidence
+for the classes its neighbours belong to, which helps when $h$ is high and destroys the node's own signal at
+intermediate $h$. Models for heterophilous graphs keep the node's own representation apart from its neighbours'
+(H2GCN), read several neighbourhood radii, or learn signed propagation weights that can act as high-pass filters
+(GPR-GNN).
+</Definition>
+
+## Intuition
+
+Citation graphs are homophilous: a paper on <Gloss name="rl">reinforcement learning</Gloss> cites mostly papers on
+reinforcement learning. A <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> exploits
+that. Averaging a node's features with its neighbours' cancels noise that differs from node to node and keeps the signal
+the neighbours share. Many graphs work the other way. In a dating network edges join people of different genders, in a
+transaction network fraudsters trade with ordinary accounts, and in a protein contact graph amino acids of different
+types bind. There the neighbours carry evidence for the other class, and an average that includes them pulls each node
+towards the wrong answer.
+
+The neighbours are not useless on such graphs. "My neighbours are mostly of class B" is informative when class A nodes
+tend to link to class B nodes. The failure is in how a graph convolution uses that information: it adds the
+neighbours' features to the node's own with a fixed positive weight, so it cannot reverse their sign or keep the two
+apart.
+
+## Measuring homophily
+
+Let a graph have node set $\Vcal$, edge set $\Ecal$ and labels $y_v \in \set{1, \dots, C}$. Three measures are in use.
+
+- **Edge homophily**, the share of edges inside a class <Cite id="zhu2020h2gcn" />:
+  $h_{\text{edge}} = \abs{\set{(u, v) \in \Ecal : y_u = y_v}} / \abs{\Ecal}$.
+- **Node homophily**, the mean over nodes of the share of a node's neighbours in its own class
+  <Cite id="pei2020geomgcn" />:
+  $h_{\text{node}} = \frac{1}{\abs{\Vcal}} \sum_v \abs{\set{u \in \Ncal(v) : y_u = y_v}} / \abs{\Ncal(v)}$.
+- **Adjusted homophily** <Cite id="platonov2023characterizing" />, which subtracts what edges that ignore the labels
+  would give:
+
+$$
+h_{\text{adj}} = \frac{h_{\text{edge}} - \sum_{k=1}^{C} \bar p_k^2}{1 - \sum_{k=1}^{C} \bar p_k^2}, \qquad
+\bar p_k = \frac{1}{2\abs{\Ecal}} \sum_{v : y_v = k} \deg(v).
+$$
+
+Here $\bar p_k$ is the share of all edge endpoints that sit in class $k$. If edges ignored labels, an endpoint's partner
+would be in class $k$ with probability $\bar p_k$, and the expected edge homophily would be $\sum_k \bar p_k^2$. The
+adjusted measure is therefore 0 for label-blind edges, 1 for perfect homophily and negative for heterophily. The raw
+measures lack that reference point: a graph with one class holding 90% of the nodes has $h_{\text{edge}} \approx 0.82$
+even when its edges are random.
+
+## Why averaging fails at intermediate homophily
+
+A two-class contextual stochastic block model (<Gloss name="sbm" />) shows the mechanism with exact numbers
+<Cite id="deshpande2018csbm" />. Each node $v$ has a class $s_v \in \set{-1, +1}$ and a scalar feature
+$x_v = \mu s_v + \varepsilon_v$ with $\varepsilon_v \sim \Gauss(0, 1)$ independent across nodes, so $\mu > 0$ is the
+signal in noise units. Suppose every node has $d$ neighbours, of which a share $h$ are in its own class.
+
+A linear graph convolution with self-loops and mean normalisation computes
+$z_v = \frac{1}{d + 1}\paren{x_v + \sum_{u \in \Ncal(v)} x_u}$. Its mean, given $s_v$, adds the node's $\mu s_v$, the
+$hd$ same-class neighbours' $\mu s_v$ each, and the $(1 - h)d$ other neighbours' $-\mu s_v$ each:
+
+$$
+\expect[z_v \mid s_v] = \frac{\mu s_v \paren{1 + hd - (1 - h)d}}{d + 1} = \mu s_v \, \frac{1 + d(2h - 1)}{d + 1}.
+$$
+
+The $d + 1$ noise terms are independent with variance 1, so $\operatorname{Var}(z_v) = 1/(d + 1)$. The two class means
+of $z_v$ lie at $\pm \expect[z_v \mid s_v = 1]$, and the best threshold is 0. Dividing the mean by the standard
+deviation gives the separation in noise units:
+
+$$
+\delta_{\text{GCN}} = \mu \, \frac{\abs{1 + d(2h - 1)}}{\sqrt{d + 1}}, \qquad
+\text{accuracy} = \Phi(\delta_{\text{GCN}}),
+$$
+
+with $\Phi$ the standard normal distribution function. A classifier that ignores the edges has $\delta = \mu$. The graph
+convolution beats it only when $\abs{1 + d(2h - 1)} > \sqrt{d + 1}$, which holds near $h = 1$ and, by a sign flip, near
+$h = 0$. Between the two it is worse, and it fails completely at
+
+$$
+h^\star = \frac{d - 1}{2d},
+$$
+
+where the node's own contribution and the net contribution of its neighbours cancel. For $d = 6$, $h^\star = 5/12$ and
+the convolution beats the edge-blind classifier only for $h > 0.64$ or $h < 0.20$. Ma et al. make the same point from
+the other side: a graph convolution can do well on a heterophilous graph when nodes of each class have distinctive
+neighbour distributions, as at $h = 0$ <Cite id="ma2022homophily" />.
+
+**Keeping the node apart.** Give the classifier the pair $(x_v, m_v)$, where
+$m_v = \frac{1}{d}\sum_{u \in \Ncal(v)} x_u$ is the neighbours' mean. Given $s_v$, $x_v$ has mean $\mu s_v$ and variance
+1, and $m_v$ has mean $\mu(2h - 1)s_v$ and variance $1/d$; the two are independent. For independent Gaussian features
+with the same variance in both classes, the best linear rule weights each feature by its mean difference over its
+variance, and the squared separations add:
+
+$$
+\delta_{\text{ego}}^2 = \mu^2 + \frac{\mu^2 (2h - 1)^2}{1/d} = \mu^2\paren{1 + d(2h - 1)^2}.
+$$
+
+This is never smaller than $\mu^2$, and it equals $\mu^2$ only at $h = 1/2$, where the neighbours say nothing about the
+class. The weight on $m_v$ is $\mu(2h - 1)d$, which is negative under heterophily: the classifier reads "neighbours
+look like class B" as evidence for class A.
+
+## Designs for heterophily
+
+**Ego and neighbour embeddings apart.** H2GCN concatenates a node's own embedding with the aggregated embeddings of its
+1-hop and 2-hop neighbourhoods, with no self-loops in the aggregation, and feeds the concatenation forward
+<Cite id="zhu2020h2gcn" />. The <NoteLink to="graphsage">GraphSAGE</NoteLink> update,
+$\sigma(\Wmat [\hvec_v \Vert \mvec_v])$, has the same separation built in <Cite id="hamilton2017graphsage" />, and so
+does any layer with a residual connection around the aggregation.
+
+**Higher-order neighbourhoods.** Under heterophily, a node's 2-hop neighbours can be more homophilous than its 1-hop
+neighbours: in a bipartite-like graph the neighbours of neighbours are back in the node's own class. H2GCN aggregates
+the 1-hop and the strict 2-hop neighbourhoods separately, and combines the representations of every layer at the end
+<Cite id="zhu2020h2gcn" />.
+
+**Signed polynomial filters.** GPR-GNN first maps features through an <Gloss name="mlp" />,
+$\Hmat^{(0)} = f_\theta(\Xmat)$, then propagates with learned scalar weights $\gamma_k$:
+
+$$
+\Zmat = \sum_{k=0}^{K} \gamma_k \hat\Amat^k \Hmat^{(0)}
+$$
+
+with $\hat\Amat$ the normalised adjacency with self-loops <Cite id="chien2021gprgnn" />. In the spectral view of
+<NoteLink to="spectral-graph-convolution">spectral graph convolution</NoteLink>, $\hat\Amat$ has eigenvalues
+$1 - \lambda$ for the eigenvalues $\lambda \in [0, 2)$ of the
+<NoteLink to="graph-laplacian-and-graph-fourier-transform">normalised Laplacian</NoteLink> of the graph with self-loops,
+so $\Zmat$ applies the polynomial filter $g(\lambda) = \sum_k \gamma_k (1 - \lambda)^k$. With all $\gamma_k \ge 0$ the
+filter is low-pass and smooths labels across edges. Negative weights can make it high-pass. $\gamma = (1, -1)$ gives
+$\Hmat - \hat\Amat\Hmat$, whose response $g(\lambda) = \lambda$ amplifies exactly the components that change sign across
+edges, which is what a heterophilous label signal does.
+
+**Using the adjacency as features.** LINKX embeds each node's row of the adjacency matrix with one MLP and its features
+with another, and combines the two <Cite id="lim2021linkx" />. A node's set of neighbours, not their features, then
+carries the structural signal, which works at any homophily and scales by minibatches of nodes.
+
+## Worked example
+
+**Homophily of a small graph.** Take a 6-cycle with labels $A, A, B, B, A, B$ around it. Its edges are 1–2 ($AA$),
+2–3 ($AB$), 3–4 ($BB$), 4–5 ($BA$), 5–6 ($AB$) and 6–1 ($BA$).
+
+- Edge homophily: 2 of the 6 edges join equal labels, so $h_{\text{edge}} = 1/3$.
+- Node homophily: nodes 1 to 4 each have one neighbour of their own class out of two, and nodes 5 and 6 have none, so
+  $h_{\text{node}} = (4 \cdot \tfrac12 + 2 \cdot 0)/6 = 1/3$.
+- Adjusted homophily: each class holds three nodes of degree 2, so $\bar p_A = \bar p_B = 6/12 = 1/2$ and
+  $\sum_k \bar p_k^2 = 1/2$. Then $h_{\text{adj}} = (1/3 - 1/2)/(1 - 1/2) = -1/3$: fewer same-class edges than random
+  wiring would give.
+
+**Cancellation at one node.** Node $v$ is in class $A$ with feature $x_v = +1$. It has $d = 3$ neighbours: one in class
+$A$ with feature $+1$ and two in class $B$ with features $-1$ each, so its own share of same-class neighbours is $1/3$.
+
+- The graph convolution's mean with a self-loop is $z_v = (1 + 1 - 1 - 1)/4 = 0$. The node's evidence is gone. The value
+  $h^\star = (d - 1)/(2d) = 2/6 = 1/3$ of the formula is exactly this node's share.
+- The separated model sees $(x_v, m_v) = (1, (1 - 1 - 1)/3) = (1, -1/3)$. With $\mu = 1$, $h = 1/3$ and $d = 3$, the
+  optimal weights are $\mu = 1$ on $x_v$ and $\mu(2h - 1)d = -1$ on $m_v$. The score is
+  $1 \cdot 1 + (-1)(-1/3) = 4/3 > 0$, which assigns class $A$. A class-$B$ node in the mirror position,
+  $(x_v, m_v) = (-1, 1/3)$, scores $-4/3$.
+
+**A high-pass filter on a bipartite cycle.** On a 6-cycle with alternating classes, $h = 0$, and features $\pm 1$ that
+follow the classes, the normalised adjacency with self-loops averages each node with its two neighbours:
+$(\hat\Amat\xvec)_v = (-1 + 1 - 1)/3 = -1/3$ for a node with $x_v = 1$. The low-pass output is weak and has the wrong
+sign. The GPR-GNN filter with $\gamma = (1, -1)$ gives $x_v - (\hat\Amat\xvec)_v = 1 + 1/3 = 4/3$, larger than the
+input.
+
+**At the figure's defaults**, $d = 6$, $h = 0.2$ and a feature signal of 1, which along the class-difference
+direction is $\mu = 1/\sqrt 2 = 0.707$. Then $\delta = 0.707$ without edges, $\delta_{\text{GCN}} =
+0.707 \cdot \abs{1 - 3.6}/\sqrt 7 = 0.695$, and $\delta_{\text{ego}} = 0.707\sqrt{1 + 6 \cdot 0.36} = 1.257$. The
+predicted accuracies are $\Phi(0.707) = 0.760$, $\Phi(0.695) = 0.756$ and $\Phi(1.257) = 0.896$.
+
+<HeterophilySweep />
+
+The measured curves lie below the formula because degrees in a block model vary from node to node and the classifiers
+are fitted on 40 labelled nodes. The shape matches: the graph convolution dips to chance near $h^\star$, and the
+separated model stays above the edge-blind baseline everywhere.
+
+## Practice
+
+Heterophily benchmarks went through a correction. The six small graphs used from 2020, Texas, Wisconsin, Cornell,
+Chameleon, Squirrel and Actor, have a few hundred to a few thousand nodes and fixed splits. Platonov et al. found that
+Chameleon and Squirrel contain many duplicate nodes, which leak between training and <NoteLink to="test-sets">test
+sets</NoteLink> <Cite id="platonov2023heterophily" />. On five new heterophilous datasets they proposed, standard
+<Gloss name="gnn" plural /> with <NoteLink to="residual-connections">residual connections</NoteLink> between the ego and
+neighbour representations almost always outperformed models built for heterophily. The working practice is therefore:
+
+- report adjusted homophily rather than edge homophily alone;
+- compare against an MLP on node features, which ignores edges, and against a GNN with residual or concatenated ego
+  embeddings, such as GraphSAGE;
+- use the newer heterophilous benchmarks, or the large non-homophilous graphs of Lim et al.
+  <Cite id="lim2021linkx" />, instead of Chameleon and Squirrel as distributed before 2023.
+
+## Assumptions
+
+- The labels relate to the edges consistently across the graph. Mixed graphs, homophilous in some regions and
+  heterophilous in others, need node-specific propagation weights.
+- The formulas assume independent Gaussian features, a fixed degree and a fixed share $h$ at every node. Real graphs
+  vary in all three; the measured curves in the figure show the effect of varying degrees.
+- Homophily is measured with labels, which are known only for training nodes at prediction time. An estimate from the
+  training nodes is noisy when they are few.
+
+## Pitfalls
+
+- **Edge homophily with unbalanced classes.** A graph where one class holds most nodes looks homophilous under
+  $h_{\text{edge}}$ even with random edges. Adjusted homophily corrects for this.
+- **Treating low homophily as "edges are useless".** At $h = 0$ a graph convolution can work well through a sign flip;
+  the hard regime is intermediate $h$, where neighbours carry no consistent signal for an average to use.
+- **Leaky heterophily benchmarks.** Duplicate nodes in Chameleon and Squirrel let models memorise test nodes through
+  their training copies <Cite id="platonov2023heterophily" />.
+- **Untuned baselines.** Many reported gains of heterophily-specific models disappear against a tuned GNN with
+  residual connections.

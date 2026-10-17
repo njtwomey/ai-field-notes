@@ -1,0 +1,171 @@
+---
+title: 'Transductive and inductive learning'
+kind: concept
+summary: 'A transductive learner predicts labels only for the unlabelled points it was given; an inductive learner returns a function that labels any new point. Label propagation is transductive; manifold regularisation and the decision function of a transductive SVM are inductive.'
+tags: [semi-supervised, learning-theory, worked-example]
+aliases: ['transduction', 'transductive inference', 'inductive semi-supervised learning', 'out-of-sample extension']
+requires: [semi-supervised-assumptions]
+related:
+  [
+    label-propagation,
+    manifold-regularisation,
+    transductive-support-vector-machine,
+    when-unlabelled-data-helps,
+    semi-supervised-node-classification,
+    conformal-prediction,
+    test-time-adaptation,
+  ]
+references: [vapnik1998, gammerman1998transduction, joachims1999transductive, zhu2003, delalleau2005induction, belkin2006manifold, balcan2010discriminative, chapelle2006, hamilton2017graphsage]
+status: draft
+updated: 2026-10-17
+---
+
+import { RefitOrExtend } from './RefitOrExtend'
+
+<Definition>
+A **transductive** learner receives labelled pairs $\set{(\xvec_i, y_i)}_{i=1}^{\ell}$ and a fixed set of $u$
+unlabelled inputs $\set{\xvec_j}_{j=\ell+1}^{\ell+u}$, and outputs labels $\hat y_{\ell+1}, \dots, \hat y_{\ell+u}$
+for exactly those inputs. An **inductive** learner receives the same data and outputs a function
+$\hat f : \Xcal \to \Ycal$ that labels any input, including inputs not seen in training. Semi-supervised methods come
+in both kinds: <NoteLink to="label-propagation">label propagation</NoteLink> is transductive, while
+<NoteLink to="manifold-regularisation">manifold regularisation</NoteLink> and the
+<NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink> return functions
+<Cite id="vapnik1998" /> <Cite id="chapelle2006" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="supervised-learning">Supervised learning</NoteLink> is usually inductive: learn a rule from examples, then
+apply it to whatever arrives. Many semi-supervised problems are posed differently. A researcher has 10,000 documents and
+labels 50 of them; the goal is to label the other 9,950, not to build a classifier for documents that do not exist yet.
+Here the test inputs are known in advance, and a learner may use them during training. That is transduction: reasoning
+from particular examples to particular examples, without passing through a general rule.
+
+Vapnik argued for transduction on the principle that a problem should be solved directly, not through a harder
+intermediate problem <Cite id="vapnik1998" />. Labelling 9,950 given points is easier than finding a function that is
+right everywhere in the input space, since the function must also be right where no point will ever be asked about.
+
+Induction pays for that generality with one practical advantage: a new input costs one evaluation of $\hat f$. A
+transductive answer for a new input requires adding the input to the problem and solving it again, and the new
+solution can change the labels of points already answered.
+
+## Details
+
+### The two settings
+
+In the inductive setting the data are drawn independently from a distribution $P$ over $\Xcal \times \Ycal$, and the
+quality of $\hat f$ is its risk $R(\hat f) = \expect_{(\xvec, y) \sim P}[\indicator[\hat f(\xvec) \ne y]]$, the error
+on future inputs.
+
+In Vapnik's transductive setting a fixed set of $\ell + u$ inputs is given, the $\ell$ labelled ones are chosen from
+it uniformly at random without replacement, and the quality of the answer is the error on the remaining $u$,
+$\frac{1}{u}\sum_{j > \ell} \indicator[\hat y_j \ne y_j]$ <Cite id="vapnik1998" />. No distribution beyond the fixed
+set is involved. Balcan and Blum note that the transductive case is learning under a known input distribution, the
+uniform distribution over the given set, so a compatibility notion can be evaluated exactly on it
+<Cite id="balcan2010discriminative" />.
+
+### Which methods are which
+
+- **Label propagation** solves for scores on the nodes of a graph built from the $\ell + u$ inputs, by
+  $\fvec_U = (\Dmat_{UU} - \Wmat_{UU})^{-1}\Wmat_{UL}\fvec_L$ with $\Dmat$ the degree matrix and $\Wmat$ the edge
+  weights <Cite id="zhu2003" />. The output is the vector $\fvec_U$: one score per given unlabelled point, and nothing
+  for any other input.
+- **The transductive support vector machine** chooses labels for the given unlabelled points and a hyperplane together,
+  maximising the margin over all of them <Cite id="joachims1999transductive" />. Training is transductive, since the
+  unlabelled points enter the objective with their chosen labels, but the result is a weight vector $\wvec$ and offset
+  $b$, so $\hat f(\xvec) = \sgn(\wvec^\top\xvec + b)$ labels any input.
+- **Manifold regularisation** fits $f$ in a <NoteLink to="reproducing-kernel-hilbert-space">reproducing kernel Hilbert
+  space</NoteLink> with a penalty on its variation along a graph of the training inputs. The solution is
+  $f(\xvec) = \sum_{i=1}^{\ell+u}\alpha_i k(\xvec_i, \xvec)$ for a kernel $k$, which is defined for every input
+  <Cite id="belkin2006manifold" />.
+- **Self-training, consistency regularisation and their deep forms** train a parametric model, such as a network, and
+  are inductive.
+- **<Gloss name="gnn">Graph neural networks</Gloss>** exist in both forms. A <Gloss name="gcn">graph convolutional
+  network</Gloss> trained on one fixed graph predicts only that graph's nodes (see
+  <NoteLink to="semi-supervised-node-classification">semi-supervised node classification</NoteLink>);
+  <Gloss name="graphsage" /> learns an aggregation function that applies to unseen nodes and graphs
+  <Cite id="hamilton2017graphsage" />.
+
+### From transduction to induction
+
+A transductive method can be given an inductive form by an **out-of-sample extension**. For graph methods, Delalleau,
+Bengio and Le Roux add a new input $\xvec$ to the graph, with edge weights $W(\xvec, \xvec_j)$ to the training inputs,
+and keep the training scores fixed. Minimising the graph energy $\sum_j W(\xvec, \xvec_j)(f(\xvec) - f_j)^2$ over the
+one free value gives
+
+$$
+\tilde f(\xvec) = \frac{\sum_j W(\xvec, \xvec_j)\, f_j}{\sum_j W(\xvec, \xvec_j)},
+$$
+
+the weighted average of the neighbours' scores <Cite id="delalleau2005induction" />. With a Gaussian $W$ this is a
+<NoteLink to="kernel-regression">Nadaraya-Watson kernel regression</NoteLink> on the propagated scores. At an unlabelled
+training node it returns that node's score, by the harmonic property. The cost per new input is $O(n)$ for $n = \ell +
+u$ training inputs, against $O((u+1)^3)$ for solving the system again with a dense solver. In Delalleau and coauthors'
+experiments the extension's classification error was about 10 to 20 per cent higher, relatively, than that of the full
+transductive solution, and the gap shrank as the training set grew, because one added point changes the other scores
+little.
+
+The extension is an approximation, and the approximation is to the refit answer. Holding the training scores fixed
+ignores the effect that the new point has on its neighbours. When the new point sits on a path between regions of
+different labels, that effect is not small.
+
+## Worked example
+
+Four nodes form a path $1 - 2 - 3 - 4$ with unit edge weights. Node 1 is labelled class 1 ($f_1 = 1$) and node 4 class
+0 ($f_4 = 0$). The harmonic conditions are $f_2 = (f_1 + f_3)/2$ and $f_3 = (f_2 + f_4)/2$, so $f_2 = 2/3 = 0.667$ and
+$f_3 = 1/3 = 0.333$. Node 2 is class 1 and node 3 class 0.
+
+A new point, node 5, arrives. It is similar to node 2 (weight 1) and more similar to node 4 (weight 2).
+
+**Extension.** Hold $f_2 = 2/3$ and $f_4 = 0$ fixed and average:
+
+$$
+\tilde f_5 = \frac{1 \cdot f_2 + 2 \cdot f_4}{1 + 2} = \frac{2/3}{3} = \frac{2}{9} = 0.222 .
+$$
+
+Node 5 is class 0, and nodes 2 and 3 keep their answers.
+
+**Refit.** Add node 5 to the graph and solve for $f_2$, $f_3$, $f_5$ together. Node 2 now has three neighbours (1, 3
+and 5), node 3 has two (2 and 4), and node 5 has two (2 with weight 1, 4 with weight 2):
+
+$$
+3 f_2 = 1 + f_3 + f_5, \qquad 2 f_3 = f_2, \qquad 3 f_5 = f_2 .
+$$
+
+Substituting $f_3 = f_2/2$ and $f_5 = f_2/3$ into the first equation, $3 f_2 = 1 + f_2/2 + f_2/3$, so
+$f_2 (3 - 5/6) = 1$ and $f_2 = 6/13 = 0.462$. Then $f_3 = 3/13 = 0.231$ and $f_5 = 2/13 = 0.154$.
+
+**Comparison.** Both answers put node 5 in class 0, with scores $0.222$ and $0.154$. The refit also moves node 2 from
+$0.667$ to $0.462$, across the threshold $1/2$: node 2 changes from class 1 to class 0. The new point opened a second
+route from node 2 to the class-0 node; in the electrical reading of label propagation, it added a conducting path from
+node 2 to the node held at 0 volts. A transductive answer depends on the whole set of points it is asked about.
+
+The figure runs the same comparison on two moons.
+
+<RefitOrExtend />
+
+## Assumptions
+
+- **Transduction assumes the test inputs are available at training time.** The setting fits batch problems: a corpus
+  to annotate, the nodes of one graph, the test set of a benchmark.
+- **Induction assumes the future inputs come from the training distribution.** An inductive $\hat f$ learned with
+  unlabelled data inherits the semi-supervised assumption only where those data lay; elsewhere it extrapolates.
+- **The out-of-sample extension assumes one new point barely changes the old solution.** That holds for points
+  inside dense regions and fails for points that bridge regions, as the worked example and the figure show.
+
+## Pitfalls
+
+- **Answers that depend on the test set.** A transductive learner's label for one point can change when other points
+  are added or removed. Results must be reported with the exact unlabelled set used, and a transductive score is not
+  comparable with the score of an inductive method evaluated on points it never saw.
+- **Cost at prediction time.** Solving the graph system again per query costs $O(u^3)$ with a dense solver. Use the
+  extension, an iterative solver warm-started at the old scores, or an inductive method when queries arrive one by
+  one.
+- **Extension far from the data.** The weighted average far from every training input is dominated by the nearest
+  node, so $\tilde f$ is confident where it has no evidence. The figure's shading extends to the corners with full
+  confidence.
+- **Transduction in other fields.** "Transductive" also names confidence machines that compute a prediction set for
+  each new point from the training set and that point together <Cite id="gammerman1998transduction" />, the origin of
+  <NoteLink to="conformal-prediction">conformal prediction</NoteLink>, and methods that adapt a model to an unlabelled
+  test batch (<NoteLink to="test-time-adaptation">test-time adaptation</NoteLink>). The shared idea is the use of the
+  specific test inputs; the methods are otherwise unrelated.

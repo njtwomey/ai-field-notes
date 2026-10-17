@@ -1,0 +1,157 @@
+---
+title: 'One-by-one convolution'
+kind: concept
+summary: 'A $1\times1$ convolution applies the same linear map across channels at every pixel. It changes the channel count and mixes channels at cost $C_{in}C_{out}HW$, and is the bottleneck layer of Inception and ResNet.'
+tags: [convolutional-networks, deep-learning, worked-example]
+aliases: ['1x1 convolution', 'pointwise convolution', 'network in network', 'channel mixing']
+requires: [convolutional-layer]
+related: [inception-networks, residual-network, depthwise-and-grouped-convolution, efficient-convolutional-networks, fully-convolutional-network-and-u-net]
+references: [lin2014nin, szegedy2015, he2016, howard2017mobilenets, he2019tricks]
+status: draft
+updated: 2026-10-17
+---
+
+import { ChannelMixing } from './ChannelMixing'
+import { BottleneckCost } from './BottleneckCost'
+
+<Definition>
+A **one-by-one convolution** is a <NoteLink to="convolutional-layer">convolutional layer</NoteLink> with kernel size
+$k = 1$. With $C_{in}$ input and $C_{out}$ output channels, it computes at every pixel $(i, j)$
+
+$$
+y_{c', i, j} = b_{c'} + \sum_{c=1}^{C_{in}} w_{c', c}\, x_{c, i, j},
+$$
+
+so the output's channel vector at a pixel is $\Wmat\xvec_{i,j} + \bvec$, with one weight matrix $\Wmat$ of shape
+$[C_{out}, C_{in}]$ shared by all pixels. It reads no neighbouring pixels.
+</Definition>
+
+## Intuition
+
+Look at a feature map of shape $[C, H, W]$ as $H W$ pixels, each carrying a vector of $C$ channel values. A
+$3 \times 3$ convolution combines vectors from nine neighbouring pixels. A $1 \times 1$ convolution combines only the
+channels of one pixel, with the same matrix at every pixel. It is a fully connected layer from $C_{in}$ to $C_{out}$
+features applied to each pixel in turn.
+
+Converting a colour image to greyscale is a $1 \times 1$ convolution with one output channel: the luminance of a pixel
+is about $0.3$ times its red value plus $0.59$ times its green plus $0.11$ times its blue. A learned $1 \times 1$ layer
+does the same with weights found by training and with many output channels. Some combine channels into new features,
+and some discard channels the next layer does not need.
+
+<ChannelMixing />
+
+The layer has three jobs in practice:
+
+- **Change the channel count.** It reduces $C$ before an expensive layer and restores it afterwards, or matches
+  channel counts where two paths meet.
+- **Mix channels.** It is the half of a depthwise separable convolution that combines channels; see
+  <NoteLink to="depthwise-and-grouped-convolution">depthwise and grouped convolution</NoteLink>.
+- **Add depth cheaply.** Followed by a nonlinearity, it adds a layer of per-pixel computation that costs no spatial
+  window.
+
+## Details
+
+### Matrix form
+
+Flatten the spatial axes, so the input is a matrix $\Xmat$ of shape $[C_{in},\ HW]$ with one column per pixel. The
+layer computes
+
+$$
+\Ymat = \Wmat\Xmat + \bvec\,\ones^\top,
+$$
+
+one matrix product of shape $[C_{out}, C_{in}] \times [C_{in}, HW]$. This needs no im2col copy, because each window is
+a single column already. Libraries run a $1 \times 1$ convolution as a plain matrix multiplication, which is the fastest
+kernel on most hardware.
+
+### Cost
+
+The layer has $C_{in}C_{out}$ weights and $C_{out}$ biases. On an $H \times W$ map it costs $C_{in}C_{out}HW$
+multiply-accumulates. A $3 \times 3$ layer between the same channels costs $9$ times as much in both. The saving comes
+only from the kernel area. A $1 \times 1$ layer between wide channel counts is still expensive: from 1024 to 1024
+channels it has over a million weights. MobileNet spends 95% of its computation and 75% of its parameters in
+$1 \times 1$ layers <Cite id="howard2017mobilenets" />.
+
+### Network in network
+
+Lin, Chen and Yan replaced each linear filter by a small <Gloss name="mlp">multilayer perceptron</Gloss> slid over the
+image, which they called network in network <Cite id="lin2014nin" />. A <NoteLink to="perceptron">perceptron</NoteLink>
+applied to every pixel's channel vector is a stack of $1 \times 1$ convolutions with nonlinearities between them. Their
+network also ended in global average pooling of one channel per class instead of fully connected layers; see
+<NoteLink to="pooling-and-strides">pooling and strides</NoteLink>.
+
+### Bottlenecks
+
+The Inception module runs $3 \times 3$ and $5 \times 5$ convolutions in parallel. Szegedy et al. placed a
+$1 \times 1$ layer with few output channels in front of each, so the expensive convolutions run on a reduced channel
+count <Cite id="szegedy2015" />; see <NoteLink to="inception-networks">Inception networks</NoteLink>. The deeper
+<Gloss name="resnet" /> models use the same idea as a bottleneck block: a $1 \times 1$ layer reduces $C$ channels to a
+width $B$, a $3 \times 3$ layer works at width $B$, and a second $1 \times 1$ layer expands back to $C$ channels
+<Cite id="he2016" />.
+
+A $1 \times 1$ reduction to $B$ channels followed by a $1 \times 1$ expansion, with nothing between them, is the product
+of a $[C_{out}, B]$ matrix and a $[B, C_{in}]$ matrix. That product has rank at most $B$. A bottleneck therefore
+restricts the block to a $B$-dimensional subspace of channel space, and the $3 \times 3$ layer and the nonlinearities
+work inside it.
+
+MobileNetV2 and <NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> invert the shape: a $1 \times 1$ layer
+expands $C$ to $4C$ channels, a cheap depthwise layer filters each channel, and a $1 \times 1$ layer projects back to
+$C$; see <NoteLink to="efficient-convolutional-networks">efficient convolutional networks</NoteLink>. A transformer's
+position-wise feed-forward block is the same pair of $1 \times 1$ layers applied to tokens instead of pixels.
+
+### Other uses
+
+- **Projection shortcuts.** A residual connection between maps with different channel counts or sizes passes the
+  shortcut through a $1 \times 1$ layer, with stride 2 when the block downsamples <Cite id="he2016" />.
+- **Per-pixel heads.** A segmentation network ends in a $1 \times 1$ layer with one output channel per class, a
+  classifier applied at every pixel; see
+  <NoteLink to="fully-convolutional-network-and-u-net">fully convolutional network and U-Net</NoteLink>.
+
+## Worked example
+
+Count the first-stage <Gloss name="resnet" />-50 bottleneck, which maps $C = 256$ channels to $256$ at
+$56 \times 56$ with width $B = 64$, against one plain $3 \times 3$ layer from 256 to 256 channels. Biases are left out,
+because <NoteLink to="batch-normalisation">batch normalisation</NoteLink> follows each layer and replaces them.
+
+1. **Reduce.** A $1 \times 1$ layer from 256 to 64 channels has $256 \cdot 64 = 16{,}384$ weights. It computes
+   $16{,}384$ multiply-accumulates at each of the $56^2 = 3136$ positions, $5.14 \times 10^7$ in all.
+2. **Filter.** A $3 \times 3$ layer from 64 to 64 channels has $9 \cdot 64 \cdot 64 = 36{,}864$ weights and costs
+   $36{,}864 \cdot 3136 = 1.16 \times 10^8$ multiply-accumulates.
+3. **Expand.** A $1 \times 1$ layer from 64 to 256 channels has $16{,}384$ weights and costs $5.14 \times 10^7$, as in
+   step 1.
+4. **Total.** The bottleneck has $16{,}384 + 36{,}864 + 16{,}384 = 69{,}632$ weights and costs
+   $69{,}632 \cdot 3136 = 2.18 \times 10^8$ multiply-accumulates.
+5. **Plain layer.** A $3 \times 3$ layer from 256 to 256 channels has $9 \cdot 256 \cdot 256 = 589{,}824$ weights and
+   costs $589{,}824 \cdot 3136 = 1.85 \times 10^9$ multiply-accumulates.
+
+The bottleneck costs $589{,}824 / 69{,}632 = 8.5$ times less than one plain layer, and it contains three layers with two
+nonlinearities. It also costs about the same as the two-layer block of ResNet-34 on 64 channels,
+$2 \cdot 36{,}864 = 73{,}728$ weights, while carrying four times as many channels between blocks. He et al. built
+<NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink>, -101 and -152 from it for that reason
+<Cite id="he2016" />.
+
+At a single pixel, the first output channel of the figure above computes
+$0.3 \cdot 0.9 + 0.59 \cdot 0.15 + 0.11 \cdot 0.1 = 0.27 + 0.089 + 0.011 = 0.37$ for a pixel of the red disc, whose
+channel vector is $(0.9, 0.15, 0.1)$.
+
+<BottleneckCost />
+
+## Assumptions
+
+- The features to combine are present at the same pixel. A $1 \times 1$ layer cannot relate a value to its neighbours;
+  spatial structure must come from other layers.
+- Channels carry redundant information, so a reduction to fewer channels loses little. The bottleneck width $B$ sets
+  how much is kept.
+
+## Pitfalls
+
+- **No <NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink>.** Stacking $1 \times 1$ layers
+  never widens what a unit sees. A network of only $1 \times 1$ layers is a per-pixel perceptron.
+- **Too narrow a bottleneck.** The block's channel map has rank at most $B$. A width far below the information in the
+  channels discards it before the $3 \times 3$ layer sees it.
+- **Strided $1 \times 1$ layers skip pixels.** A $1 \times 1$ layer with stride 2 reads one pixel in four and ignores
+  the other three. He et al. moved the stride of ResNet's downsampling blocks into the $3 \times 3$ layer, and put a
+  $2 \times 2$ average pool before the shortcut's $1 \times 1$ layer. The two changes raised ResNet-50's
+  <Gloss name="imagenet" /> top-1 accuracy by about 0.8 percentage points <Cite id="he2019tricks" />.
+- **<Gloss name="flop" plural /> are not time.** A $1 \times 1$ layer is cheap per weight, but on a large map its input
+  and output activations are large, and moving them through memory can take longer than the arithmetic.

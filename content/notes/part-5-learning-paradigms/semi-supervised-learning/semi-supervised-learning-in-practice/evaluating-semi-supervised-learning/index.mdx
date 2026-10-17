@@ -1,0 +1,191 @@
+---
+title: 'Evaluating semi-supervised learning'
+kind: concept
+summary: 'A fair comparison of semi-supervised methods tunes the supervised baseline equally, keeps the validation set no larger than the labelled set, and reports results across label counts and class mismatch. Under these rules many reported gains shrink (Oliver et al.).'
+tags: [semi-supervised, evaluation, worked-example]
+aliases: ['realistic evaluation of semi-supervised learning']
+requires: [fixmatch, cross-validation]
+related:
+  [
+    when-semi-supervised-learning-fails,
+    comparing-learning-algorithms,
+    open-set-semi-supervised-learning,
+    self-supervised-pretraining-for-semi-supervised-learning,
+    hyperparameter-search,
+    manifold-regularisation,
+  ]
+references: [oliver2018realistic, wang2022usb, sohn2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { EvaluationProtocol } from './EvaluationProtocol'
+import { ValidationNoise } from './ValidationNoise'
+
+<Definition>
+**Evaluating a semi-supervised method** means measuring how much its use of unlabelled data improves on the best model
+that the same labelled data could train without it, under conditions a practitioner would face. Oliver, Odena, Raffel,
+Cubuk and Goodfellow set out the protocol: one shared implementation for every method, a supervised baseline tuned with
+the same effort, a comparison with transfer from a related labelled dataset, unlabelled data that may contain other
+classes, varied amounts of labelled and unlabelled data, and a validation set no larger than a real labelled budget
+allows <Cite id="oliver2018realistic" />.
+</Definition>
+
+## Intuition
+
+A semi-supervised benchmark is built by taking a fully labelled dataset, keeping a few labels, say 4,000 of
+<Gloss name="cifar-10" />'s 50,000 training images, and hiding the rest. The method trains on the 4,000 labelled images
+and the 46,000 others, and its test error is compared with a model trained on the 4,000 alone. The gain is the
+difference between two numbers, and each number depends on choices that have nothing to do with unlabelled data: the
+architecture, the augmentation, the training schedule, the regulariser and the
+<NoteLink to="hyperparameter-search">hyperparameter search</NoteLink>.
+
+A gain is therefore only as trustworthy as the baseline beside it. If the semi-supervised method gets 1,000 trials of
+hyperparameter search and the baseline gets one, part of the reported gain is the search. If hyperparameters are chosen
+on a validation set of 5,000 labelled images while training uses 4,000, the experiment has quietly used more labels
+than it reports. If the hidden labels come from the same ten classes as the kept ones, the experiment never meets the
+unlabelled data a real collection contains.
+
+## Details
+
+### The protocol
+
+Oliver and colleagues reimplemented the Π-model, <NoteLink to="mean-teacher">mean teacher</NoteLink>,
+<Gloss name="vat">virtual adversarial training</Gloss>, <NoteLink to="entropy-minimisation">entropy
+minimisation</NoteLink> and <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> in one code base with one
+network, a wide <Gloss name="resnet">residual network</Gloss> of depth 28 and width 2, and checked six practices
+<Cite id="oliver2018realistic" />.
+
+1. **A shared implementation.** Papers before 2018 compared numbers from different reimplementations of a 13-layer
+   convolutional network, with different initialisation, preprocessing, augmentation and schedules. These differences
+   prevent a direct comparison of the methods.
+2. **An equally tuned supervised baseline.** Two papers reported fully supervised baselines with ostensibly the same
+   model whose accuracies differed by up to 15 percentage points. Oliver and colleagues gave the baseline and every
+   semi-supervised method the same budget of 1,000 hyperparameter trials. On CIFAR-10 with 4,000 labels the
+   Π-model had been reported to lower the error from 34.85% to 12.36%; with the tuned baseline the same method lowered
+   it from 20.26% to 16.37%. The gain fell from 22.5 to 3.9 percentage points.
+3. **A transfer baseline.** A network trained on <Gloss name="imagenet" /> downsampled to $32 \times 32$ and fine-tuned
+   on the 4,000 CIFAR-10 labels reached 12.09% error, lower than every semi-supervised method in the study. With the 252
+   ImageNet classes that resemble CIFAR-10 classes removed, it reached 12.91%. Transfer to the street-number images of
+   SVHN gave no useful result, so this baseline helps only where a related labelled dataset exists (see
+   <NoteLink to="self-supervised-pretraining-for-semi-supervised-learning">self-supervised pretraining for
+   semi-supervised learning</NoteLink> for the case without one).
+4. **Class distribution mismatch.** The labelled data held six animal classes of CIFAR-10 with 400 labels each, and the
+   unlabelled data came from four classes, of which a varying number were among the six. As the overlap fell, every
+   method got worse, and with no overlap several did worse than the baseline that ignored the unlabelled data. The
+   subject of <NoteLink to="open-set-semi-supervised-learning">open-set semi-supervised learning</NoteLink> starts
+   here.
+5. **Varied amounts of data.** Results at a single label count hide how methods behave elsewhere. As the number of
+   labels grew, the semi-supervised methods converged to each other. On SVHN with 1,000 labels, adding unlabelled
+   images from the SVHN extra set helped until about 80,000 of them and then levelled off for every method.
+6. **A realistically small validation set.** The standard SVHN split has about 7,000 validation images, seven times the
+   1,000 labels used for training. A practitioner with 1,000 labels would train on a validation set that large, so the
+   benchmark spends labels it does not count.
+
+### Why the validation set matters
+
+Hyperparameters are chosen by comparing validation accuracies. A validation accuracy measured on $n$ points is an
+average of $n$ correct-or-wrong indicators, so it fluctuates around the true accuracy $a$ with standard deviation
+$\sqrt{a(1 - a)/n}$. <NoteLink to="hoeffdings-inequality">Hoeffding's inequality</NoteLink> bounds the fluctuation for
+any distribution:
+
+$$
+P\paren{\abs{\hat a - a} \ge \varepsilon} \le 2\exp(-2n\varepsilon^2).
+$$
+
+Setting the right side to $\delta$ and solving for $n$ gives the number of points that pins the accuracy to within
+$\pm\varepsilon$ with probability at least $1 - \delta$:
+
+$$
+n \ge \frac{\ln(2/\delta)}{2\varepsilon^2}.
+$$
+
+For $\varepsilon = 0.01$ and $\delta = 0.05$ this is $\ln 40 / 0.0002 \approx 18{,}400$ points, which is what Oliver and
+colleagues meant by nearly 20,000. Published differences between semi-supervised methods are often 1 percentage point
+or less. A validation set small enough to be realistic cannot resolve them, and a method with many hyperparameters
+gains least from tuning on it <Cite id="oliver2018realistic" />.
+
+The bound is loose for the question that matters. <NoteLink to="model-selection">Model selection</NoteLink> needs the
+ranking of two models, not their accuracies, and the two are measured on the same points. Their per-point errors are
+correlated, which lowers the variance of the measured difference. For accuracies $a$ and $b$ and a correlation $\rho$
+between the two models' per-point error indicators, the measured difference $\hat b - \hat a$ has mean $b - a$ and
+variance
+
+$$
+\frac{a(1 - a) + b(1 - b) - 2\rho\sqrt{a(1 - a)\,b(1 - b)}}{n}.
+$$
+
+The figure below turns this into the probability that the better model also measures better. Oliver and colleagues
+checked the correlated case on SVHN and still found that, at 10% of the training size, the spread of the differences
+exceeded the differences themselves <Cite id="oliver2018realistic" />.
+
+<ValidationNoise />
+
+### Practice since 2018
+
+Modern papers report several label counts per dataset, such as 40, 250 and 4,000 labels on CIFAR-10, and several random
+draws of the labelled set, as <NoteLink to="fixmatch">FixMatch</NoteLink> did <Cite id="sohn2020" />. Training from
+scratch is expensive: the earlier TorchSSL suite needs 335 GPU-days to evaluate one method on its five vision tasks
+<Cite id="wang2022usb" />. The USB benchmark instead starts every method from a
+pretrained network, covers 15 tasks in vision, language and audio, and evaluates FixMatch on all of them in 39 GPU-days
+on one V100 <Cite id="wang2022usb" />. Starting from a pretrained network is itself the transfer baseline of rule 3, so
+the gains USB reports are gains over transfer. A team deciding whether to use unlabelled data compares, on its own
+data: the supervised model, the supervised model fine-tuned from the best available pretrained network, and the
+semi-supervised method on top of that same pretrained network, each tuned with the same budget by
+<NoteLink to="cross-validation">cross-validation</NoteLink> on the labelled data.
+
+## Worked example
+
+**Validation noise.** Two methods have true accuracies $a = 0.90$ and $b = 0.91$, a gap of 1 percentage point, and are
+compared on a validation set of $n = 250$ points.
+
+1. **One accuracy.** The standard deviation of $\hat a$ is $\sqrt{0.9 \times 0.1 / 250} = 0.019$: the measured accuracy
+   is typically off by about 2 points, twice the gap.
+2. **The difference, errors independent ($\rho = 0$).** The variance numerator is
+   $0.9 \times 0.1 + 0.91 \times 0.09 = 0.0900 + 0.0819 = 0.1719$, so the difference has standard deviation
+   $\sqrt{0.1719/250} = 0.0262$. The better method measures better when the difference is positive, with probability
+   $\Phi(0.01/0.0262) = \Phi(0.38) = 0.65$, where $\Phi$ is the standard normal distribution function. Model selection
+   on this validation set is right about two times in three.
+3. **Correlated errors ($\rho = 0.8$).** The numerator drops by $2 \times 0.8 \times \sqrt{0.09 \times 0.0819} = 0.137$
+   to $0.0345$. The standard deviation becomes $0.0118$ and the probability $\Phi(0.85) = 0.80$.
+4. **Points needed for 95%.** Correct ranking with probability 0.95 needs $0.01/\sqrt{v/n} = 1.645$, so
+   $n = 1.645^2 v / 0.01^2$: 4,651 points with $\rho = 0$ and 934 with $\rho = 0.8$. Both exceed the 250 labels a
+   realistic budget offers.
+
+**The baseline.** The figure below runs the protocol on a small problem: 100 points of two moons, with 1 to 16 labels
+per class. The semi-supervised method is <NoteLink to="manifold-regularisation">Laplacian regularised least
+squares</NoteLink> (<Gloss name="laprls" />); the baseline is the same kernel model fitted to the labelled points alone,
+which is <NoteLink to="kernel-ridge-regression">kernel ridge regression</NoteLink>. Both share a grid of six
+hyperparameter settings (kernel lengthscale $\ell \in \{0.2, 0.5, 1.5\}$, ridge weight $\gamma_A \in \{0.001, 0.1\}$).
+The semi-supervised method is tuned over all six; the baseline is tuned over a random subset of them. With data seed 1,
+a large validation set and one setting tried for the baseline, the semi-supervised method appears to gain 0.20 in
+accuracy at 1 label per class and 0.024 at 16. With the baseline tuned over all six settings, the gain at 1 label per
+class stays at 0.20, and the gain at 16 becomes $-0.007$: the baseline is better. The unlabelled data are worth a great
+deal at 1 label per class and nothing at 16, and only the equally tuned baseline shows it.
+
+<EvaluationProtocol />
+
+## Assumptions
+
+- **The benchmark split stands for the deployment.** A benchmark samples its labelled points uniformly and stratified by
+  class from the same pool as the unlabelled ones. Real labelled sets are often chosen by convenience or by
+  <Gloss name="active-learning">active learning</Gloss> (<NoteLink to="stream-based-active-learning">stream-based active
+  learning</NoteLink>), which changes both the baseline and the gain.
+- **The test set is untouched.** Every choice, including the number of training steps and the confidence threshold,
+  is made on labelled data that counts toward the budget.
+- **One number per method is enough.** Several draws of the labelled set give a spread, and with few labels the spread
+  between draws is often as large as the gap between methods. <NoteLink to="comparing-learning-algorithms">Comparing
+  learning algorithms</NoteLink> gives the tests for such comparisons.
+
+## Pitfalls
+
+- **Reusing the semi-supervised method's hyperparameters for the baseline.** Settings tuned to work with an unlabelled
+  loss term are rarely the best for a model trained on labels alone. The baseline needs its own search.
+- **<NoteLink to="early-stopping">Early stopping</NoteLink> on the test set.** Reporting the best test accuracy seen
+  during training selects on the test set. Oliver and colleagues report the test error at the step of lowest validation
+  error <Cite id="oliver2018realistic" />.
+- **Clean unlabelled data.** Hiding labels from a curated dataset produces unlabelled data with exactly the labelled
+  classes, in the labelled proportions. Unlabelled data collected for real contain other classes and other class
+  proportions (see <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised learning fails</NoteLink>).
+- **Ignoring transfer.** Where a related labelled dataset or a pretrained network exists, fine-tuning it is the baseline
+  to beat. A semi-supervised method that loses to it has no practical use on that task.

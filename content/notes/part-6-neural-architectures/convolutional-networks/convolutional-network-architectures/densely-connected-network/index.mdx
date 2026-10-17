@@ -1,0 +1,145 @@
+---
+title: 'Densely connected network'
+kind: concept
+summary: 'A DenseNet block feeds each layer the concatenated outputs of all earlier layers in the block, and each layer adds $k$ channels (the growth rate). Features are reused and every layer has a short path to the loss; transition layers compress and downsample between blocks.'
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases: ['DenseNet', 'dense block', 'growth rate', 'dense connectivity']
+requires: [residual-network]
+related:
+  [
+    residual-connections,
+    one-by-one-convolution,
+    classic-convolutional-network-architectures,
+    inception-networks,
+    batch-normalisation,
+  ]
+references: [huang2017, pleiss2017densenet, he2016]
+status: draft
+updated: 2026-10-17
+---
+
+import { DenseBlockGrowth } from './DenseBlockGrowth'
+
+<Definition>
+A dense block of $L$ layers computes $\xvec_\ell = H_\ell([\xvec_0, \xvec_1, \dots, \xvec_{\ell - 1}])$ for
+$\ell = 1, \dots, L$, where $\xvec_0$ is the block's input, $[\cdot]$ concatenates
+<NoteLink to="convolutional-layer">feature maps</NoteLink> along the channel axis and $H_\ell$ is a small stack of
+normalisation, <Gloss name="relu" /> and convolution that outputs $k$ channels. The block outputs
+$[\xvec_0, \dots, \xvec_L]$. A densely connected network (DenseNet) alternates dense blocks with transition layers that
+compress the channels and halve the resolution <Cite id="huang2017" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="residual-network">residual block</NoteLink> adds its input to its output,
+$\xvec_\ell = \xvec_{\ell - 1} + F_\ell(\xvec_{\ell - 1})$. Unrolled over a stage, the input to block $\ell$ is the sum
+of the stage input and every earlier residual. A sum mixes the contributions: a later layer sees one tensor and cannot
+tell which earlier layer produced which part of it. Each layer that wants a feature computed earlier must find it inside
+that sum, and much of each residual layer's output only re-encodes what was already there.
+
+A dense block keeps the contributions apart. It concatenates instead of adding, so every layer reads the block input and
+every earlier output as separate channels. A layer can then use an early edge map and a late part detector directly,
+with its own weights for each. Because nothing is lost by passing a feature on, each layer only needs to add a few new
+channels: $k = 32$ in the <Gloss name="imagenet" /> models, against hundreds per layer in a ResNet. Huang et al. call
+the concatenated channels the block's collective knowledge <Cite id="huang2017" />.
+
+Dense connectivity also shortens paths. The block's output contains every layer's output, so the gradient of the loss
+reaches each layer through at most two or three transition layers, a form of implicit deep supervision
+<Cite id="huang2017" />. DenseNet keeps the multi-stage layout and the <NoteLink to="batch-normalisation">batch
+normalisation</NoteLink> of ResNet. It changes only how the layers of a stage are connected.
+
+<DenseBlockGrowth />
+
+## Details
+
+### Growth rate
+
+If $\xvec_0$ has $k_0$ channels and each $H_\ell$ outputs $k$, layer $\ell$ reads $k_0 + (\ell - 1)k$ channels and the
+block outputs $k_0 + Lk$. The hyperparameter $k$ is the growth rate. In a block of $L$ layers, layer $\ell$ has $\ell$
+inputs, so the block has $1 + 2 + \dots + L = L(L + 1)/2$ direct connections, against $L$ in a plain stack
+<Cite id="huang2017" />.
+
+The channel count grows linearly with depth inside a block, and so does the cost of each layer's first convolution.
+This is why DenseNet keeps blocks short at high resolution (6 layers at $56 \times 56$ in DenseNet-121) and long at low
+resolution (24 layers at $14 \times 14$).
+
+### Bottleneck and compression (DenseNet-BC)
+
+Two changes keep the growth affordable <Cite id="huang2017" />.
+
+- **Bottleneck (B).** $H_\ell$ is $\mathrm{BN}$, ReLU, a $1 \times 1$ convolution to $4k$ channels, $\mathrm{BN}$,
+  ReLU and a $3 \times 3$ convolution to $k$ channels. The $1 \times 1$ layer reads all $c$ incoming channels at cost
+  $4kc$ weights; the $3 \times 3$ layer then reads only $4k$, at $36k^2$ weights. A bare $3 \times 3$ layer would have
+  $9kc$ weights. The bottleneck has fewer weights when $4kc + 36k^2 < 9kc$, that is when $c > 7.2k$, about 230 channels
+  for $k = 32$.
+- **Compression (C).** A transition layer is $\mathrm{BN}$, a $1 \times 1$ convolution and $2 \times 2$
+  <NoteLink to="pooling-and-strides">average pooling</NoteLink> with stride 2. The convolution outputs
+  $\lfloor \theta m \rfloor$ channels for an input of $m$, with $\theta = 0.5$ in the experiments.
+
+DenseNet-121 has a $7 \times 7$ stride-2 stem convolution with $2k = 64$ channels and a max pool, then four dense
+blocks of 6, 12, 24 and 16 layers with $k = 32$, three transitions, global average pooling and a 1000-way dense layer.
+It has 121 weight layers on its longest path, 8.0 million parameters and 2.8 billion multiply-adds per
+$224 \times 224$ image, against 25.6 million and 4.1 billion for ResNet-50 (counted in the figure of
+<NoteLink to="classic-convolutional-network-architectures">LeNet, AlexNet, VGG and ResNet</NoteLink>). Huang et al.
+report that DenseNet-201, with 20 million parameters, reaches about the validation error of a ResNet-101 with more
+than 40 million <Cite id="huang2017" />.
+
+### Concatenation against addition
+
+The difference from a residual network is one operation, and it changes what the layers can do with the past.
+
+- **Addition** keeps the width constant: $\xvec_\ell$ has as many channels as $\xvec_{\ell - 1}$. A later layer reads
+  one summary of all earlier layers.
+- **Concatenation** widens the input at every layer: a later layer reads every earlier output separately and weights
+  each with its own filters.
+
+Huang et al. inspect a trained DenseNet's weights: within a block, layers spread their weight over many earlier outputs,
+and the transition layers draw on the whole preceding block <Cite id="huang2017" />. Layers in the second and third
+blocks put the least weight on the transition's output, which suggests that output is redundant and supports compressing
+it.
+
+## Worked example
+
+Take the first dense block of DenseNet-121 <Cite id="huang2017" />: $k_0 = 64$ input channels at $56 \times 56$,
+$L = 6$ layers, growth rate $k = 32$, bottleneck width $4k = 128$. Count parameters (weights, plus 2 per channel for
+each batch normalisation) and multiply-adds for one image.
+
+1. **Channels.** The layers read $64, 96, 128, 160, 192$ and $224$ channels. The block outputs
+   $64 + 6 \cdot 32 = 256$.
+2. **Layer 1.** Batch normalisation of 64 channels has $2 \cdot 64 = 128$ parameters. The $1 \times 1$ convolution has
+   $64 \cdot 128 = 8{,}192$ weights. The second batch normalisation has $256$. The $3 \times 3$ convolution has
+   $9 \cdot 128 \cdot 32 = 36{,}864$. The layer has $45{,}440$ parameters. At $56 \cdot 56 = 3{,}136$ pixels its two
+   convolutions cost $3{,}136 \cdot (8{,}192 + 36{,}864) = 141.3$ million multiply-adds.
+3. **Later layers.** Only the $1 \times 1$ convolution and the first normalisation grow with the input. Layer 6 reads
+   224 channels and has $448 + 28{,}672 + 256 + 36{,}864 = 66{,}240$ parameters and costs $205.5$ million multiply-adds.
+4. **Block.** The six layers have $335{,}040$ parameters and cost $1.04$ billion multiply-adds.
+5. **Transition.** Batch normalisation of 256 channels ($512$ parameters), a $1 \times 1$ convolution from 256 to
+   $\theta \cdot 256 = 128$ channels ($32{,}768$ weights, $102.8$ million multiply-adds) and $2 \times 2$ average
+   pooling give $128$ channels at $28 \times 28$ for the next block.
+
+In this first block the bottleneck does not pay: every layer reads fewer than 230 channels. Six bare $3 \times 3$
+layers would have $250{,}560$ parameters and cost $780$ million multiply-adds. The figure reproduces both counts. In the
+third block, where layers read up to $256 + 23 \cdot 32 = 992$ channels, the bottleneck cuts the $3 \times 3$ layer's
+input by a factor of up to 7.75.
+
+## Assumptions
+
+- Features computed early stay useful later, so passing them on unchanged is worth the extra input channels.
+- A few new channels per layer are enough. Small growth rates ($k = 12$ on CIFAR, $32$ on ImageNet) worked in the
+  experiments <Cite id="huang2017" />.
+- All layers in a block share one spatial size, so their outputs can be concatenated. Downsampling happens only in the
+  transitions.
+
+## Pitfalls
+
+- **Memory.** A naive implementation stores a fresh concatenated tensor for every layer, so feature-map memory grows
+  quadratically with the depth of a block. Sharing one buffer for the concatenations and recomputing the cheap
+  normalisation outputs during the backward pass makes it linear <Cite id="pleiss2017densenet" />.
+- **Multiply-adds against speed.** DenseNet has fewer parameters and multiply-adds than ResNet-50, but concatenation
+  copies memory and narrow layers keep the hardware less busy. Memory traffic and parallelism, not multiply-adds, often
+  set the speed of a layer <Cite id="ma2018shufflenetv2" />.
+- **Long blocks at high resolution.** The cost of layer $\ell$ grows with $k_0 + (\ell - 1)k$, so adding layers to an
+  early block raises compute quickly. Grow late blocks instead.
+- **Current use.** Dense connectivity is rare in new image backbones, which favour residual stages with wide or
+  <NoteLink to="depthwise-and-grouped-convolution">depthwise convolutions</NoteLink>. Concatenating earlier features
+  survives in the skip connections of the <NoteLink to="fully-convolutional-network-and-u-net">U-Net</NoteLink>.

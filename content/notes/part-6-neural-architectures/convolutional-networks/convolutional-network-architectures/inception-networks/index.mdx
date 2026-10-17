@@ -1,0 +1,170 @@
+---
+title: 'Inception networks'
+kind: concept
+summary: 'An Inception module runs $1\times1$, $3\times3$ and $5\times5$ convolutions and a pooling branch in parallel and concatenates their outputs; $1\times1$ reductions keep the cost low. Later versions factorise $5\times5$ into two $3\times3$ and $n\times n$ into $1\times n$ and $n\times1$.'
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases: ['Inception module', 'GoogLeNet', 'Inception-v3', 'factorised convolution']
+requires: [one-by-one-convolution]
+related:
+  [
+    classic-convolutional-network-architectures,
+    residual-network,
+    label-smoothing,
+    depthwise-and-grouped-convolution,
+    frechet-inception-distance,
+  ]
+references: [szegedy2015, szegedy2016, szegedy2017inceptionv4, lin2014nin, chollet2017xception]
+status: draft
+updated: 2026-10-17
+---
+
+import { InceptionModuleCost } from './InceptionModuleCost'
+
+<Definition>
+An Inception module applies four branches to the same input and concatenates their outputs along the channel axis: a
+$1 \times 1$ convolution, a $1 \times 1$ reduction followed by a $3 \times 3$ convolution, a $1 \times 1$ reduction
+followed by a $5 \times 5$ convolution, and a $3 \times 3$ max pool followed by a $1 \times 1$ projection. Every branch
+keeps the spatial size, so the outputs line up. An Inception network (GoogLeNet and its successors) is a stack of such
+modules between ordinary convolution and pooling stages <Cite id="szegedy2015" />.
+</Definition>
+
+## Intuition
+
+A plain convolutional stage applies one kernel size. The right size depends on the feature: a texture fits in a
+$3 \times 3$ window, a part of an object may need $5 \times 5$ or more, and the same object appears at different sizes
+in different images. An Inception module does not choose. It runs several kernel sizes side by side and lets the next
+layer weigh their outputs.
+
+The obvious version of this idea is expensive. A $5 \times 5$ convolution that reads all $C$ input channels costs 25
+times $C$ multiply-adds per output value, and concatenating a pooling branch passes all $C$ input channels on, so the
+width of the representation grows from module to module. GoogLeNet fixes both with
+<NoteLink to="one-by-one-convolution">one-by-one convolutions</NoteLink>, the channel-mixing layers of Network in
+Network <Cite id="lin2014nin" />. A $1 \times 1$ layer first shrinks the channels that the $3 \times 3$ and $5 \times 5$
+convolutions read, and another $1 \times 1$ layer projects the pooled channels down. The large kernels then work on a
+narrow input.
+
+The Inception line keeps the stage-by-stage layout of <NoteLink to="classic-convolutional-network-architectures">AlexNet
+and VGG</NoteLink>, with channels growing as resolution falls. It changes the unit of design from a layer to a
+multi-branch block. Residual networks changed the same unit in a different way, by adding a shortcut around it, and
+later Inception versions adopted the shortcut too.
+
+## Details
+
+### Cost of a module
+
+Let the input have $C$ channels on an $H \times W$ grid. Write $c_1$ for the filters of the $1 \times 1$ branch, $r_3$
+and $c_3$ for the reduction and output widths of the $3 \times 3$ branch, $r_5$ and $c_5$ for those of the $5 \times 5$
+branch, and $c_p$ for the pool projection. Every convolution uses stride 1 and padding that keeps the grid, so each
+costs (kernel taps) $\times$ (input channels) $\times$ (output channels) multiply-adds per pixel. The module costs
+
+$$
+HW \left( C c_1 + C r_3 + 9 r_3 c_3 + C r_5 + 25 r_5 c_5 + C c_p \right)
+$$
+
+multiply-adds and outputs $c_1 + c_3 + c_5 + c_p$ channels. The naive module without reductions costs
+
+$$
+HW \left( C c_1 + 9 C c_3 + 25 C c_5 \right)
+$$
+
+and outputs $c_1 + c_3 + c_5 + C$ channels, because the pool branch passes all $C$ channels on. The terms $9 C c_3$ and
+$25 C c_5$ become $C r_3 + 9 r_3 c_3$ and $C r_5 + 25 r_5 c_5$. With $r_3$ and $r_5$ well below $C$, the large kernels
+cost a fraction of what they did.
+
+<InceptionModuleCost />
+
+### GoogLeNet
+
+GoogLeNet (Inception v1) won the ILSVRC 2014 classification task with a top-5 error of 6.67% <Cite id="szegedy2015" />.
+It is 22 weight layers deep and has nine Inception modules in three groups, at $28 \times 28$, $14 \times 14$ and
+$7 \times 7$. A stem of ordinary convolutions and max pools reduces the $224 \times 224$ input to $28 \times 28$ with
+192 channels first. The network ends in <NoteLink to="pooling-and-strides">global average pooling</NoteLink> and a
+single dense layer, which removes the large dense layers of AlexNet. It was designed to a budget of 1.5 billion
+multiply-adds per image <Cite id="szegedy2015" />. Counted from its layer table without the auxiliary classifiers, it
+has about 7 million parameters against AlexNet's 61 million.
+
+Two auxiliary classifiers sit on the outputs of modules 4a and 4d during training. Each is a small pooling, convolution
+and dense head whose loss is added to the main loss with weight 0.3, to push gradient into the middle of the network.
+They are removed at test time. Szegedy et al. later found that they do not speed up early training and act mainly as a
+regulariser <Cite id="szegedy2016" />.
+
+### Factorised convolutions (Inception v2 and v3)
+
+The second paper on the design adds <NoteLink to="batch-normalisation">batch normalisation</NoteLink> and replaces large
+kernels by stacks of smaller ones <Cite id="szegedy2016" />.
+
+**Two $3 \times 3$ for one $5 \times 5$.** Two stacked $3 \times 3$ convolutions with stride 1 have a
+<NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink> of $1 + 2 + 2 = 5$ pixels, the same as
+one $5 \times 5$ convolution. With $C$ channels in and out, the stack has $2 \cdot 9 C^2 = 18 C^2$ weights and the
+single layer $25 C^2$. The stack saves 28% of the weights and multiply-adds and adds a nonlinearity between the two
+layers.
+
+**Asymmetric factorisation.** A $1 \times n$ convolution followed by an $n \times 1$ convolution also covers an
+$n \times n$ window, with $2n C^2$ weights instead of $n^2 C^2$. For $n = 7$ this is 14 against 49, a saving of 71%.
+Inception v3 uses $1 \times 7$ and $7 \times 1$ pairs on its $17 \times 17$ grid. The pair is a constrained
+$7 \times 7$ filter, and Szegedy et al. found it works well on grids of 12 to 20 pixels and poorly in early layers.
+
+**Grid reduction.** Pooling before a widening layer squeezes the representation through a narrow point; widening
+before pooling costs more. Inception v3 runs a stride-2 convolution branch and a stride-2 pooling branch in parallel and
+concatenates them, which halves the grid and widens the channels in one cheap step.
+
+The same paper introduced <NoteLink to="label-smoothing">label smoothing</NoteLink> as a regulariser for the
+classifier.
+
+### Residual Inception and Xception
+
+Inception-v4 and Inception-ResNet add <NoteLink to="residual-network">residual shortcuts</NoteLink> around Inception
+modules; the shortcuts mainly speed up training <Cite id="szegedy2017inceptionv4" />. Xception pushes the
+reduction idea to its limit: one $1 \times 1$ convolution maps the channels, and then a separate $3 \times 3$ filter
+runs on every single channel. That is a <NoteLink to="depthwise-and-grouped-convolution">depthwise separable
+convolution</NoteLink>, which Chollet describes as an "extreme" Inception module <Cite id="chollet2017xception" />.
+Depthwise separable convolutions became the basis of
+<NoteLink to="efficient-convolutional-networks">efficient convolutional networks</NoteLink>.
+
+## Worked example
+
+Take GoogLeNet's module 3a <Cite id="szegedy2015" />. The input is $28 \times 28$ with $C = 192$ channels, so
+$HW = 784$. The widths are $c_1 = 64$, $r_3 = 96$, $c_3 = 128$, $r_5 = 16$, $c_5 = 32$ and $c_p = 32$. Count
+multiply-adds branch by branch, ignoring biases.
+
+1. **$1 \times 1$ branch.** $192 \cdot 64 = 12{,}288$ weights, applied at 784 pixels: $9.6$ million.
+2. **$3 \times 3$ branch.** The reduction has $192 \cdot 96 = 18{,}432$ weights. The $3 \times 3$ layer reads 96
+   channels: $9 \cdot 96 \cdot 128 = 110{,}592$ weights. Together $129{,}024$ weights and $101.2$ million
+   multiply-adds.
+3. **$5 \times 5$ branch.** The reduction has $192 \cdot 16 = 3{,}072$ weights and the $5 \times 5$ layer
+   $25 \cdot 16 \cdot 32 = 12{,}800$. Together $15{,}872$ weights and $12.4$ million multiply-adds.
+4. **Pool branch.** The $3 \times 3$ max pool has no weights; the projection has $192 \cdot 32 = 6{,}144$ weights and
+   $4.8$ million multiply-adds.
+
+The module has $163{,}328$ weights, costs $128.0$ million multiply-adds and outputs $64 + 128 + 32 + 32 = 256$
+channels at $28 \times 28$.
+
+Without the reductions, the $3 \times 3$ layer reads all 192 channels: $9 \cdot 192 \cdot 128 = 221{,}184$ weights and
+$173.4$ million multiply-adds. The $5 \times 5$ layer has $25 \cdot 192 \cdot 32 = 153{,}600$ weights and
+$120.4$ million multiply-adds. With the $1 \times 1$ branch the naive module costs $303.5$ million, 2.4 times as much,
+and outputs $64 + 128 + 32 + 192 = 416$ channels. The next module would then read 416 channels instead of 256, and the
+gap would widen at every module. Summed over the nine modules of GoogLeNet, each fed its real input, the modules cost
+$1.10$ billion multiply-adds with reductions and $3.88$ billion without.
+
+## Assumptions
+
+- Features at several scales are useful at the same depth, so parallel kernel sizes add information that one size
+  would miss.
+- The input channels are redundant enough that a $1 \times 1$ layer can compress them before a spatial filter without
+  losing what the filter needs. Szegedy et al. state this as the principle that spatial aggregation can be done over
+  lower-dimensional embeddings <Cite id="szegedy2016" />.
+- Branch widths are set by hand, module by module. The design has many such numbers and no rule for choosing them.
+
+## Pitfalls
+
+- **Multiply-adds are not latency.** Four narrow branches run as many small kernels in sequence or compete for the
+  device, so an Inception module is slower than its multiply-add count suggests. ShuffleNet V2 measures this: splitting
+  a layer into parallel fragments with the same total cost slows it on a <Gloss name="gpu" />
+  <Cite id="ma2018shufflenetv2" />.
+- **Reductions that are too narrow.** A $1 \times 1$ reduction to very few channels is a bottleneck in the information
+  sense too. Squeezing the representation early in the network hurts accuracy <Cite id="szegedy2016" />.
+- **Asymmetric pairs in early layers.** $1 \times n$ and $n \times 1$ pairs worked on medium grids and poorly on the
+  large grids of early layers <Cite id="szegedy2016" />.
+- **Inception in current practice.** New vision backbones are residual, depthwise or attention-based; Inception
+  modules are rarely chosen for new work. Inception-v3 survives as the fixed feature extractor of the
+  <NoteLink to="frechet-inception-distance">Fréchet Inception distance</NoteLink>, so its quirks shape that metric.

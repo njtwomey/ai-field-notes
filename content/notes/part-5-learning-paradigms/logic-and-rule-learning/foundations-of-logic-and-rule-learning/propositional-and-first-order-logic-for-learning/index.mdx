@@ -1,0 +1,214 @@
+---
+title: 'Propositional and first-order logic for learning'
+kind: concept
+summary: 'Propositional logic builds formulas from true-or-false atoms; first-order logic adds variables, predicates over objects and quantifiers. A hypothesis covers an example when, with background knowledge, it entails the example, so learning searches for formulas.'
+tags: [logic, worked-example]
+aliases: ['first-order logic', 'predicate logic', 'propositional logic', 'logical entailment']
+requires: []
+related: [horn-clauses-and-logic-programs, concept-learning-and-version-spaces, unification-and-resolution, inductive-logic-programming, fuzzy-logic-relaxations, statistical-relational-learning, decision-lists-and-rule-sets]
+references: [deraedt2008, lloyd1987, nienhuyscheng1997, cook1971, church1936]
+status: draft
+updated: 2026-10-17
+---
+
+import { EntailmentTable } from './EntailmentTable'
+import { CoverageByEntailment } from './CoverageByEntailment'
+
+<Definition>
+**Propositional logic** builds formulas from **atoms**, statements that are either true or false, with the connectives
+$\neg$ (not), $\land$ (and), $\lor$ (or) and $\rightarrow$ (implies). An **interpretation** assigns a truth value to
+each atom, and a **model** of a set of formulas is an interpretation that makes all of them true. **First-order logic**
+replaces atoms by predicates applied to terms that name objects, $\text{parent}(\text{ann}, X)$, and adds the
+quantifiers $\forall$ (for all) and $\exists$ (there exists). A set of formulas $T$ **entails** a formula $\varphi$,
+written $T \models \varphi$, when $\varphi$ is true in every model of $T$. In logic-based learning a hypothesis $H$
+**covers** an example $e$ when $B \cup H \models e$, where $B$ is the background knowledge.
+</Definition>
+
+## Intuition
+
+A rule learner writes its hypotheses as logical formulas. "A day is good for a picnic if the sky is sunny and the wind
+is weak" is a formula over two attribute tests. "$X$ is a daughter of $Y$ if $X$ is female and $Y$ is a parent of $X$"
+is a formula over two relations and two variables. A logical language fixes what a learner can say. Its semantics fixes
+when a hypothesis predicts an example. Both are needed before a learner can search for a hypothesis that predicts the
+training labels.
+
+Propositional logic suffices when every example is described by the same fixed set of features. Each feature test ("sky =
+sunny") is an atom, and a hypothesis is a Boolean function of the atoms. <NoteLink to="decision-tree">Decision
+trees</NoteLink>, <NoteLink to="decision-lists-and-rule-sets">decision lists</NoteLink> and conjunctive concepts are all
+propositional. First-order logic is needed when examples are structured: a molecule is a set of atoms joined by bonds, a
+family is a set of people joined by parent links. A first-order hypothesis can refer to "some atom bonded to this one"
+or "a parent of a parent" without fixing how many objects an example has.
+
+Entailment is the bridge from logic to prediction. A hypothesis does not label an example by evaluating a score. It
+labels an example positive when the example follows from the hypothesis together with what is already known. The
+learner's task is then to find a hypothesis from which the positive examples follow and the negative ones do not.
+
+## Details
+
+### Propositional logic
+
+Fix a finite set of atoms $\mathcal{A} = \set{p_1, \dots, p_n}$. Formulas are the atoms, the constants $\top$ (true)
+and $\bot$ (false), and $\neg \varphi$, $\varphi \land \psi$, $\varphi \lor \psi$, $\varphi \rightarrow \psi$ and
+$\varphi \leftrightarrow \psi$ for formulas $\varphi$ and $\psi$. An interpretation $I : \mathcal{A} \to \set{0, 1}$
+gives each atom a truth value, so there are $2^n$ interpretations. The truth value of a compound formula follows from
+the truth tables of the connectives. The only connective with a non-obvious table is the implication:
+$\varphi \rightarrow \psi$ is false only when $\varphi$ is true and $\psi$ is false, so it has the same truth table as
+$\neg \varphi \lor \psi$.
+
+$I$ is a model of a set of formulas $T$, written $I \models T$, when every formula of $T$ is true under $I$. $T$ is
+**satisfiable** when it has a model. $T \models \varphi$ when every model of $T$ is a model of $\varphi$. Entailment and
+satisfiability are two views of one question:
+
+$$
+T \models \varphi \quad \text{if and only if} \quad T \cup \set{\neg \varphi} \text{ is unsatisfiable}.
+$$
+
+The equivalence holds because a model of $T \cup \set{\neg \varphi}$ is exactly a model of $T$ in which $\varphi$ is
+false, a counter-model to the entailment. Entailment can be decided by listing all $2^n$ interpretations. Deciding
+satisfiability of a general propositional formula is NP-complete <Cite id="cook1971" />, so no known method avoids the
+exponential worst case.
+
+<EntailmentTable />
+
+### First-order logic
+
+First-order logic talks about objects. Its vocabulary has **constants** ($\text{ann}$, $\text{tom}$), **variables**
+($X$, $Y$), **function symbols** ($\text{father\_of}$) and **predicate symbols** ($\text{parent}$, $\text{female}$),
+each with an arity, its number of arguments.
+
+- A **term** is a constant, a variable, or a function symbol applied to terms: $\text{father\_of}(\text{ann})$.
+- An **atom** is a predicate symbol applied to terms: $\text{parent}(\text{ann}, X)$. It is **ground** when it has no
+  variables.
+- A **literal** is an atom (a positive literal) or a negated atom (a negative literal).
+- Formulas combine atoms with the connectives and with $\forall X\, \varphi$ and $\exists X\, \varphi$.
+
+An interpretation now has a **domain** $D$, a non-empty set of objects. It maps each constant to an object of $D$,
+each function symbol of arity $k$ to a function $D^k \to D$, and each predicate symbol of arity $k$ to a relation, a
+subset of $D^k$. $\forall X\, \varphi$ is true when $\varphi$ is true for every object assigned to $X$, and
+$\exists X\, \varphi$ when it is true for at least one. Entailment is defined as before, over all interpretations with
+all domains. Unlike the propositional case, first-order entailment is undecidable: no algorithm answers every question
+$T \models \varphi$ <Cite id="church1936" />. It is semi-decidable: a proof procedure finds a proof whenever the
+entailment holds, but may run forever when it does not.
+
+### Clauses
+
+Logic-based learners use a restricted form of formula. A **clause** is a disjunction of literals whose variables are
+all universally quantified:
+
+$$
+\forall X_1 \dots \forall X_m \; \paren{a_1 \lor \dots \lor a_k \lor \neg b_1 \lor \dots \lor \neg b_l}.
+$$
+
+Because $\neg b_1 \lor \dots \lor \neg b_l$ is equivalent to $\neg(b_1 \land \dots \land b_l)$, the clause reads as
+the rule "if $b_1, \dots, b_l$ all hold, then at least one of $a_1, \dots, a_k$ holds", written
+$a_1 \lor \dots \lor a_k \leftarrow b_1 \land \dots \land b_l$. Every first-order formula can be converted into a set of
+clauses that is satisfiable exactly when the formula is <Cite id="nienhuyscheng1997" />. A clause with at most one
+positive literal is a **Horn clause**. Horn clauses are the rules of logic programs, and most rule learners output
+them; <NoteLink to="horn-clauses-and-logic-programs">Horn clauses and logic programs</NoteLink> develops them.
+
+### Herbrand interpretations
+
+Considering all domains is unnecessary for clauses. The **Herbrand universe** of a set of clauses is the set of ground
+terms built from its constants and function symbols. The **Herbrand base** is the set of ground atoms built from its
+predicates and the Herbrand universe. A **Herbrand interpretation** takes the Herbrand universe as its domain, maps each
+ground term to itself, and is identified with the subset of the Herbrand base it makes true. A set of clauses has a
+model if and only if it has a Herbrand model <Cite id="lloyd1987" />. Interpretations then become sets of ground facts,
+which is how a database or a knowledge graph is stored. Without function symbols the Herbrand universe is just the set
+of constants, and a predicate of arity $k$ over $c$ constants contributes $c^k$ ground atoms to the Herbrand base.
+
+### Coverage
+
+Learning from logic needs a coverage relation: when does hypothesis $H$ predict example $e$? Two settings are standard
+<Cite id="deraedt2008" />.
+
+- **Learning from entailment.** Examples are ground facts, such as $\text{daughter}(\text{mary}, \text{ann})$. $H$
+  covers $e$ when $B \cup H \models e$. The goal is a hypothesis that is **complete**, covering every positive example,
+  and **consistent**, covering no negative example. <NoteLink to="inductive-logic-programming">Inductive logic
+  programming</NoteLink> and <NoteLink to="foil">FOIL</NoteLink> use this setting.
+- **Learning from interpretations.** Each example is a whole interpretation, a set of ground facts describing one object
+  (one molecule, one shopping basket). $H$ covers $e$ when $e$, completed with $B$, is a model of $H$. Each example can
+  be checked on its own, which makes this setting closer to ordinary attribute-value learning.
+
+Propositional concept learning is the special case of learning from entailment in which the background knowledge is the
+example's feature values and the hypothesis is a Boolean formula over feature tests.
+<NoteLink to="concept-learning-and-version-spaces">Concept learning and version spaces</NoteLink> studies the
+conjunctive case.
+
+## Worked example
+
+The worked example has two parts: propositional entailment by truth table, then first-order coverage of the family
+examples in the second figure.
+
+**Part 1: propositional entailment.** Take the atoms rain, sprinkler and wet, and the knowledge base
+
+$$
+T = \set{\text{rain} \rightarrow \text{wet},\; \text{sprinkler} \rightarrow \text{wet},\; \text{rain} \lor \text{sprinkler}}.
+$$
+
+1. There are $2^3 = 8$ interpretations. List them as (rain, sprinkler, wet) from (T, T, T) to (F, F, F).
+2. Strike out the interpretations that falsify a premise. rain $\rightarrow$ wet is false in (T, T, F) and (T, F, F).
+   sprinkler $\rightarrow$ wet is false in (T, T, F) and (F, T, F). rain $\lor$ sprinkler is false in (F, F, T) and
+   (F, F, F).
+3. Three interpretations remain, the models of $T$: (T, T, T), (T, F, T) and (F, T, T).
+4. wet is true in all three models, so $T \models \text{wet}$.
+5. rain is false in the model (F, T, T), so $T \not\models \text{rain}$. That model is a counter-model: the sprinkler
+   alone explains the wet grass.
+6. Remove the premise rain $\lor$ sprinkler. The models grow to five: the three above plus (F, F, T) and (F, F, F).
+   wet is false in (F, F, F), so wet is no longer entailed. A smaller knowledge base has more models and entails less.
+
+The figure reproduces these steps for any choice of premises and query.
+
+**Part 2: first-order coverage.** The background knowledge $B$ has seven ground facts:
+$\text{parent}(\text{ann}, \text{mary})$, $\text{parent}(\text{ann}, \text{tom})$, $\text{parent}(\text{tom},
+\text{eve})$, $\text{parent}(\text{tom}, \text{ian})$, $\text{female}(\text{ann})$, $\text{female}(\text{mary})$ and
+$\text{female}(\text{eve})$. The positive examples are $\text{daughter}(\text{mary}, \text{ann})$ and
+$\text{daughter}(\text{eve}, \text{tom})$. The negative examples are $\text{daughter}(\text{tom}, \text{ann})$,
+$\text{daughter}(\text{eve}, \text{ann})$ and $\text{daughter}(\text{ian}, \text{tom})$.
+
+1. The Herbrand universe is the five constants. The three predicates have arities 2, 1 and 2, so the Herbrand base has
+   $25 + 5 + 25 = 55$ ground atoms. $B$ makes 7 of them true.
+2. Take $H_1 = \text{daughter}(X, Y) \leftarrow \text{female}(X)$. For the example
+   $\text{daughter}(\text{eve}, \text{ann})$, the substitution $X \mapsto \text{eve}, Y \mapsto \text{ann}$ maps the
+   head onto the example and the body onto $\text{female}(\text{eve})$, a fact of $B$. So
+   $B \cup H_1 \models \text{daughter}(\text{eve}, \text{ann})$: $H_1$ covers a negative example. It also covers both
+   positives, so it is complete but not consistent.
+3. Take $H_2 = \text{daughter}(X, Y) \leftarrow \text{parent}(Y, X)$. It covers both positives and the negatives
+   $\text{daughter}(\text{tom}, \text{ann})$ and $\text{daughter}(\text{ian}, \text{tom})$, because Tom and Ian are
+   children of Ann and Tom.
+4. Take $H_3 = \text{daughter}(X, Y) \leftarrow \text{female}(X) \land \text{parent}(Y, X)$. For
+   $\text{daughter}(\text{mary}, \text{ann})$ the body becomes $\text{female}(\text{mary}) \land \text{parent}(\text{ann},
+   \text{mary})$, and both facts are in $B$. The same holds for $\text{daughter}(\text{eve}, \text{tom})$. Each negative
+   fails one condition: Tom and Ian are not female, and Ann is not Eve's parent. $H_3$ is complete and consistent.
+
+$H_3$ adds a condition to $H_1$ and to $H_2$, and it covers a subset of what each of them covers. That ordering of
+hypotheses by what they cover is the subject of <NoteLink to="generality-ordering-and-refinement">generality ordering
+and refinement</NoteLink>.
+
+<CoverageByEntailment />
+
+## Assumptions
+
+- **Closed-world reading of the background.** Coverage checks treat a fact missing from $B$ as false. Classical
+  entailment does not: $B$ does not entail $\neg\text{female}(\text{tom})$, it only fails to entail
+  $\text{female}(\text{tom})$. Rule learners use the closed-world assumption, as Prolog's negation as failure does
+  (<NoteLink to="horn-clauses-and-logic-programs">Horn clauses and logic programs</NoteLink>).
+- **Crisp truth values.** Every atom is true or false. Uncertain or graded facts need a probabilistic or fuzzy
+  extension, such as <NoteLink to="markov-logic-networks">Markov logic networks</NoteLink> or
+  <NoteLink to="fuzzy-logic-relaxations">fuzzy-logic relaxations</NoteLink>.
+- **A fixed vocabulary.** The predicates and constants are given. Inventing new predicates is a separate problem
+  (<NoteLink to="predicate-invention">predicate invention</NoteLink>).
+
+## Pitfalls
+
+- **Reading $\rightarrow$ as causation.** $\text{rain} \rightarrow \text{wet}$ is true whenever rain is false. It does
+  not say that rain causes wetness, and together with wet it entails nothing about rain (affirming the consequent).
+- **Confusing entailment with truth in one interpretation.** A hypothesis can be true in the intended interpretation and
+  still not be entailed by the background knowledge. Coverage is entailment, so a learner sees only what follows from
+  $B$, not what happens to be true of the world.
+- **Expecting first-order coverage to be cheap.** Testing whether a clause covers an example is NP-hard in general,
+  because it requires finding a substitution that maps the body onto the facts
+  (<NoteLink to="theta-subsumption">theta-subsumption</NoteLink>). With recursion or function symbols it may not
+  terminate, so practical systems bound the proof depth <Cite id="deraedt2008" />.
+- **Propositionalising too early.** Turning relational examples into a fixed feature table loses information when the
+  number of related objects varies. <NoteLink to="propositionalisation-and-relational-learning">Propositionalisation
+  </NoteLink> works when the relevant features can be listed in advance.

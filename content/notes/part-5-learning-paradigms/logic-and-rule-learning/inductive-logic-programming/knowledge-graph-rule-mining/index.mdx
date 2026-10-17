@@ -1,0 +1,194 @@
+---
+title: 'Knowledge-graph rule mining'
+kind: technique
+summary: 'Rule miners learn Horn rules such as livesIn(x, z) if marriedTo(x, y) and livesIn(y, z) from a knowledge graph. AMIE scores rules by support and by confidence under the partial completeness assumption, since missing facts are unknown; AnyBURL samples paths.'
+tags: [logic, inductive-logic-programming, knowledge-graphs, worked-example]
+aliases: ['AMIE', 'AnyBURL', 'rule mining on knowledge graphs', 'partial completeness assumption', 'PCA confidence', 'closed path rules']
+requires: [inductive-logic-programming, knowledge-graph-data]
+related: [knowledge-graph-embeddings, differentiable-inductive-logic-programming, foil, translational-and-rotational-knowledge-graph-models, bilinear-and-tensor-factorisation-knowledge-graph-models, mean-average-precision-and-mean-reciprocal-rank]
+references: [galarraga2013amie, galarraga2015amieplus, lajus2020amie3, meilicke2019anyburl, yang2017neurallp, sadeghian2019drum, quinlan1990]
+status: draft
+updated: 2026-10-17
+---
+
+import { RuleMiningExplorer } from './RuleMiningExplorer'
+
+<Definition>
+A knowledge graph is a set of facts $r(s, o)$, each a relation $r$ between a subject $s$ and an object $o$. A **closed
+rule** $B_1 \land \dots \land B_k \Rightarrow r(x, y)$ is a <NoteLink to="horn-clauses-and-logic-programs">Horn
+clause</NoteLink> over binary atoms in which every variable occurs at least twice and the atoms are connected through
+shared variables. For the set of pairs $(x, y)$ for which the body holds, the rule's **support** is the number of those
+pairs with $r(x, y)$ in the graph; its **head coverage** is the support divided by the number of $r$ facts; its
+**standard confidence** is the support divided by the number of body pairs; and its **PCA confidence** divides the
+support only by the body pairs whose subject $x$ has at least one $r$ fact, following the **partial completeness
+assumption** <Cite id="galarraga2013amie" />.
+</Definition>
+
+## Problem
+
+Knowledge graphs such as Wikidata hold hundreds of millions of facts, and they are incomplete in a specific way. A
+missing fact is unknown, not false (<NoteLink to="knowledge-graph-data">knowledge graph data</NoteLink>). The
+negatives of classical <NoteLink to="inductive-logic-programming">inductive logic programming</NoteLink> come from the
+closed-world assumption, which reads every missing fact as false. On a knowledge graph that penalises a correct rule
+for every fact it predicts that nobody has recorded yet, which is exactly the use a rule is wanted for.
+
+Rule mining on knowledge graphs answers two needs. It finds regularities, such as "spouses live in the same city", that
+explain the graph to a person. And it predicts missing links, as <NoteLink to="knowledge-graph-embeddings">knowledge
+graph embeddings</NoteLink> do, with each prediction justified by a rule. The miners keep the clause language of
+<Gloss name="ilp" /> but change three things: they restrict the rule shape so the search scales, they treat absence with
+a weaker assumption than the closed world, and they mine every rule above a threshold rather than one program, as
+association-rule mining does for itemsets.
+
+## Mechanism
+
+### The language
+
+Rules have binary atoms whose arguments are variables, at most a few atoms long. AMIE mines rules of at most three
+atoms, the head included, by default <Cite id="galarraga2013amie" />. A **path rule** of length 2 links $x$ to $y$
+through one intermediate variable $z$:
+
+$$
+s(x, z) \land t(z, y) \Rightarrow r(x, y),
+$$
+
+and its variants with $s(z, x)$ or $t(y, z)$ reverse an atom's direction. Length-1 rules $s(x, y) \Rightarrow r(x, y)$
+and $s(y, x) \Rightarrow r(x, y)$ capture sub-relations, synonyms and inverse or symmetric relations. Requiring closed
+rules means every rule predicts a specific pair $(x, y)$ rather than a dangling existential.
+
+### The partial completeness assumption
+
+Write $\text{body}(R)$ for the pairs $(x, y)$ for which the body of rule $R$ holds, and $K_r$ for the $r$ facts of the
+graph. The three measures are
+
+$$
+\text{supp}(R) = \abs{\text{body}(R) \cap K_r}, \qquad
+\text{conf}(R) = \frac{\text{supp}(R)}{\abs{\text{body}(R)}}, \qquad
+\text{pca}(R) = \frac{\text{supp}(R)}{\abs{\set{(x, y) \in \text{body}(R) : \exists y'\, r(x, y') \in K_r}}}.
+$$
+
+Standard confidence treats every body pair without a head fact as a counter-example: the closed world. The partial
+completeness assumption says that if the graph knows at least one $r$ fact about a subject $x$, it knows all of them.
+A prediction $r(x, y)$ for such an $x$ is then a genuine counter-example. A prediction for a subject with no $r$ fact is
+unknown and left out of the denominator <Cite id="galarraga2013amie" />. The assumption suits relations with few
+objects per subject, such as birthplace or citizenship, and fails for relations such as "acted in" whose coverage per
+subject is patchy.
+
+### Search and pruning
+
+AMIE grows rules from a head atom $r(x, y)$ with three <NoteLink to="generality-ordering-and-refinement">refinement
+operators</NoteLink> <Cite id="galarraga2013amie" />:
+
+- **Dangling atom.** Add an atom with one existing and one new variable, such as $s(x, z)$.
+- **Instantiated atom.** Add an atom with one existing variable and a constant.
+- **Closing atom.** Add an atom whose two variables already occur, which can close the rule.
+
+Support never increases when an atom is added, because the body can only hold for fewer pairs. Head coverage is
+support divided by a constant, so it is anti-monotone too, and AMIE prunes every rule whose head coverage falls below a
+threshold together with all its refinements. AMIE's defaults are a head coverage of 0.01, a PCA confidence of 0.1 and
+three atoms. The supports are computed by joins over an in-memory index of the facts; AMIE+ and AMIE 3 add bounds that
+skip confidence computations and parallel, exact counting <Cite id="galarraga2015amieplus" />
+<Cite id="lajus2020amie3" />.
+
+<Derivation title="Why support is anti-monotone">
+Let $R'$ be $R$ with one more body atom $A$. A pair $(x, y)$ is in $\text{body}(R')$ when some binding of the other
+variables makes every atom of $R$'s body and $A$ true. The same binding makes every atom of $R$'s body true, so
+$(x, y) \in \text{body}(R)$. Hence $\text{body}(R') \subseteq \text{body}(R)$, and intersecting both with $K_r$ gives
+$\text{supp}(R') \le \text{supp}(R)$. A rule below the support or head coverage threshold therefore has no refinement
+above it, and its whole subtree can be skipped, as in <NoteLink to="pattern-mining">frequent itemset mining</NoteLink>.
+</Derivation>
+
+### Sampling instead of enumerating: AnyBURL
+
+AnyBURL works bottom-up <Cite id="meilicke2019anyburl" />. It samples a random path in the graph that starts with a
+fact $r(a, b)$, such as $r(a, b), s(a, c), t(c, b)$, and generalises the path into the rules it instantiates, such as
+$s(x, z) \land t(z, y) \Rightarrow r(x, y)$, plus acyclic rules with constants. Each rule's confidence is estimated on a
+sample of its body pairs. Longer runs sample more paths and find more rules, so it is an anytime algorithm and can stop
+at any time budget.
+
+### Predicting links
+
+To answer a query $r(x, ?)$, every rule with head $r$ proposes the objects $y$ for which its body holds and $r(x, y)$ is
+missing. AnyBURL ranks candidates by **maximum aggregation**: by the confidence of the best rule that proposes them,
+with ties broken by the next-best rule <Cite id="meilicke2019anyburl" />. The ranking is evaluated like an
+<NoteLink to="text-embedding-models">embedding model</NoteLink>'s, by filtered mean reciprocal rank and hits at $k$
+(<NoteLink to="mean-average-precision-and-mean-reciprocal-rank">mean average precision and mean reciprocal
+rank</NoteLink>).
+
+### Differentiable rule learners
+
+Neural LP writes a path rule as a product of relation adjacency matrices, so that $M_s M_t$ counts the paths from $x$ to
+$y$ through $s$ then $t$. It learns soft attention weights over which relations to multiply, end to end by
+<NoteLink to="gradient-descent">gradient descent</NoteLink>, and reads rules off the weights
+<Cite id="yang2017neurallp" />. DRUM keeps the matrix view and adds low-rank, recurrent parameterisations that represent
+several rules for one head <Cite id="sadeghian2019drum" />. Both are forms of
+<NoteLink to="differentiable-inductive-logic-programming">differentiable inductive logic programming</NoteLink>.
+
+## Worked example
+
+The figure's graph has 14 entities and 26 facts over five relations: marriedTo, hasChild, livesIn, locatedIn and
+citizenOf. It is incomplete on purpose: Fay has no home and no citizenship, Gus has no citizenship, and only Eli's side
+of his marriage to Fay is recorded. Dia is a French citizen living in Rome, and Hal lives in Milan, away from his
+parents in Rome.
+
+**The citizenship rule** $\text{livesIn}(x, z) \land \text{locatedIn}(z, y) \Rightarrow \text{citizenOf}(x, y)$:
+
+1. **Body pairs.** Seven people have a home, and each home city lies in one country: (ann, france), (ben, france),
+   (cal, italy), (dia, italy), (eli, france), (gus, france) and (hal, italy).
+2. **Support.** Five pairs are citizenOf facts: Ann, Ben, Cal, Eli and Hal. $\text{supp} = 5$, and the graph has 6
+   citizenOf facts, so the head coverage is $5 / 6 = 0.83$.
+3. **Standard confidence.** $5 / 7 = 0.71$. The two other pairs, (dia, italy) and (gus, france), count as errors.
+4. **PCA confidence.** Gus has no citizenOf fact at all, so (gus, france) is unknown and leaves the denominator. Dia
+   has one, France, so (dia, italy) is a counter-example. $\text{pca} = 5 / 6 = 0.83$.
+5. **Predictions.** $\text{citizenOf}(\text{gus}, \text{france})$, plausible, and $\text{citizenOf}(\text{dia},
+   \text{italy})$, which the graph contradicts under the partial completeness assumption.
+
+**The symmetry rule** $\text{marriedTo}(y, x) \Rightarrow \text{marriedTo}(x, y)$ has five body pairs, the reverses of
+the five marriage facts. Four are facts, so $\text{conf} = 4 / 5 = 0.80$. The fifth, (fay, eli), concerns Fay, who has
+no marriedTo fact, so $\text{pca} = 4 / 4 = 1.00$ and the rule predicts $\text{marriedTo}(\text{fay}, \text{eli})$ with
+the highest score.
+
+**A spurious rule.** $\text{livesIn}(x, z) \land \text{livesIn}(y, z) \Rightarrow \text{marriedTo}(x, y)$, "people who
+live in the same city are married", has support 4 of 5 and PCA confidence $4 / 6 = 0.67$. Its counter-examples are
+Ann and Ben's son Gus, who lives with them: the rule predicts that Ann is married to Gus. Small graphs make such
+coincidences frequent, which is why thresholds on support and confidence, and type constraints on the variables,
+matter.
+
+<RuleMiningExplorer />
+
+## Cost
+
+- **Rules.** With $\abs{\mathcal{R}}$ relations there are $2\abs{\mathcal{R}}$ length-1 bodies and
+  $4\abs{\mathcal{R}}^2$ length-2 path bodies per head relation, so $O(\abs{\mathcal{R}}^3)$ path rules of three
+  atoms. Each extra atom multiplies the count by about $\abs{\mathcal{R}}$ times the number of argument patterns.
+- **Support counting.** Each candidate needs a join of the body's relations. A relation with hub entities, such as a
+  country with millions of residents, makes the join large; the confidence denominator is the expensive part, and the
+  AMIE+ bounds avoid computing it for rules that cannot pass <Cite id="galarraga2015amieplus" />.
+- **Sampling.** AnyBURL's cost is set by its time budget rather than by the size of the rule space, at the price of
+  missing rare rules and estimating confidence from samples.
+
+## Trade-offs
+
+- **Rules against embeddings.** A rule states its reason and applies to entities never seen in training if their
+  neighbourhood matches. Embeddings capture graded similarity that no short rule expresses. AnyBURL's rule-based
+  predictions are competitive with embedding models on standard link-prediction benchmarks
+  <Cite id="meilicke2019anyburl" />.
+- **Exhaustive against sampled.** AMIE finds every rule above the thresholds, which suits explaining a graph. AnyBURL
+  trades completeness for speed and suits link prediction under a time limit.
+- **Standard against PCA confidence.** PCA confidence is the better estimate of precision on incomplete graphs for
+  functional relations. On relations that are not functional, it overestimates, because one recorded object stops
+  counting as evidence that the others are absent.
+- **Relation to FOIL.** The miners use the same clause language as <NoteLink to="foil">FOIL</NoteLink>, but they mine
+  all rules above thresholds rather than a covering set, and they never read missing facts as negatives
+  <Cite id="quinlan1990" />.
+
+## Pitfalls
+
+- **Inverse relations leak.** A graph that stores both hasChild and its inverse yields length-1 rules with confidence 1
+  that predict test facts from their own inverses, inflating link-prediction scores
+  (<NoteLink to="knowledge-graph-data">knowledge graph data</NoteLink>).
+- **Direction of the assumption.** The partial completeness assumption is applied to the subject. For a relation that is
+  more complete from the object side, such as hasChild read from the child, the measure must use the object instead.
+- **Redundant rules.** Variants that differ only in an atom's direction, such as marriedTo$(x, z)$ and marriedTo$(z, x)$
+  in the spouse-home rule, appear as separate rules with near-identical scores and inflate rule counts.
+- **Coincidences on small or skewed graphs.** A rule with support 2 can reach confidence 1 by chance. A support
+  threshold of a few facts per rule, and evaluation on held-out facts, separate regularities from coincidences.

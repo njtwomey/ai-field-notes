@@ -1,0 +1,201 @@
+---
+title: 'Receptive field and dilated convolution'
+kind: concept
+summary: 'The receptive field of a unit is the set of input pixels that can change it. Each layer widens it by $(k-1)$ times the product of earlier strides; dilation $d$ spreads a $k$-tap kernel over $d(k-1)+1$ pixels with no extra weights. The effective field is smaller and roughly Gaussian.'
+tags: [convolutional-networks, deep-learning, worked-example]
+aliases: ['receptive field', 'effective receptive field', 'dilated convolution', 'atrous convolution', 'dilation rate']
+requires: [convolutional-layer, pooling-and-strides]
+related: [wavenet-and-causal-convolution, segmentation-decoders, temporal-convolutional-networks, semantic-segmentation, modern-convolutional-networks, convolution-versus-attention-in-vision]
+references: [araujo2019, luo2016, yu2016, chen2018deeplab, chen2017deeplab, wang2018hdc, ding2022replknet, simonyan2015, dumoulin2016]
+status: draft
+updated: 2026-10-17
+---
+
+import { DilationLadder } from './DilationLadder'
+
+<Definition>
+The **receptive field** of a unit in a convolutional network is the set of input positions whose values can change the
+unit. Along one axis it is an interval of $r$ positions. A **dilated convolution** with dilation $d$ places its $k$ taps
+$d$ positions apart: in one dimension, $y_i = \sum_{u=0}^{k-1} w_u\, x_{si - p + du}$ for stride $s$ and padding $p$.
+Its kernel spans $d(k - 1) + 1$ input positions and keeps $k$ weights. The **effective receptive field** is the
+gradient of the unit with respect to each input position, which shows how strongly each position in the receptive field
+actually acts on it.
+</Definition>
+
+## Intuition
+
+A unit can only respond to what lies inside its receptive field. A classifier that must recognise a dog needs units
+whose fields cover the dog. A segmentation network that labels a pixel as road needs a field wide enough to see the
+surrounding scene. A <NoteLink to="convolutional-layer">convolutional layer</NoteLink> with a $3 \times 3$ kernel sees
+three pixels per side, so networks grow the field by stacking layers. There are three ways to make the growth fast.
+
+- **Depth.** Each stride-1 layer adds $k - 1$ positions. Growth is linear in the number of layers.
+- **Downsampling.** A stride or a pooling layer spaces the next layer's units further apart in the input, so every
+  later layer adds more input positions; see <NoteLink to="pooling-and-strides">pooling and strides</NoteLink>. Growth
+  is geometric, and the feature map loses resolution.
+- **Dilation.** A dilated kernel skips $d - 1$ positions between taps, so one layer reaches further without more
+  weights. With dilation doubling per layer the growth is geometric and the feature map keeps full resolution.
+
+The theoretical field says which inputs can matter. It does not say how much. An input at the edge of the field reaches
+the unit through one chain of connections; an input at the centre reaches it through many. The effective field is
+therefore concentrated in the middle of the theoretical one.
+
+<DilationLadder />
+
+## Details
+
+### The recursion
+
+Work along one axis, with input positions indexed by integers. Layer $l$ has kernel size $k_l$, stride $s_l$, dilation
+$d_l$ and padding $p_l$. Its dilated extent is $e_l = d_l(k_l - 1) + 1$. Track three numbers per layer:
+
+- the **jump** $j_l$, the distance in input positions between two adjacent units of layer $l$;
+- the **size** $r_l$, the number of input positions one unit can see;
+- the **start** $c_l$, the input coordinate of the centre of the first unit's field.
+
+The input has $j_0 = 1$, $r_0 = 1$ and $c_0 = 0$. Adjacent units of layer $l$ are $s_l$ units of layer $l - 1$ apart,
+and those are $j_{l-1}$ positions apart, so
+
+$$
+j_l = j_{l-1}\, s_l = \prod_{m=1}^{l} s_m.
+$$
+
+A unit of layer $l$ reads $k_l$ units of layer $l - 1$ spread over $e_l$ consecutive units. Their centres span
+$(e_l - 1)\, j_{l-1}$ input positions, and each of them sees $r_{l-1}$ positions around its own centre. The union has
+
+$$
+r_l = r_{l-1} + (e_l - 1)\, j_{l-1}, \qquad r_L = 1 + \sum_{l=1}^{L} (e_l - 1) \prod_{m=1}^{l-1} s_m.
+$$
+
+The first unit of layer $l$ reads its window starting $p_l$ units of layer $l - 1$ before the first one, so its centre
+sits $(e_l - 1)/2 - p_l$ units of layer $l - 1$ after it, $c_l = c_{l-1} + \paren{(e_l - 1)/2 - p_l}\, j_{l-1}$
+<Cite id="araujo2019" />. With same padding, $p_l = (e_l - 1)/2$, the centres line up: unit $i$ of every layer is
+centred on input position $i\, j_l$. Pooling layers enter the recursion as kernels with $d = 1$. In two dimensions the
+recursion runs separately along each axis.
+
+The closed form shows where the field comes from. Each layer adds its extent minus one, scaled by the product of all
+strides before it. A layer placed after three stride-2 stages counts eight times as much as the same layer at the
+input.
+
+### Dilated convolution
+
+Dilation inserts $d - 1$ gaps between the taps of a kernel. In two dimensions a $3 \times 3$ kernel with $d = 2$
+reads a $5 \times 5$ region at its nine corners, edge midpoints and centre. The layer has $k^2 C C'$ weights and costs
+$k^2 C C'$ multiply-accumulates per output position, the same as the undilated layer. The output size follows the usual
+formula with $k$ replaced by $e = d(k - 1) + 1$ <Cite id="dumoulin2016" />. Dilation is also called atrous convolution,
+from the French à trous, "with holes", the name of a wavelet algorithm that upsamples its filters the same way.
+
+Yu and Koltun stacked $3 \times 3$ layers with dilations $1, 2, 4, 8, \dots$ as a context module for
+<NoteLink to="semantic-segmentation">semantic segmentation</NoteLink> <Cite id="yu2016" />. With dilation
+$d_l = 2^{l-1}$ and stride 1 the recursion gives $r_L = 1 + \sum_{l=1}^{L} 2 \cdot 2^{l-1} = 2^{L+1} - 1$. The field
+grows exponentially with depth and the number of weights grows linearly.
+<NoteLink to="wavenet-and-causal-convolution">WaveNet</NoteLink> uses the same schedule with causal kernels on audio.
+
+### Dilation against stride
+
+A stride and a dilation can produce the same receptive field. They differ in what they do to the feature map.
+
+- **Stride** spaces the outputs. Four stride-2 layers give a field of 31 positions per side, and the map shrinks by
+  $2^4 = 16$ per side. Every later layer is $256$ times cheaper, and spatial detail is lost.
+- **Dilation** spaces the taps. Four layers with dilations $1, 2, 4, 8$ also give 31 positions per side, and the map
+  keeps its size. Every layer runs at full resolution and costs as much as the first.
+
+Dense prediction needs both context and resolution. DeepLab removes the strides of a classification backbone's last
+one or two stages and dilates the later layers by the factor the strides would have contributed, so the receptive field
+is unchanged and the output stride falls from 32 to 16 or 8 <Cite id="chen2018deeplab" />. Its atrous spatial pyramid
+runs several dilation rates in parallel; see <NoteLink to="segmentation-decoders">segmentation decoders</NoteLink>.
+
+### Effective receptive field
+
+Luo et al. measured how much each input position affects a unit by the gradient $g_q = \partial y / \partial x_q$
+<Cite id="luo2016" />. For a stack of linear layers the gradient does not depend on the input. Take $L$ stride-1
+layers whose $k$ taps all have weight $1/k$. Input position $q$ reaches the output through every chain of taps whose
+offsets $a_1 + \dots + a_L$ add up to the distance from $q$ to the centre, each chain with weight $k^{-L}$. The
+gradient is therefore the distribution of a sum of $L$ independent offsets, each uniform on
+$\set{-(k-1)/2, \dots, (k-1)/2}$.
+
+One offset has variance $(k^2 - 1)/12$, so the sum has standard deviation
+
+$$
+\sigma_L = \sqrt{\frac{L(k^2 - 1)}{12}}.
+$$
+
+By the <NoteLink to="central-limit-theorem">central limit theorem</NoteLink> the gradient approaches a Gaussian of
+that width. The theoretical field grows as $L(k - 1) + 1$ and the effective one as $\sqrt{L}$, so the fraction of the
+field that carries most of the influence shrinks as $1/\sqrt{L}$. Luo et al. found the same Gaussian shape with random
+weights and nonlinearities, and found that training, subsampling and dilation enlarge it <Cite id="luo2016" />.
+
+Dilation changes the picture because its offsets at layer $l$ are multiples of $d_l$. With dilations $1, 2, 4, 8$ the
+offset sum is a number written in base 2 with digits in $\set{-1, 0, 1}$, and the gradient spreads across the whole
+field instead of piling up in the centre.
+
+### Practice
+
+Classification backbones such as ResNet-50 reach theoretical fields wider than their input images by their last stage,
+so the theoretical field rarely limits them. The effective field does. Modern convolutional networks widen it with
+larger depthwise kernels: <NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> uses $7 \times 7$, and
+RepLKNet $31 \times 31$, which gave much larger effective fields than stacks of $3 \times 3$ layers
+<Cite id="ding2022replknet" />. Dilation is used where resolution must be kept: segmentation decoders, audio and
+time-series models. <Gloss name="vit">Vision transformers</Gloss> have a global field from the first layer; see
+<NoteLink to="convolution-versus-attention-in-vision">convolution versus attention in vision</NoteLink>.
+
+## Worked example
+
+**VGG-16.** <NoteLink to="classic-convolutional-network-architectures">VGG-16</NoteLink> has five stages of
+$3 \times 3$ stride-1 convolutions (2, 2, 3, 3 and 3 layers), each followed by a $2 \times 2$ stride-2 max pool
+<Cite id="simonyan2015" />. Each convolution adds $(3 - 1)\, j = 2j$, and each pool adds $(2 - 1)\, j = j$ and doubles
+the jump.
+
+1. Stage 1, jump 1: two convolutions give $r = 1 + 2 + 2 = 5$. The pool adds 1, so $r = 6$ and $j = 2$.
+2. Stage 2, jump 2: two convolutions add $4$ each, $r = 14$. The pool adds 2: $r = 16$, $j = 4$.
+3. Stage 3, jump 4: three convolutions add $8$ each, $r = 40$. The pool adds 4: $r = 44$, $j = 8$.
+4. Stage 4, jump 8: three convolutions add $16$ each, $r = 92$. The pool adds 8: $r = 100$, $j = 16$.
+5. Stage 5, jump 16: three convolutions add $32$ each, $r = 196$. The pool adds 16: $r = 212$, $j = 32$.
+
+The last convolution sees a $196 \times 196$ region of the $224 \times 224$ input. Thirteen stride-1 convolutions
+without pooling would see $1 + 13 \cdot 2 = 27$ pixels per side.
+
+**Dilation against stride.** Take four layers of 3-tap kernels in one dimension.
+
+- Plain: $e_l = 3$ and $j = 1$ throughout, so $r = 1 + 4 \cdot 2 = 9$.
+- Stride 2 in every layer: the jumps before the layers are $1, 2, 4, 8$, so $r = 1 + 2(1 + 2 + 4 + 8) = 31$. The output
+  has one unit per 16 inputs.
+- Dilations $1, 2, 4, 8$: the extents are $3, 5, 9, 17$ and the jump stays 1, so $r = 1 + 2 + 4 + 8 + 16 = 31$. The
+  output has one unit per input.
+
+Both use 12 weights per channel pair.
+
+**Effective field.** With uniform weights $1/3$, the plain stack's gradient is the coefficient list of
+$(1 + z + z^2)^4 / 81$:
+
+$$
+g = \tfrac{1}{81}\,(1,\ 4,\ 10,\ 16,\ 19,\ 16,\ 10,\ 4,\ 1).
+$$
+
+The centre position carries $19/81 = 23\%$ of the total and the two edge positions together carry $2/81 = 2.5\%$. The
+standard deviation is $\sqrt{4 \cdot 8/12} = 1.63$ positions, so $\pm 2\sigma$ covers 6.5 of the 9 positions. The
+dilated stack with rates $1, 2, 4, 8$ has gradient coefficients between $1/81$ and $5/81$ over all 31 positions and a
+standard deviation of $7.5$, so $\pm 2\sigma$ covers 30 of them.
+
+## Assumptions
+
+- The network is a chain. For branched networks, such as <NoteLink to="inception-networks">Inception modules</NoteLink>
+  or <NoteLink to="residual-network">residual blocks</NoteLink>, the receptive field is the largest over all paths from
+  input to unit <Cite id="araujo2019" />.
+- Padded positions count as positions. Units near the border have part of their field outside the image, filled with
+  zeros.
+- The effective-field argument assumes independent, identically distributed offsets per layer. Trained weights are
+  neither uniform nor independent, and the measured field of a trained network is wider and less regular.
+
+## Pitfalls
+
+- **Gridding.** Stacking layers with the same dilation $d > 1$ reaches only every $d$-th input position: with dilation 2
+  in every layer, half of the field is never read. Choosing rates without a common factor, such as $1, 2, 3$, fills the
+  gaps <Cite id="wang2018hdc" />.
+- **Rates close to the map size.** A dilated tap that falls outside the feature map reads padding. When the rate
+  approaches the size of the map, a $3 \times 3$ kernel has only its centre tap inside at most positions and acts as a
+  $1 \times 1$ layer <Cite id="chen2017deeplab" />.
+- **Theoretical versus effective field.** A theoretical field larger than the object does not mean the unit uses the
+  whole object; the effective field may be a small fraction of it.
+- **Misaligned centres.** Even kernel sizes and same padding with a stride put the field's centre half a position away
+  from the unit's nominal position. The start recursion gives the exact offset.

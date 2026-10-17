@@ -1,0 +1,261 @@
+---
+title: 'Transductive support vector machine'
+kind: technique
+summary: 'The transductive SVM chooses labels for the unlabelled points and a hyperplane together, maximising the margin over all points. Its loss on unlabelled points, the symmetric hinge, is non-convex, so solvers use label switching, continuation or the concave-convex procedure.'
+tags: [semi-supervised, kernel-methods, max-margin, worked-example]
+aliases: ['TSVM', 'S3VM', 'semi-supervised support vector machine', 'transductive SVM', 'symmetric hinge loss']
+requires: [support-vector-machine, low-density-separation]
+related:
+  [
+    entropy-minimisation,
+    transductive-and-inductive-learning,
+    semi-supervised-assumptions,
+    kernel-support-vector-machine,
+    manifold-regularisation,
+    sequential-minimal-optimisation,
+  ]
+references:
+  [
+    vapnik1998,
+    joachims1999transductive,
+    bennett1998s3vm,
+    chapelle2005lds,
+    collobert2006tsvm,
+    yuille2003cccp,
+    sindhwani2006annealing,
+    chapelle2008s3vm,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { TransductiveMargin } from './TransductiveMargin'
+
+<Definition>
+Given $\ell$ labelled pairs $(\xvec_i, y_i)$ with $y_i \in \set{-1, +1}$ and $u$ unlabelled inputs $\xvec_j$, the
+**transductive support vector machine** (TSVM) solves
+
+$$
+\min_{\wvec,\, b,\, y_{\ell+1}, \dots, y_{\ell+u}}\ \frac12\norm{\wvec}^2 + C\sum_{i=1}^{\ell}\xi_i
++ C^*\sum_{j=\ell+1}^{\ell+u}\xi_j
+\quad \text{subject to} \quad y_n(\wvec^\top\xvec_n + b) \ge 1 - \xi_n,\ \ \xi_n \ge 0,\ \ y_j \in \set{-1, +1}
+$$
+
+for every point $n$, labelled or not. The labels of the unlabelled points are variables chosen with the hyperplane, and
+$C^* \ge 0$ prices margin violations by unlabelled points as $C$ does for labelled ones
+<Cite id="vapnik1998" /> <Cite id="joachims1999transductive" />. The name semi-supervised support vector machine (S3VM)
+refers to the same problem <Cite id="bennett1998s3vm" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="support-vector-machine">support vector machine</NoteLink> trained on a few labels places its boundary
+midway between the nearest labelled points of the two classes. Unlabelled points may lie on or near that boundary, and
+the SVM has no way to notice. Under the <NoteLink to="low-density-separation">low-density separation</NoteLink>
+assumption the boundary should instead pass where the inputs are sparse.
+
+The TSVM extends the margin to the unlabelled points: the band $\abs{\wvec^\top\xvec + b} < 1$ should contain as few of
+them as possible. A boundary through a dense region has many unlabelled points inside its margin and is penalised; a
+boundary through a gap has few. Vapnik introduced the problem as transductive inference, labelling a given test set,
+which he argued is easier than learning a rule for every input <Cite id="vapnik1998" />. Chapelle and Zien read the same
+objective differently: on labelled points the margin regularises, and on unlabelled points it implements the
+<NoteLink to="semi-supervised-assumptions">cluster assumption</NoteLink> <Cite id="chapelle2005lds" />. Despite the
+name, the solution is a hyperplane that labels any new input (see
+<NoteLink to="transductive-and-inductive-learning">transductive and inductive learning</NoteLink>).
+
+The TSVM keeps the SVM's objective and kernel machinery and adds one term. The TSVM's probabilistic counterpart is
+<NoteLink to="entropy-minimisation">entropy minimisation</NoteLink>, which penalises uncertain predictions on unlabelled
+points where the TSVM penalises small margins.
+
+## Mechanism
+
+### From label choices to the symmetric hinge
+
+Fix $\wvec$ and $b$, and write $f(\xvec) = \wvec^\top\xvec + b$. The best label for an unlabelled point is the one that
+makes its slack smallest. With label $y_j$ the slack is $\max(0, 1 - y_j f(\xvec_j))$, which is smaller for
+$y_j = \sgn f(\xvec_j)$, giving $\max(0, 1 - \abs{f(\xvec_j)})$. Substituting the best labels removes them from the
+problem:
+
+$$
+\min_{\wvec, b}\ \frac12\norm{\wvec}^2 + C\sum_{i=1}^{\ell}\max\paren{0,\ 1 - y_i f(\xvec_i)}
++ C^*\sum_{j=\ell+1}^{\ell+u}\max\paren{0,\ 1 - \abs{f(\xvec_j)}}.
+$$
+
+The last term is the **symmetric hinge**. The symmetric hinge is 1 for a point on the boundary, falls linearly to 0 at
+the margin $\abs{f} = 1$, and is 0 beyond. The loss does not depend on which side a point is on, only that the point is
+outside the margin. A combinatorial search over $2^u$ labellings has become a continuous problem in $\wvec$ and $b$.
+
+### Why the problem is non-convex
+
+The symmetric hinge is not convex: its values at $f = -0.5$ and $f = 0.5$ are both $0.5$, but its value at the midpoint
+$f = 0$ is 1, above the chord. A second view shows where the local minima come from. For each fixed labelling of the
+unlabelled points, the objective is a standard SVM objective, convex in $(\wvec, b)$. The TSVM objective is the minimum
+of these convex functions over all labellings. A minimum of convex functions has a local minimum in the basin of each
+labelling that wins somewhere, and in practice that means roughly one local minimum per way of threading the boundary
+through the gaps of the data. Chapelle and Zien stress that the objective is sound but that different ways of
+minimising it reach very different solutions, so a poor TSVM result often reflects the optimiser rather than the
+objective <Cite id="chapelle2005lds" />.
+
+### The balancing constraint
+
+With few labels, assigning every unlabelled point to one class and placing the boundary far from all of them can give a
+large margin and a small objective. A **balancing constraint** rules this out. Joachims fixes the fraction of
+unlabelled points assigned to each class to the fraction in the labelled set <Cite id="joachims1999transductive" />.
+Chapelle and Zien relax it to the mean output
+
+$$
+\frac{1}{u}\sum_{j=\ell+1}^{\ell+u} f(\xvec_j) = \frac{1}{\ell}\sum_{i=1}^{\ell} y_i ,
+$$
+
+which is linear in $(\wvec, b)$ <Cite id="chapelle2005lds" />. Writing $\bar\xvec_U$ for the mean unlabelled input, the
+constraint fixes $b = \frac{1}{\ell}\sum_i y_i - \wvec^\top\bar\xvec_U$, so $b$ can be eliminated and the problem solved
+over $\wvec$ alone. The figure's solver does exactly this.
+
+### Solvers
+
+- **Integer programming.** Bennett and Demiriz wrote the linear TSVM with a 1-norm penalty on $\wvec$ as a mixed-integer
+  programme, one binary variable per unlabelled point, and solved it exactly <Cite id="bennett1998s3vm" />. The cost
+  grows exponentially with $u$ in the worst case.
+- **Label switching (SVMlight).** Joachims trains an SVM on the labels, labels the unlabelled points by it subject to
+  the class fraction, and then improves the labelling locally: whenever an unlabelled positive and an unlabelled
+  negative point have slacks with $\xi_i + \xi_j > 2$, their labels are swapped and the SVM is retrained. The swap
+  keeps the class fraction and lowers the objective. An outer loop raises $C^*$ from a small value, $10^{-5}$, by a
+  factor 1.5 per round until it reaches its final value <Cite id="joachims1999transductive" />
+  <Cite id="collobert2006tsvm" />.
+- **<NoteLink to="gradient-descent">Gradient descent</NoteLink> with continuation (∇TSVM).** Chapelle and Zien replace
+  the labelled hinge by its square $\max(0, 1 - t)^2$ and the symmetric hinge by $\exp(-3t^2)$, which are
+  differentiable, and minimise the result by gradient descent under the balancing constraint. They start with
+  $C^* = 2^{-10}C$ and double it ten times, each stage starting from the previous solution
+  <Cite id="chapelle2005lds" />. A small $C^*$ gives an objective close to the convex supervised one, and doubling
+  deforms it gradually towards the non-convex target.
+- **Concave-convex procedure (CCCP).** Collobert, Sinz, Weston and Bottou clip the symmetric hinge into a ramp,
+  $R_s(t) = \min(1 - s, \max(0, 1 - t))$ with $-1 < s \le 0$, which is the convex hinge minus a convex function:
+  $R_s(t) = \max(0, 1 - t) - \max(0, s - t)$. Each unlabelled point enters twice, once with each label. The
+  <Gloss name="cccp" /> replaces the concave part by its tangent at the current solution and solves the resulting convex
+  SVM; the objective never increases, and the labels that the tangent depends on change finitely often, so the
+  procedure stops <Cite id="yuille2003cccp" /> <Cite id="collobert2006tsvm" />. Around five convex SVMs usually suffice,
+  each solved in the dual by standard SVM software <Cite id="collobert2006tsvm" />.
+- **Deterministic annealing.** Sindhwani, Keerthi and Chapelle relax each unknown label to a probability, add an
+  entropy term at a temperature $T$, and lower $T$ gradually, tracking the minimiser from an easy convex problem to
+  the hard one <Cite id="sindhwani2006annealing" />. The relaxed labels make this the TSVM's closest link to
+  <NoteLink to="entropy-minimisation">entropy minimisation</NoteLink>.
+
+Chapelle, Sindhwani and Keerthi review these and other optimisation strategies for the same objective
+<Cite id="chapelle2008s3vm" />.
+
+<Derivation title="Why the label-switching rule lowers the objective">
+Take an unlabelled point with output $f$ and current label $y$, and let $m = yf$. Its slack is
+$\xi = \max(0, 1 - m)$. After switching the label, its slack is $\xi' = \max(0, 1 + m)$. Whenever $\xi > 0$, that is
+$m < 1$, the two satisfy $\xi' = \max(0, 2 - \xi)$: for $-1 \le m < 1$ both slacks are positive and sum to 2, and for
+$m < -1$ the new slack is 0.
+
+Now take a positive and a negative unlabelled point with slacks $\xi_i, \xi_j > 0$ and $\xi_i + \xi_j > 2$. Switching
+both keeps the number of points in each class. If both slacks are at most 2, the new total is
+$(2 - \xi_i) + (2 - \xi_j) = 4 - (\xi_i + \xi_j)$, which is below $\xi_i + \xi_j$ exactly when $\xi_i + \xi_j > 2$. If
+one slack exceeds 2, its new slack is 0 and the other's new slack is at most 2, so the new total is at most 2, again
+below the old total. With $\wvec$ and $b$ unchanged, the objective falls by $C^*$ times the drop in total slack, and
+retraining the SVM on the new labels can only lower it further. The labelling never repeats, and there are finitely
+many, so the inner loop terminates <Cite id="joachims1999transductive" />.
+</Derivation>
+
+### Kernels
+
+Every solver above works with a kernel. The dual-based ones (SVMlight, CCCP) use the kernel matrix directly. The primal
+∇TSVM needs explicit coordinates: Chapelle and Zien use the coordinates of each point in a
+<NoteLink to="kernel-principal-component-analysis">kernel PCA</NoteLink> basis, or the rows of a Cholesky factor of the
+kernel matrix <Cite id="chapelle2005lds" />. The figure uses 40 <NoteLink to="random-fourier-features">random Fourier
+features</NoteLink>, which approximate an <Gloss name="rbf-kernel" />.
+
+## Worked example
+
+The line data of the chapter: ten inputs, a dense run $0.0, 0.4, \dots, 2.4$ and a short run $3.4, 3.8, 4.2$. The input
+$x = 0$ is labelled $-1$ and $x = 4.2$ is labelled $+1$; the other eight are unlabelled. A linear classifier on a line
+is $f(x) = w(x - t)$ with $w > 0$, boundary $t$ and margin half-width $1/w$. Take the labelled constraints as hard:
+$f(0) \le -1$ and $f(4.2) \ge 1$.
+
+**Step 1: the supervised SVM.** With only the two labels, the widest margin puts $t$ at their midpoint, $2.1$, with
+half-width $2.1$, so $w = 1/2.1 = 0.476$ and $\frac12 w^2 = 0.113$. The unlabelled inputs have outputs
+
+| $x$      | 0.4    | 0.8    | 1.2    | 1.6    | 2.0    | 2.4   | 3.4   | 3.8   |
+| -------- | ------ | ------ | ------ | ------ | ------ | ----- | ----- | ----- |
+| $f(x)$   | −0.810 | −0.619 | −0.429 | −0.238 | −0.048 | 0.143 | 0.619 | 0.810 |
+| hinge    | 0.190  | 0.381  | 0.571  | 0.762  | 0.952  | 0.857 | 0.381 | 0.190 |
+
+The symmetric <Gloss name="hinge-loss">hinge losses</Gloss> sum to $4.286$, and the input $2.4$ is on the wrong side of
+the boundary.
+
+**Step 2: the hard-margin TSVM by enumeration.** With no unlabelled point allowed inside the margin, the labelling of
+the unlabelled inputs must be a threshold: everything left of some gap is $-1$, everything right is $+1$. For a gap of
+width $g$ the best boundary is its midpoint, the half-width is $g/2$, and $\frac12 w^2 = 2/g^2$. Eight gaps between the
+labels have width $0.4$, giving $\frac12 w^2 = 12.5$ each. The gap from $2.4$ to $3.4$ has width $1.0$, giving
+$\frac12 w^2 = 2$. The TSVM picks $t = 2.9$ and $w = 2$: the boundary in the gap, with $2.4$ and $3.4$ exactly on the
+margins. Every unlabelled input is classified correctly.
+
+**Step 3: the soft TSVM as $C^*$ grows.** Minimising $\frac12 w^2 + C^*\sum_j\max(0, 1 - \abs{f(x_j)})$ over $w$ and
+$t$, by a fine <NoteLink to="grid-search">grid search</NoteLink>, gives:
+
+| $C^*$ | $w$  | $t$  | objective | margin reaches                        |
+| ----- | ---- | ---- | --------- | ------------------------------------- |
+| 0.1   | 0.67 | 2.70 | 0.462     | the labelled input 4.2                |
+| 1     | 1.11 | 2.90 | 1.506     | 2.0 and 3.8; 2.4 and 3.4 inside       |
+| 2     | 2.00 | 2.90 | 2.000     | 2.4 and 3.4 (the hard-margin solution) |
+
+Already at $C^* = 0.1$ the boundary has left the dense run. The supervised boundary would cost
+$0.113 + 0.1 \times 4.286 = 0.542$ there, more than $0.462$. At $C^* = 1$ the boundary sits in the middle of the gap
+with half-width $0.9$; the two inputs inside the margin cost $1 - 0.556 = 0.444$ each. At $C^* = 2$ the margin shrinks
+to fit the gap exactly and the solution is the hard-margin TSVM of step 2. Raising $C^*$ narrows the margin until no
+unlabelled point is inside it.
+
+**In two dimensions.** The figure runs ∇TSVM on two Gaussian clusters, where the four labels tilt the supervised
+boundary into both clusters, and on two moons. On the default clusters the supervised SVM classifies 92% of the
+unlabelled points correctly and the TSVM 99%; the number of unlabelled points inside the margin falls from 81 at the
+first stage to 5 at the last.
+
+<TransductiveMargin />
+
+## Cost
+
+A TSVM costs more than an SVM on all $\ell + u$ points. Label switching retrains an SVM after each swap, and the number
+of swaps can grow with $u$, which limits SVMlight's TSVM to a few thousand points <Cite id="collobert2006tsvm" />. ∇TSVM
+evaluates its objective in $O((\ell + u)d)$ for $d$ coordinates, but with kernel coordinates $d = \ell + u$, and the
+kernel PCA alone costs $O((\ell + u)^3)$. CCCP solves a short sequence of convex SVMs on $\ell + 2u$ points, and its
+total cost grows about quadratically with the number of points in practice <Cite id="collobert2006tsvm" />. Every method
+also pays for the continuation in $C^*$ or the temperature, typically ten stages.
+
+## Trade-offs
+
+- **Optimiser against objective.** The same objective gives different test errors under different solvers. In
+  Chapelle and Zien's comparison, ∇TSVM reached lower values of the TSVM objective than SVMlight on average. On the
+  Coil20 image set its test error was 17.6%, against 26.3% for SVMlight's TSVM and 24.6% for a supervised SVM
+  <Cite id="chapelle2005lds" />.
+- **Final $C^*$.** Setting the final $C^*$ equal to $C$, as Chapelle and Zien do, is a convention; they note that it
+  would be better treated as a free parameter <Cite id="chapelle2005lds" />. A large $C^*$ trusts the low-density
+  assumption more.
+- **Against entropy minimisation.** Both push the boundary away from unlabelled points. The TSVM's hinge is exactly zero
+  outside the margin, so far points exert no force and the solution depends only on points near the boundary. The
+  entropy never reaches zero, so every point contributes a little (see the loss comparison in
+  <NoteLink to="low-density-separation">low-density separation</NoteLink>).
+- **Against graph methods.** <NoteLink to="label-propagation">Label propagation</NoteLink> and
+  <NoteLink to="manifold-regularisation">manifold regularisation</NoteLink> follow connected dense regions of any shape
+  through a neighbour graph. A TSVM with a fixed kernel finds a gap only if the kernel can draw a boundary through it.
+  Chapelle and Zien combine the two: ∇TSVM on a density-sensitive distance had the lowest test error of the methods
+  they compared on four of their five benchmarks <Cite id="chapelle2005lds" />.
+- **Practice today.** Deep <NoteLink to="semi-supervised-learning">semi-supervised learning</NoteLink> rarely uses
+  TSVMs. Their principle, keeping unlabelled points away from the boundary, survives in entropy minimisation and in the
+  confidence thresholds of <NoteLink to="fixmatch">FixMatch</NoteLink>. Linear TSVMs remain a reasonable choice for
+  high-dimensional sparse data such as text, where Joachims first applied them <Cite id="joachims1999transductive" />.
+
+## Pitfalls
+
+- **Local minima.** A solver that starts from the supervised boundary can stay in the basin of a wrong labelling. Slow
+  continuation in $C^*$ and several restarts reduce the risk; no polynomial method guarantees the global minimum.
+- **Wrong class balance.** The balancing constraint forces the unlabelled points to match the labelled class
+  proportions. If the labelled set was not drawn at random, for example with equal numbers per class from
+  <NoteLink to="class-imbalance">imbalanced data</NoteLink>, the constraint pushes the boundary into a dense region.
+- **No gap.** When the cluster assumption fails, the margin still seeks an empty band and can find one that cuts the
+  true classes. On Chapelle and Zien's g10n problem, built so that the true boundary crosses the cluster centres,
+  SVMlight's TSVM had 14.4% test error against 9.4% for a supervised SVM <Cite id="chapelle2005lds" />.
+- **All unlabelled points in one class.** Without a balancing constraint, the trivial labelling can win, especially in
+  high dimensions with few labels.
+- **Scaling.** The margin is measured in the Euclidean norm of the features, so features on larger scales dominate it,
+  as for any SVM. Standardise the features first.

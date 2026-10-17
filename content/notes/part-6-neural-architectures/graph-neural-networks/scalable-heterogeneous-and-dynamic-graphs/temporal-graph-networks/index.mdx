@@ -1,0 +1,197 @@
+---
+title: 'Temporal graph networks'
+kind: concept
+summary: 'A dynamic graph arrives as a stream of timed edges. TGN keeps a memory vector per node, updated by a recurrent cell at each event, and embeds nodes by attention over recent neighbours with time encodings; JODIE and TGAT are special cases.'
+tags: [graph-neural-networks, sequence-models, worked-example]
+aliases: ['TGN', 'dynamic graph neural network', 'JODIE', 'TGAT', 'continuous-time dynamic graph']
+requires: [message-passing-neural-network, heterogeneous-and-temporal-graphs]
+related:
+  [
+    recurrent-neural-network,
+    gated-recurrent-unit,
+    graph-attention-network,
+    link-prediction-with-graph-neural-networks,
+    random-fourier-features,
+    data-leakage,
+    heterogeneous-graph-networks,
+  ]
+references: [rossi2020tgn, kumar2019jodie, xu2020tgat, pareja2020evolvegcn, poursafaei2022dynamic, huang2023tgb, cong2023graphmixer]
+status: draft
+updated: 2026-10-17
+---
+
+import { TemporalMemory } from './TemporalMemory'
+
+<Definition>
+A continuous-time dynamic graph is a time-ordered stream of events, such as interactions $(u, v, t, \evec_{uv}(t))$
+between nodes $u$ and $v$ at time $t$ with edge features $\evec_{uv}(t)$. A temporal graph network (TGN) keeps a memory
+vector $\svec_i(t)$ for every node. Each event updates the memories of the nodes it involves by a learned recurrent
+cell. A node's embedding at query time $t$ combines its memory with an attention-weighted aggregate over its recent
+neighbours, with the elapsed times encoded as features <Cite id="rossi2020tgn" />.
+</Definition>
+
+## Intuition
+
+Purchases, messages, payments and edits arrive one at a time with timestamps. Collapsing them into one static graph
+loses the order. A static graph says that a user and an item are linked, but not whether the link is from last year or
+from a minute ago, and not whether a two-hop path ran forwards or backwards in time. Splitting the stream into daily
+snapshots and running a static network on each, as in EvolveGCN <Cite id="pareja2020evolvegcn" />, keeps coarse order
+but blurs everything inside a window.
+
+A temporal graph network treats each node as a small recurrent system. When a user rates an item, the user's memory is
+updated from its old value and the item's memory, and the item's memory from its old value and the user's. Information
+therefore travels only along **time-respecting paths**: sequences of events with increasing times. A user's rating
+reaches another user only if that user meets the same item later. The memory summarises a node's history in a fixed
+number of numbers, as the hidden state of a <NoteLink to="recurrent-neural-network">recurrent network</NoteLink>
+summarises a sequence.
+
+## Details
+
+TGN is a framework of five modules <Cite id="rossi2020tgn" />. Write $\svec_i(t^-)$ for node $i$'s memory just before
+time $t$, and $\Delta t_i$ for the time since node $i$'s previous event.
+
+### Memory, messages and updates
+
+For an interaction between $i$ and $j$ at time $t$, each endpoint receives a **message**:
+
+$$
+\mvec_i(t) = \mathrm{msg}\paren{\svec_i(t^-), \svec_j(t^-), \phi(\Delta t_i), \evec_{ij}(t)}, \qquad
+\mvec_j(t) = \mathrm{msg}\paren{\svec_j(t^-), \svec_i(t^-), \phi(\Delta t_j), \evec_{ij}(t)},
+$$
+
+where $\phi$ is a time encoding. The TGN experiments use the identity message, the concatenation of the inputs
+<Cite id="rossi2020tgn" />. When a batch holds several events for one node, a **message aggregator** combines them; the
+paper keeps the most recent message or the mean. The **memory updater** is a recurrent cell,
+
+$$
+\svec_i(t) = \mathrm{mem}\paren{\bar\mvec_i(t), \svec_i(t^-)},
+$$
+
+typically a <NoteLink to="gated-recurrent-unit">GRU</NoteLink>. A new node starts with the zero memory, and memories
+keep updating after training, as new events arrive <Cite id="rossi2020tgn" />.
+
+### Embedding module
+
+A memory changes only when its node takes part in an event. A node that has been inactive for months keeps a **stale**
+memory. The **embedding module** computes the node's embedding $\zvec_i(t)$ at query time from its memory and from its
+neighbours, whose memories may be fresher. The TGN paper covers four choices <Cite id="rossi2020tgn" />:
+
+- **Identity:** $\zvec_i(t) = \svec_i(t)$.
+- **Time projection:** $\zvec_i(t) = (1 + \Delta t\, \wvec) \odot \svec_i(t)$, with learned $\wvec$ and $\odot$ the
+  elementwise product. The embedding drifts as time since the last event grows. This is the projection of JODIE
+  <Cite id="kumar2019jodie" />.
+- **Temporal <NoteLink to="graph-attention-network">graph attention</NoteLink>:** $L$ layers of
+  <NoteLink to="multi-head-attention">multi-head attention</NoteLink> in which node $i$ is the query and its sampled
+  temporal neighbours are the keys and values. Each neighbour $k$ enters as
+  $[\hvec_k \Vert \evec_{ik}(t_k) \Vert \phi(t - t_k)]$, its vector, the features of the event that joined it to $i$,
+  and the encoded age of that event. An <Gloss name="mlp" /> combines the attended vector with $i$'s own.
+- **Temporal graph sum:** the same neighbourhood, summed through a learned linear map and a <Gloss name="relu" />
+  instead of attended.
+
+Only events before $t$ are neighbours. The neighbours are usually the $k$ most recent; the TGN experiments use 10 for
+one layer <Cite id="rossi2020tgn" />.
+
+### Time encoding
+
+The time encoding maps an elapsed time $\Delta t \geq 0$ to a vector. TGAT derives it from Bochner's theorem: a
+translation-invariant kernel $K(t_1, t_2) = \psi(t_1 - t_2)$ is the expectation of $\cos(\omega(t_1 - t_2))$ under a
+distribution of frequencies $\omega$, so it is approximated by the inner product of the features
+
+$$
+\phi(t) = \sqrt{\tfrac{1}{d}}\,\brack{\cos(\omega_1 t), \sin(\omega_1 t), \dots, \cos(\omega_d t), \sin(\omega_d t)}
+$$
+
+with learned frequencies <Cite id="xu2020tgat" />. The construction is that of
+<NoteLink to="random-fourier-features">random Fourier features</NoteLink> with the frequencies trained. Attention scores
+built from $\phi(t_1)$ and $\phi(t_2)$ then depend on the gap $t_1 - t_2$, not on the absolute times. Implementations
+often use the single-cosine form $[\cos(\omega_k \Delta t + b_k)]_k$.
+
+### Training without leakage
+
+TGN is trained for future-edge prediction: given all events before a batch, predict the batch's events against sampled
+negative pairs. The memory modules get no gradient if the memory is updated only after the loss is computed. Updating
+the memory with an event before predicting that same event would leak the answer. TGN resolves this by storing each
+event's raw message and applying it at the start of the next batch, before that batch's predictions
+<Cite id="rossi2020tgn" />. All predictions in a batch see the same memory, which is out of date for the later events in
+the batch. The paper found a batch size of 200 a good compromise between speed and freshness
+<Cite id="rossi2020tgn" />.
+
+### Special cases
+
+Earlier models are settings of the modules <Cite id="rossi2020tgn" />:
+
+| model | memory | memory updater | embedding |
+| --- | --- | --- | --- |
+| JODIE | per node | RNN | time projection |
+| TGAT | none | none | temporal graph attention, 2 layers |
+| DyRep | per node | RNN | identity |
+| TGN (default) | per node | GRU | temporal graph attention, 1 layer |
+
+JODIE updates a user from the item's embedding and an item from the user's with two coupled
+<NoteLink to="recurrent-networks">recurrent networks</NoteLink> <Cite id="kumar2019jodie" />. TGAT has no memory and
+relies on attention over the temporal neighbourhood. In the TGN ablation, TGAT lost over 10% in <Gloss name="ap">average
+precision</Gloss> with one layer instead of two, while TGN with memory needed only one layer: a neighbour's memory
+already summarises that neighbour's own neighbours <Cite id="rossi2020tgn" />.
+
+### Practice
+
+Current evaluation is stricter than the early benchmarks. EdgeBank, a baseline that predicts an edge if it has been seen
+before, scores well under the usual random negatives; harder negatives drawn from past edges separate memorising from
+predicting <Cite id="poursafaei2022dynamic" />. The Temporal Graph Benchmark provides large datasets with time-ordered
+splits and ranking metrics against many negatives <Cite id="huang2023tgb" />. GraphMixer, built only from MLPs, a fixed
+time encoding and mean pooling over recent neighbours, matches the recurrent and attention models on
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink> <Cite id="cong2023graphmixer" />. A
+recurrent memory is therefore a modelling choice to justify against simple baselines, not a requirement.
+
+## Worked example
+
+Three users $u_1, u_2, u_3$ rate two items $i_1, i_2$. Every memory is a single number starting at 0. Use the update
+$s \leftarrow \tfrac12(s + s_{\text{other}} + x)$, where $s_{\text{other}}$ is the other endpoint's memory just before
+the event and $x$ is the rating. Both endpoints are updated from the memories before the event.
+
+1. **$t = 1$, $u_1$ rates $i_1$ with $x = 4$.** Both memories are 0, so $s_{u_1} = s_{i_1} = \tfrac12(0 + 0 + 4) = 2$.
+2. **$t = 2$, $u_2$ rates $i_2$ with $x = 2$.** $s_{u_2} = s_{i_2} = \tfrac12(0 + 0 + 2) = 1$.
+3. **$t = 3$, $u_2$ rates $i_1$ with $x = 0$.** Before the event $s_{u_2} = 1$ and $s_{i_1} = 2$. Then
+   $s_{u_2} = \tfrac12(1 + 2 + 0) = 1.5$ and $s_{i_1} = \tfrac12(2 + 1 + 0) = 1.5$. The time gaps are
+   $\Delta t_{u_2} = 3 - 2 = 1$ and $\Delta t_{i_1} = 3 - 1 = 2$.
+4. **$t = 5$, $u_3$ rates $i_2$ with $x = 1$.** Before the event $s_{u_3} = 0$ and $s_{i_2} = 1$. Then
+   $s_{u_3} = \tfrac12(0 + 1 + 1) = 1$ and $s_{i_2} = \tfrac12(1 + 0 + 1) = 1$.
+
+After step 3, $u_2$'s memory contains $u_1$'s rating, passed through $i_1$: the path $u_1 \to i_1$ at $t = 1$, then
+$i_1 \to u_2$ at $t = 3$, runs forwards in time. After step 4, $u_3$'s memory contains nothing from $u_1$. The static
+graph has the path $u_1 - i_1 - u_2 - i_2 - u_3$, but its edge $u_2 - i_2$ happened at $t = 2$, before $u_2$ heard from
+$u_1$ at $t = 3$. A static <Gloss name="gnn">message passing</Gloss> network with four layers would mix $u_1$ into
+$u_3$; the temporal network does not, because no sequence of events could have carried the information.
+
+**Staleness.** At $t = 100$, $u_1$'s memory is still the value from $t = 1$. A time projection with $w = -0.01$ scales
+it by $1 + 99 \cdot (-0.01) = 0.01$, nearly to zero, so the model can learn to distrust old memories.
+
+**Time encoding.** With frequencies $\omega = (1, 0.1)$ and zero phases, the encoding $[\cos(\omega_k \Delta t)]_k$
+gives $(1, 1)$ at $\Delta t = 0$, $(0.54, 0.995)$ at $\Delta t = 1$ and $(-0.84, 0.54)$ at $\Delta t = 10$. The fast
+frequency separates short gaps; the slow one separates long gaps.
+
+The figure continues the stream to ten events between five users and three items.
+
+<TemporalMemory />
+
+## Assumptions
+
+- **Events are the signal.** The model learns from interactions and their order; a node's state between events is
+  extrapolated, not observed.
+- **Timestamps are correct and ordered.** Events with equal or misordered timestamps are processed in an arbitrary
+  order, which changes the memories.
+- **The future resembles the past.** Memories and the embedding module are trained on earlier events and applied to
+  later ones; a shift in behaviour is absorbed only as fast as the memories update.
+
+## Pitfalls
+
+- **Random splits leak the future.** Training and test events must be split by time, as described in
+  <NoteLink to="heterogeneous-and-temporal-graphs">heterogeneous and temporal graphs</NoteLink>. A random split lets the
+  memory see test-time events during training.
+- **Easy negatives inflate scores.** Random node pairs are almost never edges; a memorising baseline then looks strong
+  <Cite id="poursafaei2022dynamic" />. Evaluate against negatives drawn from historical edges and report ranking
+  metrics.
+- **Batch size changes the model.** Larger batches make the memory staler for later events in the batch, so a model
+  tuned at one batch size can degrade at another <Cite id="rossi2020tgn" />.
+- **Memory is per node.** A transductive memory gives a new node only the zero vector until it has events; the
+  embedding module, which reads the neighbours' memories, carries the inductive case.

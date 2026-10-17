@@ -1,0 +1,185 @@
+---
+title: 'Co-training'
+kind: technique
+summary: 'Co-training trains two classifiers on two views of each input, such as a web page''s text and the anchor text of links to it; each labels its most confident unlabelled points for the other. It works when each view suffices and the views are independent given the label.'
+tags: [semi-supervised, multi-view, worked-example]
+aliases: ['multi-view co-training']
+requires: [self-training]
+related:
+  [
+    tri-training-and-disagreement-methods,
+    multi-view-representation-learning,
+    canonical-correlation-analysis,
+    pseudo-labelling,
+    learning-with-noisy-labels,
+  ]
+references: [blum1998, nigam2000cotraining, balcan2004cotraining, qiao2018deep, han2018, zhou2010disagreement]
+status: draft
+updated: 2026-10-17
+---
+
+import { CoTrainingViews } from './CoTrainingViews'
+
+<Definition>
+**Co-training** applies to inputs that come as two **views** $\xvec = (\xvec^{(1)}, \xvec^{(2)})$, each enough on its
+own to predict the class. One classifier is trained per view on the labelled set. In each round each classifier labels
+the unlabelled points it is most confident about, and those points join the shared labelled set with its labels, so
+each classifier learns from the other's confident predictions. Blum and Mitchell introduced the method and proved that
+it learns from unlabelled data when the two views are independent given the class <Cite id="blum1998" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="self-training">Self-training</NoteLink> lets a model label data for itself. The points it labels are
+the ones it is already confident about, far from its own boundary, so they teach it little, and its mistakes come back
+to it as targets. Both problems come from one model judging its own work.
+
+Co-training keeps the self-training loop and changes who labels. Two classifiers look at the same example through
+different features. A point that is easy for one view can be hard for the other: classifier 1 labels it confidently,
+and classifier 2 receives a correct label on a point near its own boundary, which it could not have labelled itself.
+Classifier 1's mistakes are also less harmful to classifier 2, because they depend on view 1's features, which
+classifier 2 does not see.
+
+Blum and Mitchell's example is web-page classification <Cite id="blum1998" />. View 1 is the
+<NoteLink to="bag-of-words">bag of words</NoteLink> on a page; view 2 is the bag of words in the anchor text of
+hyperlinks that point to the page. Either view tells whether a page is a course home page, and the words a page uses
+about itself say little about the words other pages use to link to it. Starting from 12 labelled pages, co-training cut
+the test error of the page-text classifier from 12.9% to 6.2% and of the combined classifier from 11.1% to 5.0%.
+
+## Mechanism
+
+### The algorithm
+
+Let $L$ be the labelled set and $U$ the unlabelled set. Fix the number of points $p_k$ of each class $k$ that each
+classifier labels per round, a pool size $u$ and a number of rounds.
+
+1. Draw a pool $U'$ of $u$ points at random from $U$.
+2. Train $h_1$ on view 1 of $L$, and $h_2$ on view 2 of $L$.
+3. Let $h_1$ label, for each class $k$, the $p_k$ pool points it gives the highest probability of class $k$; let $h_2$
+   do the same. Move these points, with those labels, from $U'$ to $L$.
+4. Refill $U'$ to $u$ points from $U$, and return to step 2.
+
+Labels are added for good: unlike most self-training, co-training never revises a label. The final classifier combines
+the two views, for example by multiplying their class probabilities,
+$\hat p(y \mid \xvec) \propto \hat p_1(y \mid \xvec^{(1)})\,\hat p_2(y \mid \xvec^{(2)})$, which is the right
+combination when the views are independent given the class. In Blum and Mitchell's experiment both classifiers were
+<NoteLink to="naive-bayes">naive Bayes</NoteLink>, with $p = 1$ course page and $n = 3$ other pages per classifier per
+round, a pool of $u = 75$ and 30 rounds, starting from 12 labelled pages <Cite id="blum1998" />. The small pool forces
+the classifiers to choose among points that are more typical of the whole distribution than the extreme points of all of
+$U$ would be.
+
+### The two assumptions
+
+Co-training needs two things of the views.
+
+- **Sufficiency.** Each view alone determines the class: there are classifiers $f_1$ and $f_2$ with
+  $f_1(\xvec^{(1)}) = f_2(\xvec^{(2)}) = y$ for (almost) every example.
+- **Conditional independence.** Given the class, the views are independent:
+  $p(\xvec^{(1)}, \xvec^{(2)} \mid y) = p(\xvec^{(1)} \mid y)\,p(\xvec^{(2)} \mid y)$.
+
+Under independence the labels that $h_2$ hands to view 1 behave like correct labels corrupted by
+**<NoteLink to="label-noise-models">random classification noise</NoteLink>** whose rate depends only on the true class.
+Which view-1 inputs receive a wrong label does not depend on those inputs. Learning from labels with such noise is
+possible whenever the noise rates $\alpha$ (a class-1 point labelled 0) and $\beta$ (a class-0 point labelled 1) satisfy
+$\alpha + \beta < 1$ (see <NoteLink to="learning-with-noisy-labels">learning with noisy labels</NoteLink>). So any weak
+classifier on view 2 that is better than chance supplies enough signal for view 1 to be learnt from unlabelled data
+<Cite id="blum1998" />.
+
+<Derivation title="Why conditional independence makes the noise random">
+Let $h$ be any classifier on view 2 and $y$ the true class. The label $h(\xvec^{(2)})$ given to a view-1 input
+$\xvec^{(1)}$ of class $y$ has
+
+$$
+P\bigl(h(\xvec^{(2)}) = 1 \mid \xvec^{(1)}, y\bigr) = P\bigl(h(\xvec^{(2)}) = 1 \mid y\bigr),
+$$
+
+because $\xvec^{(2)}$, and so $h(\xvec^{(2)})$, is independent of $\xvec^{(1)}$ given $y$. The probability of a wrong
+label is therefore $\alpha = P(h = 0 \mid y = 1)$ for every class-1 input and $\beta = P(h = 1 \mid y = 0)$ for every
+class-0 input, whatever $\xvec^{(1)}$ is: class-conditional random noise. The noisy label still carries the class,
+since $P(h = 1 \mid y = 1) - P(h = 1 \mid y = 0) = 1 - \alpha - \beta > 0$ when $\alpha + \beta < 1$. Without
+independence, $P(h = 1 \mid \xvec^{(1)}, y)$ varies with $\xvec^{(1)}$: the wrong labels concentrate on the view-1
+inputs that resemble the other class, which is exactly where they bias the boundary.
+</Derivation>
+
+### Weaker conditions
+
+Conditional independence rarely holds. Balcan, Blum and Yang replaced it by **expansion**: for any sets of points that
+the two classifiers label confidently, the points confidently labelled in exactly one view must be a sizeable fraction
+of those labelled in both or in neither <Cite id="balcan2004cotraining" />. Expansion is enough for iterative
+co-training to work when each view has a strong learner, and it explains why co-training runs for many rounds rather
+than one. Nigam and Ghani found that, on text, methods that use a natural split of the features beat those that do not,
+and that a random split of a redundant feature set can still help <Cite id="nigam2000cotraining" />.
+
+## Worked example
+
+Each input has two one-dimensional views $a$ and $b$. The classifier of each view puts its threshold midway between
+the class means of its labelled values, and its confidence on a point is the distance from that threshold. In truth,
+class 1 has $a > 0$ and $b > -0.6$. Two points are labelled, and four are not:
+
+| point | $a$  | $b$  | label (true class) |
+| ----- | ---- | ---- | ------------------ |
+| P1    | 1.0  | 2.0  | 1                  |
+| P2    | −1.0 | −2.0 | 0                  |
+| U1    | 2.2  | −0.4 | (1)                |
+| U2    | 0.3  | 1.6  | (1)                |
+| U3    | −1.8 | −1.2 | (0)                |
+| U4    | −0.2 | −2.4 | (0)                |
+
+**Round 1.** Both thresholds start at 0, the midpoints of $\pm 1$ and $\pm 2$. Each classifier labels one point of each
+class. Classifier $a$ is most confident about U1 ($a = 2.2$, class 1) and U3 ($a = -1.8$, class 0). Classifier $b$ is
+most confident about U2 ($b = 1.6$, class 1) and U4 ($b = -2.4$, class 0). All four labels are correct.
+
+**What view $b$ receives.** U1 has $b = -0.4$, below $b$'s threshold of 0: classifier $b$ would have called it class
+0, and with confidence $0.4$ it is the point $b$ is least sure about. Classifier $a$ labels it class 1 with the largest
+confidence of all.
+
+**Round 2.** View $b$'s class-1 values are now $2.0$, $-0.4$ and $1.6$, with mean $1.067$; its class-0 values are
+$-2.0$, $-1.2$ and $-2.4$, with mean $-1.867$. The new threshold is their midpoint, $-0.4$, closer to the true $-0.6$.
+View $a$'s means become $1.167$ and $-1.0$, and its threshold moves to $0.083$.
+
+**Against self-training.** If classifier $b$ labelled for itself, it would add its own confident points U2 and U4.
+Its class means would be $1.8$ and $-2.2$ and its threshold $-0.2$: half as far towards the truth, because the points it
+chose lie far from its boundary.
+
+The figure runs the same loop on 200 two-view points with uniform densities in each view, two labels per class, two
+points per class per classifier per round and a pool of 50. With data seed 2 and independent views, view $b$'s test
+accuracy rises from $0.754$ to $0.908$ by round 25, when every unlabelled point has been labelled, against $0.913$ for
+the best classifier of one view, and 6 of the 196 added labels are wrong. View $b$ self-trained alone with the same
+budget reaches $0.881$. The product of the two views reaches $0.971$. With dependence 1 the views are copies, both reach
+$0.903$, and 26 of the 196 added labels are wrong.
+
+<CoTrainingViews />
+
+## Cost
+
+Each round trains two classifiers and predicts the pool with each, so a run of $R$ rounds costs $2R$ fits of
+the base learner on a labelled set that grows by $2\sum_k p_k$ points per round. With a pool, prediction costs $O(u)$
+per round instead of $O(\abs{U})$.
+
+## Trade-offs
+
+- **Natural against manufactured views.** A natural split (page text and anchor text, an image and its caption, audio
+  and video) gives the most independent errors. Without one, random feature splits or different learners on the same
+  features (<NoteLink to="tri-training-and-disagreement-methods">tri-training</NoteLink>) manufacture diversity, at the
+  cost of weaker guarantees <Cite id="nigam2000cotraining" /> <Cite id="zhou2010disagreement" />.
+- **Labels per round.** Adding few points per round keeps each addition reliable but needs many rounds. Fixing the
+  number per class, as Blum and Mitchell did with one course page to three others, keeps the added labels at the class
+  proportions of the data.
+- **Permanent labels.** Never revising a label is cheap and stops the loop from oscillating, but a wrong label stays
+  for the whole run.
+- **Deep networks.** Two networks on one input have no natural views and tend to collapse into the same function. Deep
+  co-training keeps them apart with <NoteLink to="adversarial-examples">adversarial examples</NoteLink> that one network
+  must classify differently from the other <Cite id="qiao2018deep" />. Co-teaching applies the exchange to noisy labels:
+  each network picks the examples with small loss for the other to train on <Cite id="han2018" />.
+
+## Pitfalls
+
+- **Correlated views.** When the views share information beyond the class, the labels one classifier gives the other
+  are wrong on exactly the inputs that confuse both. The figure's dependence knob shows the added-label error rate
+  rising from 3% to 13% as the views go from independent to copies.
+- **An insufficient view.** If one view cannot predict the class, its confident labels are noise, and it pulls the
+  better view down. Each view should be checked alone on the labelled data first.
+- **Class drift.** If one classifier is biased towards a class, it keeps adding that class, and the shared set drifts
+  from the true proportions; fixed per-class quotas prevent this.
+- **The pool matters.** Labelling from all of $U$ picks the most extreme points, which carry little information about
+  the boundary; Blum and Mitchell obtained better results with a small pool <Cite id="blum1998" />.

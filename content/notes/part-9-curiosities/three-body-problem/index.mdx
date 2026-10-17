@@ -1,0 +1,204 @@
+---
+title: 'The three-body problem'
+kind: concept
+summary: 'Three masses under mutual gravity have no general closed-form solution. Most motions are chaotic, so nearby starts diverge exponentially, and many end with one body ejected, as in Burrau''s Pythagorean problem.'
+tags: [orbital-mechanics, chaos, worked-example]
+aliases: [Pythagorean three-body problem, Burrau's problem, general three-body problem]
+requires: [kepler-orbits, bifurcations-and-chaos]
+related: [periodic-three-body-orbits, lagrange-points, symplectic-integrators-and-energy-drift, numerical-ode-solvers]
+references: [poincare1890, sundman1913, szebehely1967, musielak2014, hairer2006]
+status: draft
+updated: 2026-10-17
+---
+
+import { PythagoreanProblem } from './PythagoreanProblem'
+
+<Definition>
+The **three-body problem** asks for the motion of three point masses $m_1, m_2, m_3$ that attract one another by
+Newton's inverse-square law, given their positions and velocities at one time. The equations of motion conserve the
+total energy, linear momentum and angular momentum. No further integrals exist that would reduce them to formulas, as
+the conservation laws do for two bodies. Most solutions are chaotic, and a bound triple of comparable masses usually
+ends with one body ejected and the other two locked in a binary.
+</Definition>
+
+## Intuition
+
+Two bodies under gravity move on conic sections, fixed once and for all by their energy and angular momentum
+(<NoteLink to="kepler-orbits" />). A third body perturbs each pair's orbit all the time. When the third body is light
+or far away, the perturbation is small and the motion stays close to Keplerian for a long time; the planets of the
+Solar System are this case. When three comparable masses come close, they trade energy in close encounters. A close
+pass between two bodies can hand a large amount of kinetic energy to the third. The motion then looks like a sequence of
+encounters with no pattern, and it ends when one body leaves for good.
+
+Burrau posed a clean example in 1913, now called the Pythagorean problem. Masses 3, 4 and 5 start at rest at the corners
+of a right triangle with sides 3, 4 and 5, each mass opposite the side of its own length. Burrau's hand computation
+stopped at $t = 3.35$. Szebehely and Peters followed the motion to the end in 1967 <Cite id="szebehely1967" />. The
+bodies fall inward and pass through a long series of close encounters, the closest at a distance of about
+$4 \times 10^{-4}$. Near $t = 31.7$ the three bodies almost return to their starting triangle, which suggests a periodic
+orbit, but they do not quite arrive and the motion that follows is entirely different. Around $t = 60$ the lightest
+body, mass 3, shoots through the pair formed by masses 4 and 5 and leaves on a hyperbolic path, while the pair recedes
+the opposite way as a tight binary.
+
+## Equations of motion and what they conserve
+
+Write $\qvec_i \in \reals^3$ for the position of body $i$, $\vvec_i = \dot{\qvec}_i$ for its velocity and
+$\pvec_i = m_i \vvec_i$ for its momentum. Units are chosen so that the gravitational constant is $G = 1$; masses,
+lengths and times are then plain numbers. The force on body $i$ is the sum of the pull of the other two:
+
+$$
+m_i \ddot{\qvec}_i = \Fvec_i = -\sum_{j \ne i} \frac{m_i m_j \paren{\qvec_i - \qvec_j}}{\norm{\qvec_i - \qvec_j}^3},
+\qquad i = 1, 2, 3.
+$$
+
+The same motion follows from the Hamiltonian, the total energy as a function of positions and momenta:
+
+$$
+H(\qvec, \pvec) = \underbrace{\sum_{i} \frac{\norm{\pvec_i}^2}{2 m_i}}_{T(\pvec)}
+\underbrace{- \sum_{i < j} \frac{m_i m_j}{\norm{\qvec_i - \qvec_j}}}_{V(\qvec)},
+\qquad \dot{\qvec}_i = \frac{\partial H}{\partial \pvec_i}, \quad \dot{\pvec}_i = -\frac{\partial H}{\partial \qvec_i}.
+$$
+
+$T$ is the kinetic energy and $V$ the potential energy. $H$ splits into a part that depends only on momenta and a part
+that depends only on positions, which is what a leapfrog integrator needs
+(<NoteLink to="symplectic-integrators-and-energy-drift" />).
+
+Three conservation laws follow from the form of the force.
+
+1. **Linear momentum.** The force of $j$ on $i$,
+   $\Fvec_{ij} = -m_i m_j (\qvec_i - \qvec_j) / \norm{\qvec_i - \qvec_j}^3$, is minus the force of $i$ on $j$. The
+   forces cancel in pairs, so $\frac{d}{dt} \sum_i \pvec_i = \sum_i \Fvec_i = \zeros$. The centre of mass therefore
+   moves in a straight line at constant speed.
+2. **Angular momentum.** $\Lvec = \sum_i \qvec_i \times \pvec_i$ has derivative
+   $\sum_i \vvec_i \times m_i \vvec_i + \sum_i \qvec_i \times \Fvec_i$. The first sum vanishes because each term crosses
+   a vector with itself. In the second, the pair $(i, j)$ contributes $(\qvec_i - \qvec_j) \times \Fvec_{ij}$, which
+   vanishes because $\Fvec_{ij}$ points along $\qvec_i - \qvec_j$. So $\dot{\Lvec} = \zeros$.
+3. **Energy.** The chain rule gives
+   $\dot{H} = \sum_i \paren{\partial H / \partial \pvec_i} \cdot \dot{\pvec}_i + \paren{\partial H / \partial \qvec_i} \cdot \dot{\qvec}_i$.
+   Hamilton's equations replace $\partial H / \partial \pvec_i$ by $\dot{\qvec}_i$ and $\partial H / \partial \qvec_i$
+   by $-\dot{\pvec}_i$, so the two terms cancel and $\dot{H} = 0$.
+
+These give ten integrals in all: the energy (one), the momentum (three), the initial position of the centre of mass
+(three) and the angular momentum (three). The state of three bodies in space has 18 numbers, nine positions and nine
+velocities, so the ten integrals confine the motion to 8 dimensions. Eliminating time and the line of nodes brings
+the count to 6 <Cite id="musielak2014" />. For two bodies the same integrals, together with the Laplace–Runge–Lenz
+vector, pin each orbit to a single conic. For three bodies nothing further is available.
+
+## Why there is no general solution
+
+In 1889 Poincaré won King Oscar II's prize with a memoir on the three-body problem, published in revised form the next
+year <Cite id="poincare1890" />. He showed that the problem has no integrals beyond the classical ones that depend
+analytically on the positions and velocities, extending Bruns's 1887 result for algebraic integrals
+<Cite id="musielak2014" />. In correcting an error in the prize version, Poincaré found the reason. The curves of states
+that approach an unstable periodic orbit and the curves of states that leave it can cross, and once they cross once they
+cross infinitely often, in a tangle that folds over itself at every scale. An orbit near the tangle wanders in a way
+that no smooth function of the state can track, and this tangle was the first description of chaos. A general solution
+in the sense of the two-body problem, a formula that maps any starting state to the state at time $t$, would need the
+missing integrals, so none exists. Sundman later found a convergent power series for every solution with nonzero angular
+momentum <Cite id="sundman1913" />. The series converges so slowly that it has no practical use, and the three-body
+problem is studied with <NoteLink to="numerical-integration">numerical integration</NoteLink> and with special solutions
+instead (<NoteLink to="periodic-three-body-orbits" />, <NoteLink to="lagrange-points" />).
+
+## Sensitivity to the start
+
+Chaos makes nearby solutions separate exponentially on average (<NoteLink to="bifurcations-and-chaos" />). Let
+$\delta(t) = \norm{\qvec^A(t) - \qvec^B(t)}$ be the distance between two solutions, measured over all positions. For a
+chaotic orbit, $\delta(t) \approx \delta(0) e^{\lambda t}$ for small $\delta$, with $\lambda > 0$ the largest Lyapunov
+exponent. In the three-body problem the growth is not smooth. It comes in jumps, one at each close encounter, because
+a small change in the distance of closest approach changes the deflection a lot. Two copies of the Pythagorean problem
+started $10^{-6}$ apart (mass 3 moved along $x$) separate to $10^{-3}$ by about $t = 40$ and to the size of the system,
+about 1, near $t = 57$, in the figure below. That is an average rate of $\ln(10^6) / 57 \approx 0.24$ per unit time,
+an e-folding time of about 4.
+
+The same sensitivity applies to the integrator's own errors. Each step of a numerical method commits a small error,
+and chaos magnifies it at the same rate as a perturbation of the start. A computed orbit of a chaotic system is
+therefore accurate only up to a horizon that grows like the logarithm of the accuracy. Beyond that horizon, the
+computed orbit is a correct-looking solution that started somewhere slightly different. The statistical outcome (which
+body escapes, roughly when, roughly how fast) is far more robust than the trajectory itself.
+
+## Why one body escapes
+
+The total energy $E$ of a bound triple is negative and fixed. When two bodies $a$ and $b$ form a close pair with
+semi-major axis $a_{ab}$, the pair's internal energy is that of a Kepler orbit, $E_{ab} = -m_a m_b / (2 a_{ab})$. Once
+the third body is far from the pair, the total energy splits into the pair's energy and the energy $E_\text{out}$ of the
+third body's motion relative to the pair's centre of mass:
+
+$$
+E = E_{ab} + E_\text{out}, \qquad E_\text{out} = E - E_{ab} = E + \frac{m_a m_b}{2 a_{ab}}.
+$$
+
+A tight pair has a large negative $E_{ab}$. If $m_a m_b / (2 a_{ab}) > -E$, then $E_\text{out} > 0$: the outer motion
+is hyperbolic, and the third body escapes to infinity. Close encounters are where the pair tightens and the third body
+is kicked, so a long enough series of encounters eventually produces a pair tight enough to release the third body.
+A given outer energy gives the lightest body the highest speed, and in the Pythagorean problem the lightest body is
+the one ejected. For $E > 0$ the system
+must split, because a bound configuration needs $E < 0$ <Cite id="musielak2014" />.
+
+## Worked example: the Pythagorean start
+
+The figure integrates this start, so its numbers can be checked by hand.
+
+**Positions.** Place mass 3 at $(1, 3)$, mass 4 at $(-2, -1)$ and mass 5 at $(1, -1)$, all at rest, in units with
+$G = 1$. Mass 3 faces the side from mass 4 to mass 5, of length $\norm{(1, -1) - (-2, -1)} = 3$. Mass 4 faces the side
+from mass 3 to mass 5, of length $\norm{(1, -1) - (1, 3)} = 4$. Mass 5 faces the side from mass 3 to mass 4, of length
+$\norm{(-2, -1) - (1, 3)} = \sqrt{9 + 16} = 5$.
+
+**Centre of mass.**
+$\frac{1}{12}\paren{3 \cdot (1, 3) + 4 \cdot (-2, -1) + 5 \cdot (1, -1)} = \frac{1}{12}(3 - 8 + 5,\ 9 - 4 - 5) = (0, 0)$.
+The bodies start at rest, so the total momentum and the angular momentum are both zero, and they stay zero.
+
+**Energy.** All the energy is potential at the start:
+
+$$
+E = V = -\paren{\frac{3 \cdot 4}{5} + \frac{3 \cdot 5}{4} + \frac{4 \cdot 5}{3}} = -\paren{2.4 + 3.75 + 6.667} = -\frac{769}{60} \approx -12.817.
+$$
+
+This is the value Szebehely and Peters report <Cite id="szebehely1967" />, and the figure's energy error is measured
+against it.
+
+**Initial accelerations.** Divide each force by the body's mass. For mass 3, the pull of mass 4 is
+$4 \cdot (-3, -4) / 5^3 = (-0.096, -0.128)$ and the pull of mass 5 is $5 \cdot (0, -4) / 4^3 = (0, -0.3125)$, so
+$\ddot{\qvec}_3 = (-0.096, -0.441)$. The same sums give $\ddot{\qvec}_4 = (0.628, 0.096)$ and
+$\ddot{\qvec}_5 = (-0.444, 0.188)$. The mass-weighted sum is
+$3(-0.096, -0.441) + 4(0.628, 0.096) + 5(-0.444, 0.188) = (0.000, 0.000)$ to rounding, as momentum conservation
+requires. All three accelerations point roughly toward the centre of mass, so the triangle starts to collapse.
+
+**The end state.** In the figure's default run, masses 4 and 5 end as a binary with semi-major axis close to 0.47. Its
+energy is $-4 \cdot 5 / (2 \cdot 0.47) \approx -21.3$. Mass 3 therefore leaves with
+$E_\text{out} \approx -12.8 + 21.3 = +8.5$, a positive outer energy, so its escape is permanent.
+
+## The Pythagorean problem in the browser
+
+The figure integrates two copies of the Pythagorean problem as one system with the Dormand–Prince 5(4) method, which
+shrinks its steps automatically near close encounters (<NoteLink to="numerical-ode-solvers" />). Copy B starts with
+mass 3 moved $\delta$ along $x$. The log panel shows the distance between the copies and the relative energy error
+$|E(t)/E(0) - 1|$ of copy A.
+
+<PythagoreanProblem />
+
+The closest approach in the default run is $4.14 \times 10^{-4}$ at $t = 15.830$, between masses 4 and 5, which agrees
+with the $4 \times 10^{-4}$ at $t = 15.830$ in Szebehely and Peters <Cite id="szebehely1967" />. The tolerance
+changes the ending. At relative tolerances of $10^{-11}$, $10^{-12}$ and $10^{-13}$, mass 3 escapes into the first
+quadrant every time, but at different speeds and with binaries of different sizes. At $10^{-10}$, copy A ends
+differently: mass 5 is ejected and masses 3 and 4 pair up. At $10^{-8}$, mass 3 escapes into the third quadrant. The
+largest energy error is below $10^{-6}$ in every run at $10^{-10}$ or tighter, so a small energy error does not certify
+the trajectory.
+
+## Pitfalls
+
+- **Fixed steps fail at close encounters.** At a separation of $4 \times 10^{-4}$ the relative speed of masses 4 and 5
+  reaches about 171 <Cite id="szebehely1967" />, so the pass takes a few millionths of a time unit. A fixed step small
+  enough for it would take hundreds of millions of steps over the whole run. Use an adaptive method, or regularise the
+  equations near each close pair, as Szebehely and Peters did, with a <NoteLink to="change-of-variables">change of
+  variables</NoteLink> that removes the $1/r^2$ singularity.
+- **Softening changes the problem.** Replacing $1/r$ by $1/\sqrt{r^2 + \varepsilon^2}$, with softening length
+  $\varepsilon$, removes the singularity and makes fixed steps workable. It also caps the energy a close pass can
+  release, so close encounters and ejections change. Softening suits large N-body simulations that model a smooth mass
+  distribution, not a few-body problem.
+- **Energy conservation is necessary, not sufficient.** A run can conserve energy to $10^{-7}$ and still end in a
+  different state from a run at a tighter tolerance, because chaos amplifies errors that leave the energy unchanged.
+  Compare runs at two tolerances before trusting a trajectory past the first few encounters.
+- **No general solution is not no solution.** Every start that avoids collisions has a unique solution, and numerical
+  integration computes it to any accuracy up to the chaotic horizon. What is missing is a formula.
+- **The restricted problem is a different problem.** When one mass is negligible and the other two move on circles,
+  the problem has a conserved quantity of its own, the Jacobi constant (<NoteLink to="lagrange-points" />). The general
+  problem has no such constant.

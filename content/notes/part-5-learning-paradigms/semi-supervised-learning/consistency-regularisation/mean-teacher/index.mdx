@@ -1,0 +1,169 @@
+---
+title: 'Mean teacher'
+kind: technique
+summary: 'Mean teacher takes consistency targets from a teacher whose weights are the exponential moving average of the student''s, not from past predictions. The teacher improves at every step, so its targets are less noisy than those of temporal ensembling (Tarvainen and Valpola).'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['mean teacher model', 'EMA teacher', 'weight-averaged teacher']
+requires: [consistency-regularisation]
+related: [self-distillation-and-dino, noisy-student, fixmatch, knowledge-distillation, pseudo-labelling]
+references: [tarvainen2017meanteacher, laine2017temporal, berthelot2019mixmatch, sohn2020, grill2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { TeacherStudent } from './TeacherStudent'
+
+<Definition>
+**Mean teacher** is a consistency-regularisation method with two networks of the same architecture. The **student** is
+trained by <NoteLink to="gradient-descent">gradient descent</NoteLink> on the labelled loss plus a consistency cost: the
+squared difference between its prediction on a perturbed unlabelled input and the **teacher's** prediction on another
+perturbation of the same input. The teacher is never trained by gradient; after every update its weights become an
+<Gloss name="ema">exponential moving average</Gloss> (EMA) of the student's,
+$\thetavec' \leftarrow \alpha\thetavec' + (1 - \alpha)\thetavec$ <Cite
+id="tarvainen2017meanteacher" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="consistency-regularisation">Consistency regularisation</NoteLink> trains a network to agree with a
+target on each unlabelled input. The Π-model takes the target from a second noisy pass of the same network. That
+target is as noisy as the network: a single forward pass under random noise, from weights that change at every step.
+Temporal ensembling averages each input's predictions over epochs, which removes some of the noise, but its target for
+an input changes only once per epoch, when that input is next visited <Cite id="laine2017temporal" />. On a large
+dataset an epoch is thousands of steps, so the targets reflect an old network. The averages also take memory for
+every unlabelled input, and they cannot follow a stream of new data.
+
+Mean teacher keeps the idea of averaging and moves it from predictions to weights. One set of averaged weights serves
+every input, is updated at every step, and costs one extra copy of the parameters.
+
+## Mechanism
+
+### The two networks
+
+Let $f_{\thetavec}(\xvec) \in [0, 1]^K$ be the student's softmax output and $f_{\thetavec'}(\xvec)$ the teacher's, with
+the same architecture and $\thetavec'$ initialised to the student's starting weights. Each step draws two independent
+perturbations of each unlabelled input $\xvec_u$, such as noise, augmentation or a dropout mask: $\tilde\xvec_u$ for
+the student and $\tilde\xvec'_u$ for the teacher. The student minimises
+
+$$
+\Lcal(\thetavec) = \frac{1}{n_L}\sum_{i=1}^{n_L} -\log f_{\thetavec}(\tilde\xvec_i)_{y_i}
++ \lambda(t)\, \frac{1}{n_U}\sum_{u=1}^{n_U} \frac{1}{K}\norm{f_{\thetavec}(\tilde\xvec_u) - f_{\thetavec'}(\tilde\xvec'_u)}^2 ,
+$$
+
+with the teacher's output treated as a constant. After the optimiser updates $\thetavec$, the teacher follows:
+
+$$
+\thetavec'_t = \alpha\,\thetavec'_{t-1} + (1 - \alpha)\,\thetavec_t, \qquad 0 \le \alpha < 1 .
+$$
+
+### What the average holds
+
+Unrolling the update shows the teacher as a weighted average of every student so far:
+
+$$
+\thetavec'_t = (1 - \alpha)\sum_{s=1}^{t} \alpha^{t-s}\,\thetavec_s + \alpha^t\,\thetavec_0 .
+$$
+
+The weights $(1 - \alpha)\alpha^{t-s}$ decay geometrically with age, so the average covers roughly the last $1/(1 -
+\alpha)$ steps: 10 steps for $\alpha = 0.9$, 100 for $0.99$, 1000 for $0.999$. The term $\alpha^t\thetavec_0$ is the
+initial weights' remaining share, which falls below 5% after $3/(1 - \alpha)$ steps.
+
+Averaging weights is the same idea as Polyak averaging of an optimiser's iterates. It makes sense for a network
+because successive students lie close together along one training trajectory, where the network is close to linear in
+its weights, so the average network predicts close to the average of the predictions. Two independently trained
+networks have no such relation, and averaging their weights produces nonsense; the teacher works because it starts at
+the student and follows it.
+
+### Why the teacher's targets are better
+
+The student's weights jump around with the noise of each minibatch and each perturbation. The average cancels much of
+that noise while keeping the direction of progress, so the teacher's predictions are more stable and, after enough
+steps, usually more accurate than the student's. In Tarvainen and Valpola's training curves the averaged network
+predicts more accurately than the student after an initial period <Cite id="tarvainen2017meanteacher" />. A better
+target gives the student a better consistency signal, which in turn improves the teacher. When the loop is cut, with an
+averaged network kept for evaluation only and the student's own predictions as targets, learning is slower and
+overfitting starts earlier.
+
+Two limits mark the range of $\alpha$. At $\alpha = 0$ the teacher is the current student, and the method is the
+Π-model with the gradient blocked through one pass. As $\alpha \to 1$ the teacher stays at its initial weights and
+its targets carry no information. Tarvainen and Valpola used $\alpha = 0.99$ during the ramp-up of the consistency
+weight and $0.999$ after it: the student improves fast early, so the teacher should forget quickly, and slowly later,
+when a long memory helps <Cite id="tarvainen2017meanteacher" />.
+
+### The consistency cost
+
+The paper uses the squared error between probability vectors, as the Π-model does. It also tried a family of costs
+between squared error and KL divergence and found squared error best in its setting <Cite
+id="tarvainen2017meanteacher" />. The squared error is bounded, so an unlabelled input on which the teacher is
+confidently wrong cannot dominate the gradient.
+
+<TeacherStudent />
+
+## Worked example
+
+A one-weight model $p(x) = 1/(1 + e^{-\theta x})$ for the probability of class 2, decay $\alpha = 0.6$, teacher and
+student both starting at $\theta_0 = 0$.
+
+**Step 1: three student updates.** Gradient descent moves the student to $\theta_1 = 1.0$, $\theta_2 = 1.5$ and
+$\theta_3 = 1.8$.
+
+**Step 2: the teacher follows.** $\theta'_1 = 0.6 \times 0 + 0.4 \times 1.0 = 0.40$; $\theta'_2 = 0.6 \times 0.40 +
+0.4 \times 1.5 = 0.84$; $\theta'_3 = 0.6 \times 0.84 + 0.4 \times 1.8 = 1.224$.
+
+**Step 3: the weights in the average.** The unrolled form gives $\theta'_3 = 0.4\,\theta_3 + 0.24\,\theta_2 +
+0.144\,\theta_1 + 0.216\,\theta_0 = 0.72 + 0.36 + 0.144 + 0 = 1.224$. The initial weight still has a share of
+$0.6^3 = 0.216$.
+
+**Step 4: the consistency cost at one input.** Take the unlabelled input $x = 1$, perturbed to $1.1$ for the student
+and left at $1$ for the teacher. The student predicts $p = 1/(1 + e^{-1.8 \times 1.1}) = 0.879$ and the teacher
+$p' = 1/(1 + e^{-1.224}) = 0.773$. With two classes the cost $\frac{1}{K}\norm{\cdot}^2$ is $(p - p')^2 =
+0.106^2 = 0.0112$.
+
+**Step 5: its gradient.** The derivative of $(p - p')^2$ with respect to the student's weight, with $p'$ held
+constant, is $2(p - p')\,p(1 - p)\,\tilde x = 2 \times 0.106 \times 0.879 \times 0.121 \times 1.1 = 0.025$. Gradient
+descent lowers $\theta_3$ towards the teacher, by $0.025$ times the step size and the weight $\lambda$. Where the
+labelled loss pushes the student on, the teacher's lag pulls it back towards the recent consensus.
+
+In the figure, on two moons with eight labels, the decay sets the trade between noise and lag. On the default data
+seed, with $\lambda = 30$ and $\sigma = 0.1$, the student's accuracy over the second half of a 600-step run has a
+standard deviation of 2.8 percentage points at $\alpha = 0$ and 0.7 at $\alpha = 0.97$, and the teacher's 0.4 at
+$\alpha = 0.97$ and under 0.1 at $\alpha = 0.99$. The mean accuracy falls as $\alpha$ grows (from 90.4% at $\alpha = 0$
+to 84.9% for the teacher at $\alpha = 0.99$), because 600 full-batch steps are short against a memory of 100 steps.
+The small problem shows the smoothing, not the accuracy gain: the gain in the paper comes from long runs of noisy
+minibatch training on images, where the student's noise is large.
+
+## Cost
+
+Mean teacher stores a second copy of the weights and runs a forward pass of the teacher on each unlabelled input per
+step, without a backward pass. The EMA update costs one multiply-add per parameter per step. Compared with temporal
+ensembling it saves the $n_U \times K$ table of averaged predictions and refreshes its targets every step instead of
+every epoch.
+
+## Trade-offs
+
+- **The decay.** A small $\alpha$ gives a noisy teacher; a large one gives a stale teacher. The useful range spans
+  about an order of magnitude, and performance degrades quickly outside it <Cite id="tarvainen2017meanteacher" />.
+- **Noise is still needed.** With neither input augmentation nor dropout the two predictions agree trivially and the
+  consistency cost carries no signal; the paper's ablation found that either input augmentation or dropout was
+  necessary for passable results <Cite id="tarvainen2017meanteacher" />.
+- **Teacher and student coupled.** The teacher is an average of the student, so a student that drifts into a wrong
+  solution drags the teacher after it. The two networks are not independent, unlike the two classifiers of
+  <NoteLink to="co-training">co-training</NoteLink>.
+
+## Pitfalls
+
+- **<NoteLink to="batch-normalisation">Batch normalisation</NoteLink> statistics.** A teacher with batch normalisation
+  needs running statistics that belong to its own weights. Implementations either average the student's running
+  statistics along with the weights or recompute them from the teacher's own forward passes.
+- **Averaging when it hurts.** <NoteLink to="mixmatch">MixMatch</NoteLink>'s ablation found that guessing labels with an
+  EMA of the weights slightly raised its error <Cite id="berthelot2019mixmatch" />. The teacher helps when the targets
+  are the bottleneck, not in every pipeline.
+- **Evaluate the right network.** The teacher is usually the better classifier; reporting the student understates the
+  method, and the two differ most early in training.
+
+## In practice
+
+The averaged-weights teacher outlived the method that introduced it. <NoteLink to="fixmatch">FixMatch</NoteLink>
+evaluates an exponential moving average of its weights <Cite id="sohn2020" />. Self-supervised methods such as
+<Gloss name="byol" /> take their targets from an EMA teacher with no labels at all <Cite id="grill2020" />, and
+<NoteLink to="self-distillation-and-dino">DINO</NoteLink> does the same with a centred and sharpened teacher.

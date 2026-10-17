@@ -1,0 +1,199 @@
+---
+title: 'Horn clauses and logic programs'
+kind: concept
+summary: 'A Horn clause has at most one positive literal and reads as a rule ''head if body'', a fact or a query. A definite logic program is a set of such rules and facts; its meaning is its least Herbrand model, the ground facts reached by applying the rules until nothing new follows.'
+tags: [logic, worked-example]
+aliases: ['Horn clause', 'logic program', 'Prolog', 'least Herbrand model', 'definite clause', 'Datalog', 'immediate consequence operator', 'forward chaining']
+requires: [propositional-and-first-order-logic-for-learning]
+related: [unification-and-resolution, inductive-logic-programming, foil, probabilistic-logic-programming, deepproblog, knowledge-graph-rule-mining, differentiable-inductive-logic-programming]
+references: [vanemden1976, lloyd1987, dowling1984, clark1978]
+status: draft
+updated: 2026-10-17
+---
+
+import { LeastModelGrowth } from './LeastModelGrowth'
+
+<Definition>
+A **Horn clause** is a clause with at most one positive literal. A **definite clause** has exactly one and is written
+$h \leftarrow b_1 \land \dots \land b_n$: the **head** $h$ holds whenever every atom of the **body** $b_1, \dots, b_n$
+holds. A definite clause with an empty body is a **fact**, and a Horn clause with no positive literal,
+$\leftarrow b_1 \land \dots \land b_n$, is a **query** or goal. A **definite logic program** $P$ is a finite set of
+definite clauses. Its meaning is its **least Herbrand model** $M_P$: the set of ground atoms that are true in every
+Herbrand model of $P$, which equals the set of ground atoms $P$ entails <Cite id="vanemden1976" />.
+</Definition>
+
+## Intuition
+
+Most rules people write have one conclusion: "if $X$ is a parent of $Y$ and $Y$ is a parent of $Z$, then $X$ is a
+grandparent of $Z$". Horn clauses are exactly the clauses of that shape. Restricting a logic to them buys three things.
+A program has one intended meaning, its least model, rather than a family of models to choose between. That meaning can
+be computed by applying the rules forward until nothing new appears. And the same clauses can be run backwards, from a
+query to the facts that support it, which is how Prolog executes them.
+
+Rule learners exploit all three. A learned <NoteLink to="decision-lists-and-rule-sets">rule set</NoteLink> is a logic
+program, so its predictions are the facts in its least model. Coverage tests reduce to queries against that program.
+<NoteLink to="inductive-logic-programming">Inductive logic programming</NoteLink>, <NoteLink to="foil">FOIL</NoteLink>
+and the probabilistic and neural extensions of logic programming all take definite programs as their hypothesis
+language.
+
+The least-model semantics also fixes how absence is read. A fact that does not follow from the program is false. That
+is the closed-world assumption of databases, and it is what a learner relies on when it treats every unlisted fact as a
+negative example.
+
+## Details
+
+### Syntax and the Prolog reading
+
+In Prolog text a definite clause is written `h :- b1, b2, ..., bn.`, a fact `h.` and a query `?- b1, ..., bn.`. Names
+starting with an upper-case letter are variables, and every variable of a clause is universally quantified over the
+whole clause. A variable that occurs only in the body reads existentially. The clause
+
+$$
+\text{grandparent}(X, Z) \leftarrow \text{parent}(X, Y) \land \text{parent}(Y, Z)
+$$
+
+says: for all $X$ and $Z$, $X$ is a grandparent of $Z$ if there exists a $Y$ with $\text{parent}(X, Y)$ and
+$\text{parent}(Y, Z)$. Each clause has two readings. The **declarative** reading is the logical formula. The
+**procedural** reading is a procedure: to prove $\text{grandparent}(X, Z)$, prove $\text{parent}(X, Y)$, then
+$\text{parent}(Y, Z)$. <NoteLink to="unification-and-resolution">Unification and resolution</NoteLink> makes the
+procedural reading precise.
+
+### The least Herbrand model
+
+A Herbrand interpretation $I$ is a set of ground atoms, those it makes true
+(<NoteLink to="propositional-and-first-order-logic-for-learning">propositional and first-order logic for
+learning</NoteLink>). $I$ is a model of a definite clause when, for every ground instance
+$h\theta \leftarrow b_1\theta \land \dots \land b_n\theta$ with all $b_i\theta \in I$, also $h\theta \in I$.
+
+Definite programs have the **model intersection property**: the intersection of any set of Herbrand models of $P$ is
+again a model of $P$. The whole Herbrand base is always a model, so the intersection of all models exists, and it is the
+smallest model, $M_P$. A ground atom $A$ is in every model exactly when $P \models A$, so $M_P$ is the set of ground
+atoms that $P$ entails <Cite id="lloyd1987" />. General clauses lack the property. The clause
+$\text{male}(X) \lor \text{female}(X) \leftarrow \text{person}(X)$ with the fact $\text{person}(\text{sam})$ has the
+models $\set{\text{person}(\text{sam}), \text{male}(\text{sam})}$ and $\set{\text{person}(\text{sam}),
+\text{female}(\text{sam})}$, and their intersection, $\set{\text{person}(\text{sam})}$, is not a model.
+
+<Derivation title="Why the intersection of models is a model">
+Let $\set{I_k}$ be Herbrand models of $P$ and $J = \bigcap_k I_k$. Take a ground instance
+$h \leftarrow b_1 \land \dots \land b_n$ of a clause of $P$ with every $b_i \in J$. Then every $b_i$ is in each $I_k$.
+Each $I_k$ is a model, so $h \in I_k$ for every $k$, and therefore $h \in J$. So $J$ satisfies every ground instance of
+every clause and is a model of $P$. The argument uses that the head is a single atom. With a disjunctive head
+$h_1 \lor h_2$, each $I_k$ contains one of $h_1, h_2$, but different models can contain different ones, and $J$ may
+contain neither.
+</Derivation>
+
+### Computing the model: the immediate-consequence operator
+
+The **immediate-consequence operator** $T_P$ maps an interpretation $I$ to the heads that $P$ derives from it in one
+step:
+
+$$
+T_P(I) = \set{h\theta \;:\; (h \leftarrow b_1 \land \dots \land b_n) \in P,\; \theta \text{ ground},\; b_1\theta, \dots, b_n\theta \in I}.
+$$
+
+$T_P$ is monotone: a larger $I$ satisfies more bodies, so $I \subseteq J$ implies $T_P(I) \subseteq T_P(J)$. An
+interpretation $I$ is a model of $P$ exactly when $T_P(I) \subseteq I$, since that says every derivable head is already
+in $I$. Iterate from the empty set: $T_P \uparrow 0 = \emptyset$ and $T_P \uparrow (k + 1) = T_P(T_P \uparrow k)$. The
+first application adds the facts, the second adds what the rules derive from the facts, and so on. Van Emden and
+Kowalski proved that the least model is the limit of this sequence <Cite id="vanemden1976" />:
+
+$$
+M_P = \bigcup_{k \geq 0} T_P \uparrow k = \text{the least fixpoint of } T_P.
+$$
+
+Evaluating a program this way is **forward chaining**, or bottom-up evaluation. Each round applies every rule to the
+facts known before it; the figure below steps through the rounds.
+
+**Datalog.** A program without function symbols is a Datalog program. Its Herbrand base is finite: with $c$ constants,
+a predicate of arity $k$ has $c^k$ ground atoms. Each round before the fixpoint adds at least one atom, so forward
+chaining stops after at most as many rounds as the Herbrand base has atoms. With function symbols the Herbrand base is
+infinite. The program $\text{nat}(0)$, $\text{nat}(s(X)) \leftarrow \text{nat}(X)$ has the least model
+$\set{\text{nat}(0), \text{nat}(s(0)), \text{nat}(s(s(0))), \dots}$, and the iteration never stops, although every
+atom of the model appears after finitely many rounds.
+
+**Propositional Horn clauses.** When every atom is propositional, forward chaining that tracks how many body atoms of
+each clause are still unknown decides satisfiability in time linear in the total size of the clauses
+<Cite id="dowling1984" />. General propositional satisfiability is NP-complete, so the Horn restriction is what makes
+reasoning cheap.
+
+### Queries, negation and the closed world
+
+A query $\leftarrow b_1 \land \dots \land b_n$ asks whether some ground instance of the conjunction is in $M_P$, and for
+which values of its variables. A Horn clause with no head is the negation of the query, so proving the query refutes
+$P \cup \set{\leftarrow b_1 \land \dots \land b_n}$, which is how resolution answers it.
+
+Definite programs cannot state negative facts, and they entail no negative literal. Prolog adds **negation as
+failure**: `\+ g` succeeds when every attempt to prove `g` fails <Cite id="clark1978" />. A ground goal whose every
+proof attempt fails after finitely many steps is not in $M_P$, so for such goals negation as failure agrees with the
+closed-world assumption. Negation makes the semantics harder: the program
+$p \leftarrow \neg q$ has two minimal models, $\set{p}$ and $\set{q}$, so there is no least one. Stratified programs,
+where no predicate depends negatively on itself, recover a unique intended model by computing the lower strata first
+<Cite id="lloyd1987" />.
+
+## Worked example
+
+The family program of the figure has four facts and three rules:
+
+```prolog
+parent(ann, bob).  parent(bob, cid).  parent(bob, dee).  parent(cid, eve).
+grandparent(X, Z) :- parent(X, Y), parent(Y, Z).
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z).
+```
+
+The constants are ann, bob, cid, dee and eve, so the Herbrand base has $3 \times 5^2 = 75$ ground atoms. The rounds of
+forward chaining are:
+
+1. **Round 1.** $T_P(\emptyset)$ contains the four facts, since a fact has no body to check.
+2. **Round 2.** Apply the rules to the four parent facts.
+   - grandparent needs $\text{parent}(X, Y)$ and $\text{parent}(Y, Z)$ with the same $Y$. With $Y = \text{bob}$:
+     $\text{parent}(\text{ann}, \text{bob})$ joins $\text{parent}(\text{bob}, \text{cid})$ and
+     $\text{parent}(\text{bob}, \text{dee})$, giving $\text{grandparent}(\text{ann}, \text{cid})$ and
+     $\text{grandparent}(\text{ann}, \text{dee})$. With $Y = \text{cid}$: $\text{grandparent}(\text{bob},
+     \text{eve})$.
+   - The first ancestor rule copies each parent fact: four ancestor facts.
+   - The second ancestor rule needs an ancestor fact, and none is known before round 2, so it derives nothing yet.
+   - Round 2 adds 7 atoms; 11 are known.
+3. **Round 3.** The second ancestor rule now joins a parent fact with a round-2 ancestor fact:
+   $\text{parent}(\text{ann}, \text{bob})$ with $\text{ancestor}(\text{bob}, \text{cid})$ gives
+   $\text{ancestor}(\text{ann}, \text{cid})$, with $\text{ancestor}(\text{bob}, \text{dee})$ gives
+   $\text{ancestor}(\text{ann}, \text{dee})$, and $\text{parent}(\text{bob}, \text{cid})$ with
+   $\text{ancestor}(\text{cid}, \text{eve})$ gives $\text{ancestor}(\text{bob}, \text{eve})$. Three new atoms; 14
+   known.
+4. **Round 4.** $\text{parent}(\text{ann}, \text{bob})$ with $\text{ancestor}(\text{bob}, \text{eve})$ gives
+   $\text{ancestor}(\text{ann}, \text{eve})$. One new atom; 15 known.
+5. **Round 5.** Every rule instance with a true body has a head already known. $T_P$ adds nothing, so the 15 atoms are
+   $M_P$.
+
+The recursive rule needs one round per generation: an ancestor link spanning $d$ generations first appears in round
+$d + 1$. The model holds 15 of the 75 atoms of the Herbrand base; the other 60, such as
+$\text{ancestor}(\text{eve}, \text{ann})$, are false under the least-model reading. The cycle preset in the figure
+shows the Datalog bound at work: four edges around a cycle give 16 path atoms after 5 rounds, the whole of
+$\text{path}$'s part of the Herbrand base.
+
+<LeastModelGrowth />
+
+## Assumptions
+
+- **Definite clauses.** One atom in each head and no negation in the bodies. Negation as failure needs stratification or
+  another semantics, and disjunctive heads leave no least model.
+- **Range restriction for forward chaining.** Every variable of a head must occur in a body atom. Otherwise a rule such
+  as $\text{q}(X, Y) \leftarrow \text{p}(X)$ derives non-ground heads, and naive bottom-up evaluation has no finite
+  set of ground facts to add.
+- **Finite Herbrand base for termination.** Forward chaining terminates on Datalog programs. Function symbols allow
+  infinite models, which only <NoteLink to="generality-ordering-and-refinement">top-down search</NoteLink> with a depth
+  bound, or a query-directed method, can explore.
+
+## Pitfalls
+
+- **Clause order does not change the meaning, but it changes Prolog's behaviour.** $M_P$ is the same for any order of
+  clauses and of body atoms. Prolog's depth-first search is not: on the cycle preset, both the left-recursive and the
+  right-recursive definition of path make the query `path(a, e)` run forever, while forward chaining answers it in five
+  rounds.
+- **Reading absence as falsity outside the closed world.** A fact missing from the model is false only under the
+  closed-world assumption. A knowledge base that is known to be incomplete, such as a knowledge graph, needs a weaker
+  reading (<NoteLink to="knowledge-graph-rule-mining">knowledge-graph rule mining</NoteLink> uses a partial-completeness
+  assumption instead).
+- **Underestimating the Herbrand base.** It grows as $c^k$ in the arity $k$. A ternary predicate over 1,000 constants
+  has $10^9$ ground atoms, so naive bottom-up evaluation is used on small or indexed fact sets, and database systems
+  use semi-naive evaluation, in which each round joins at least one fact that is new since the previous round.

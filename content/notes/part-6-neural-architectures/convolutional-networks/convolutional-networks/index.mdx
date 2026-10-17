@@ -1,68 +1,137 @@
 ---
 title: 'Convolutional networks'
 kind: overview
-summary: 'Neural networks built from small filters shared across positions of a grid: the convolutional layer, its output sizes and receptive field, pooling and strided downsampling, residual blocks, and the line of image classifiers from LeNet and AlexNet to VGG and ResNet.'
+summary: 'Networks of small kernels shared across a grid: the convolutional layer and its variants, image architectures from LeNet and ResNet to EfficientNet and ConvNeXt, U-Net and feature pyramids for dense prediction, 1-D and 3-D convolution, and interpretation.'
 tags: [convolutional-networks, deep-learning, computer-vision, overview]
 aliases: [convolutional neural networks, CNNs, convnets]
 requires: [multilayer-perceptron, convolution]
-related: [feedforward-networks, graph-neural-networks, transformers]
-references: [goodfellow2016, lecun1998b]
+related: [feedforward-networks, graph-neural-networks, geometric-deep-learning, transformers, computer-vision]
+references: [goodfellow2016, zhang2023d2l, lecun1998b]
 status: draft
-updated: 2026-10-12
+updated: 2026-10-17
 ---
 
 <Definition>
 A **convolutional network** is a neural network whose main layers compute each output from a small window of the
-input, using one set of weights shared across all window positions. The input is a grid, such as an image, an audio
-spectrogram or a time series. Weight sharing makes the layer translation equivariant: shifting the input shifts the
-output. Stacks of such layers, interleaved with downsampling, build features from local edges up to whole objects
-<Cite id="lecun1998b" />.
+input, with one set of weights shared across all window positions. The input lies on a regular grid: an image, a
+spectrogram, a sensor recording or a video clip. Weight sharing makes each layer translation equivariant, so shifting
+the input shifts the output. Stacks of such layers, interleaved with downsampling, build features from local edges up
+to whole objects <Cite id="lecun1998b" />.
 </Definition>
 
 ## What it is for
 
-A fully connected layer on a 224 × 224 colour image needs about 150,000 weights per output unit and ignores the fact
-that nearby pixels are related. A convolutional layer needs only the weights of one small filter per output channel,
-whatever the image size, and it applies the same detector everywhere. This saving in parameters and the built-in
-assumption of locality made deep learning practical for images <Cite id="goodfellow2016" />.
+A fully connected layer on a $224 \times 224$ colour image needs $224 \cdot 224 \cdot 3 = 150{,}528$ weights per output
+unit and treats distant pixels like neighbouring ones. A $3 \times 3$ convolution from 3 to 64 channels has
+$3 \cdot 3 \cdot 3 \cdot 64 = 1{,}728$ weights whatever the image size, and it applies the same detectors at every
+position. Fewer weights and a built-in assumption of locality made deep learning practical for images
+<Cite id="goodfellow2016" />.
 
-Convolutional networks were the dominant architecture for <NoteLink to="image-classification" />,
-<NoteLink to="object-detection" /> and <NoteLink to="semantic-segmentation" /> from 2012, and remain common where data
-or compute are limited. One-dimensional convolutions process audio and time series, and the residual connection,
-introduced for convolutional networks, is now part of every deep architecture.
+Convolutional networks were the standard backbone for <NoteLink to="image-classification" />,
+<NoteLink to="object-detection" /> and <NoteLink to="semantic-segmentation" /> from 2012 to about 2020. They remain the
+default where data, memory or latency are limited, such as on phones, and the U-Net is the denoiser of many
+<NoteLink to="diffusion-models" />. One-dimensional convolutions classify heart rhythms and generate audio, and
+three-dimensional ones recognise actions in video. The <NoteLink to="residual-connections">residual
+connection</NoteLink>, introduced for convolutional networks, is now part of almost every deep architecture.
 
 ## Main ideas
 
-**Local, shared filters.** A <NoteLink to="convolutional-layer" /> slides a kernel over the input and computes a
-weighted sum at each position. Its output size follows from the kernel size, stride and padding, and its cost and
-parameter count from the numbers of input and output channels. Translation equivariance and the receptive field, the
-region of the input that affects one output, are its defining properties.
+**Local, shared filters.** A <NoteLink to="convolutional-layer" /> with a $k \times k$ kernel from $C$ to $C'$ channels
+holds $k^2 C C'$ weights and costs $k^2 C C'$ multiply-accumulates per output position. Its output width is
+$\lfloor (n + 2p - k)/s \rfloor + 1$ for input width $n$, padding $p$ and stride $s$. Translation equivariance is the
+symmetry it builds in; <NoteLink to="symmetry-and-equivariance" /> places it among the other symmetries a layer can
+respect. <NoteLink to="convolution-versus-attention-in-vision" /> compares this built-in locality with self-attention,
+which must learn it from data.
 
-**Downsampling grows the receptive field.** <NoteLink to="pooling-and-strides" /> shrink feature maps by taking the
-maximum or mean of each window, or by evaluating a convolution only at every $s$-th position. The receptive field then
-grows geometrically with depth instead of linearly, so a few dozen layers see the whole image. Pooling also gives some
-invariance to small shifts; striding without a low-pass filter can alias.
+**Resolution against receptive field.** A unit sees only the input positions in its
+<NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink>. Depth grows the field linearly, and
+<NoteLink to="pooling-and-strides" /> grow it geometrically by shrinking the feature map. Dilation grows it without
+shrinking the map. Downsampling without a low-pass filter aliases, and the <NoteLink to="transposed-convolution" />
+maps a small map back to a large one.
 
-**Residual blocks make depth trainable.** A <NoteLink to="residual-network" /> builds each block as
-$\yvec = \xvec + F(\xvec)$, so the block learns a correction to the identity and the gradient passes through every
-block unchanged. This allowed networks with hundreds of layers to train.
+**Factorising the cost.** Most of a full convolution's cost is channel mixing repeated at every kernel tap. The
+<NoteLink to="one-by-one-convolution" /> mixes channels alone, and
+<NoteLink to="depthwise-and-grouped-convolution" /> filters each channel or group alone. The
+<NoteLink to="inception-networks" /> and <NoteLink to="efficient-convolutional-networks" /> are built from these
+factorised blocks, and <NoteLink to="fast-convolution-algorithms" /> compute an unchanged layer with fewer operations.
 
-**Architectures grew deeper and more uniform.** <NoteLink to="classic-convolutional-network-architectures" /> compares
-LeNet-5, AlexNet, VGG-16 and ResNet-152. Over 1998 to 2015 depth rose from a handful of layers to 152, large kernels
-gave way to stacks of $3 \times 3$ kernels, tanh gave way to <Gloss name="relu" />, and batch normalisation and
-<NoteLink to="residual-connections">residual connections</NoteLink> appeared.
+**Shortcuts make depth trainable.** Plain networks deeper than about 20 layers train worse than shallower ones. A
+<NoteLink to="residual-network" /> builds each block as $\yvec = \xvec + F(\xvec)$, so the block learns a correction to
+the identity and the gradient reaches every block through the shortcuts. A
+<NoteLink to="densely-connected-network" /> concatenates earlier outputs instead of adding them, and
+<NoteLink to="normalisation-in-convolutional-networks" /> keeps the activations of each layer at a stable scale.
+
+**Keeping the grid for dense outputs.** A network without dense layers accepts any input size and returns a map of
+predictions. The <NoteLink to="fully-convolutional-network-and-u-net" /> recovers full resolution with skip
+connections from the encoder. The <NoteLink to="feature-pyramid-network" /> gives every scale strong features, and
+<NoteLink to="detection-heads-and-anchors" /> turn the map into boxes.
+
+**The same layer on other grids.** A <NoteLink to="one-dimensional-convolutional-networks">one-dimensional
+convolution</NoteLink> is a learned filter bank over a sequence. Causal, dilated stacks
+(<NoteLink to="wavenet-and-causal-convolution" />) reach $2^L$ past steps with $L$ layers of kernel size 2. A
+<NoteLink to="video-and-three-dimensional-convolution">three-dimensional kernel</NoteLink> spans frames as well as
+pixels, so it can detect motion.
+
+## Architecture timeline
+
+The table lists the image architectures of the chapter by the year they were first released. Each row names the one
+change it made to the template of convolution stages, downsampling and a classifier.
+
+| Year | Network | What it changed |
+| ---- | ------- | --------------- |
+| 1998 | <NoteLink to="classic-convolutional-network-architectures">LeNet-5</NoteLink> | convolution and subsampling stages trained end to end by backpropagation, on $32 \times 32$ digits <Cite id="lecun1998b" /> |
+| 2012 | <NoteLink to="classic-convolutional-network-architectures">AlexNet</NoteLink> | the same template scaled to <Gloss name="imagenet" /> on two <Gloss name="gpu" plural />, with <Gloss name="relu" />, <NoteLink to="dropout">dropout</NoteLink> and augmentation <Cite id="krizhevsky2012" /> |
+| 2014 | <NoteLink to="classic-convolutional-network-architectures">VGG</NoteLink> | only $3 \times 3$ kernels, in 16 to 19 weight layers <Cite id="simonyan2015" /> |
+| 2014 | <NoteLink to="inception-networks">GoogLeNet</NoteLink> | parallel $1 \times 1$, $3 \times 3$ and $5 \times 5$ branches behind $1 \times 1$ reductions <Cite id="szegedy2015" /> |
+| 2015 | <NoteLink to="residual-network">ResNet</NoteLink> | identity shortcuts, batch normalisation and global average pooling; 152 layers <Cite id="he2016" /> |
+| 2016 | <NoteLink to="densely-connected-network">DenseNet</NoteLink> | each layer reads the concatenated outputs of all earlier layers in its block <Cite id="huang2017" /> |
+| 2017 | <NoteLink to="efficient-convolutional-networks">MobileNet</NoteLink> | depthwise separable convolutions for phones <Cite id="howard2017mobilenets" /> |
+| 2017 | <NoteLink to="squeeze-and-excitation">SENet</NoteLink> | a gate per channel computed from the globally pooled features <Cite id="hu2018senet" /> |
+| 2017 | <NoteLink to="capsule-network">Capsule network</NoteLink> | vector capsules for parts and wholes, routed by agreement <Cite id="sabour2017capsules" /> |
+| 2018 | <NoteLink to="efficient-convolutional-networks">MobileNetV2</NoteLink> | inverted residual blocks with linear bottlenecks <Cite id="sandler2018mobilenetv2" /> |
+| 2019 | <NoteLink to="efficient-convolutional-networks">EfficientNet</NoteLink> | depth, width and input resolution scaled together by fixed ratios <Cite id="tan2019" /> |
+| 2020 | <NoteLink to="vision-transformer">Vision transformer</NoteLink> | attention over $16 \times 16$ patches in place of convolution <Cite id="dosovitskiy2021" /> |
+| 2022 | <NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> | a ResNet rebuilt with the stem, $7 \times 7$ depthwise kernels and training recipe of vision transformers <Cite id="liu2022" /> |
+| 2023 | <NoteLink to="modern-convolutional-networks">ConvNeXt V2</NoteLink> | <Gloss name="masked-autoencoder">masked-autoencoder</Gloss> pretraining for a convolutional network <Cite id="woo2023convnextv2" /> |
+
+Two trends run through the table. Depth rose from LeNet-5's 4 weight layers to ResNet's 152, while the parameter count
+fell from VGG-16's 138 million to ResNet-152's 60 million once global average pooling replaced the large dense layers.
+MobileNet, MobileNetV2 and EfficientNet target accuracy per multiply-add rather than accuracy alone, and the networks
+after 2020 are measured against attention. ConvNeXt showed that much of the 2020 gap between ResNets and vision
+transformers came from training, not from the architecture <Cite id="liu2022" />.
 
 ## How the notes fit together
 
-Read the <NoteLink to="convolutional-layer" /> first, then <NoteLink to="pooling-and-strides" />. The
-<NoteLink to="residual-network" /> needs the convolutional layer and <NoteLink to="backpropagation" />. The case study
-<NoteLink to="classic-convolutional-network-architectures" /> comes last and draws on all three.
+The chapter has five sub-chapters. The first is needed by all the others; the remaining four can be read in any order.
+
+1. <NoteLink to="building-blocks-of-convolutional-networks" /> defines each layer by its output shape, parameters and
+   cost. Start with the <NoteLink to="convolutional-layer" />, then <NoteLink to="one-by-one-convolution" /> and
+   <NoteLink to="pooling-and-strides" />.
+2. <NoteLink to="convolutional-network-architectures" /> assembles the blocks into image classifiers, from
+   <NoteLink to="classic-convolutional-network-architectures">LeNet, AlexNet, VGG and ResNet</NoteLink> to ConvNeXt.
+   The <NoteLink to="residual-network" /> is required by most later notes there.
+3. <NoteLink to="dense-prediction-with-convolutional-networks" /> replaces the classifier head with decoders, pyramids
+   and detection heads that predict per pixel or per anchor. It uses an architecture from sub-chapter 2 as its
+   backbone and the transposed and dilated convolutions of sub-chapter 1.
+4. <NoteLink to="convolution-beyond-images" /> applies the layer along one axis for audio, sensors and text, causally
+   for generation, and along three axes for video. It needs only the convolutional layer and, for WaveNet, the
+   receptive field.
+5. <NoteLink to="interpreting-convolutional-networks" /> shows what trained networks detect, where they find a class
+   and which cues they rely on. It needs the convolutional layer, global average pooling and
+   <NoteLink to="backpropagation" />.
 
 ## Prerequisites and next steps
 
-The notes assume the <NoteLink to="multilayer-perceptron" /> and discrete <NoteLink to="convolution" />. Training
-methods shared with every deep network, such as <NoteLink to="batch-normalisation" />, initialisation and data
-augmentation, are in <NoteLink to="training-deep-networks" />. The signal-processing view of convolution, filters and
-downsampling is in <NoteLink to="signal-processing" />. <NoteLink to="graph-neural-networks" /> generalise convolution
-from grids to graphs, and the <NoteLink to="vision-transformer" /> replaces convolutions with attention over image
-patches.
+The notes assume the <NoteLink to="multilayer-perceptron" /> and discrete <NoteLink to="convolution" />. The
+<NoteLink to="signal-processing" /> topic gives the filter and sampling view of convolution and downsampling.
+Training methods shared with every deep network, such as <NoteLink to="batch-normalisation" />, initialisation and
+<NoteLink to="data-augmentation" />, are in <NoteLink to="training-deep-networks" />. Dive into Deep Learning covers the
+same architectures with code <Cite id="zhang2023d2l" />.
+
+The task notes of <NoteLink to="computer-vision" /> in Part VII use these networks as backbones, and
+<NoteLink to="temporal-convolutional-networks" /> and <NoteLink to="time-series-classification" /> apply the
+one-dimensional layer to series. <NoteLink to="geometric-deep-learning" /> generalises convolution from translations to
+other symmetries, starting with the <NoteLink to="group-equivariant-convolutional-network" />.
+<NoteLink to="graph-neural-networks" /> carry the idea of shared local weights from grids to graphs, and
+<NoteLink to="transformers" /> replace fixed neighbourhoods with attention. <NoteLink to="long-convolution-models" />
+use convolutions as long as the sequence inside efficient <NoteLink to="sequence-models">sequence models</NoteLink>.

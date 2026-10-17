@@ -1,0 +1,219 @@
+---
+title: 'Linear recurrent units and S5'
+kind: concept
+summary: 'S5 uses one multi-input, multi-output state space with a diagonal state matrix, run by a parallel scan instead of S4''s convolution. The linear recurrent unit shows that a complex diagonal recurrence with eigenvalues initialised on a ring near 1 and normalised inputs matches S4.'
+tags: [state-space-models, sequence-models, long-context, worked-example]
+aliases:
+  [
+    S5,
+    LRU,
+    linear recurrent unit,
+    simplified state space layer,
+    complex diagonal recurrence,
+    stable exponential parameterisation,
+  ]
+requires: [structured-state-space-models, parallel-scan]
+related: [gated-linear-recurrence, hippo, mamba, recurrent-neural-network, vanishing-and-exploding-gradients]
+references: [smith2023s5, orvieto2023, gu2022s4, gu2022s4d, martin2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { LruRing } from './LruRing'
+
+<Definition>
+An **S5 layer** (simplified state space layer) maps an input sequence $\uvec_1, \dots, \uvec_L \in \reals^H$ to outputs
+$\yvec_k \in \reals^H$ through one shared state $\hvec_k \in \complex^P$ with a diagonal transition:
+
+$$
+\hvec_k = \bar\Lambdamat\,\hvec_{k-1} + \bar\Bmat\,\uvec_k, \qquad \yvec_k = \operatorname{Re}\paren{\Cmat\hvec_k} + \Dmat\uvec_k,
+$$
+
+where $\bar\Lambdamat = \diag(\bar\lambda_1, \dots, \bar\lambda_P)$, $\bar\Bmat \in \complex^{P \times H}$,
+$\Cmat \in \complex^{H \times P}$ and $\Dmat$ is diagonal. S5 obtains $\bar\Lambdamat$ and $\bar\Bmat$ by discretising a
+continuous system with one learned step per state, and computes all $L$ states with a parallel scan
+<Cite id="smith2023s5" />. The **linear recurrent unit** (LRU) is the same recurrence reached from the recurrent-network
+side: the eigenvalues are learned directly as $\lambda_j = \exp(-e^{\nu_j} + i e^{\theta_j})$, initialised on a ring
+of radii near 1, and the input is scaled by $\gamma_j = \sqrt{1 - \abs{\lambda_j}^2}$ <Cite id="orvieto2023" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="structured-state-space-models">structured state-space layer</NoteLink> (S4) gives each of the $H$
+channels its own single-input, single-output system with $N$ states and trains it as a long convolution. Two of its
+ingredients turn out not to be needed. The convolution is one way to evaluate a linear recurrence in parallel; a
+<NoteLink to="parallel-scan">parallel scan</NoteLink> is another, and the scan does not care whether the system mixes
+channels or changes over time. The intricate HiPPO matrix and its normal-plus-low-rank kernel algorithm can be replaced
+by a diagonal matrix with well-chosen eigenvalues.
+
+S5 keeps the continuous-time view of S4 and changes the computation: one multi-input, multi-output system, diagonal,
+run by a scan. The LRU drops the continuous-time view. It starts from a plain
+<NoteLink to="recurrent-neural-network">recurrent network</NoteLink> $\hvec_k = \sigma(\Amat\hvec_{k-1} + \Bmat\uvec_k)$
+and makes four changes, each of which helps on long-range tasks: remove the nonlinearity $\sigma$, diagonalise $\Amat$
+over the complex numbers, parameterise its eigenvalues so they stay inside the unit circle, and normalise the input
+so the state does not grow when the eigenvalues approach the circle. The result is a recurrence of the S5 form,
+reached without HiPPO, without discretisation and without a convolution <Cite id="orvieto2023" />.
+
+In both layers the eigenvalues carry the memory. A state with $\abs{\lambda} = r$ forgets a fraction $1 - r$ of itself
+per step, so its contribution halves every $\ln\tfrac12 / \ln r$ steps: 6.6 steps at $r = 0.9$ and 69 steps at
+$r = 0.99$. A spread of radii close to 1 gives a bank of memories with different lengths.
+
+## S5: one shared state, run by a scan
+
+### From many small systems to one
+
+S4 runs $H$ separate systems with $N$ states each, $HN$ states in all, and mixes channels only in the layer that
+follows. S5 runs one system with $P$ states whose input matrix $\Bmat \in \complex^{P \times H}$ reads all channels
+and whose output matrix $\Cmat \in \complex^{H \times P}$ writes all of them <Cite id="smith2023s5" />. With $P$
+comparable to S4's $N$, S5 stores $P$ state numbers where S4 stores $HN$.
+
+A shared state removes the convolutional mode's advantage. The kernel of a multi-input, multi-output system is a
+sequence of $H \times H$ matrices $\Cmat\bar\Lambdamat^k\bar\Bmat$, and convolving with it costs $O(H^2 L \log L)$.
+The recurrence costs $O(PHL)$ for the products $\bar\Bmat\uvec_k$ and $\Cmat\hvec_k$, plus $O(PL)$ for the diagonal
+scan, so S5 evaluates the recurrence directly. When $P = O(H)$ its cost matches S4's up to the factor $\log L$
+<Cite id="smith2023s5" />.
+
+### The scan
+
+Because $\bar\Lambdamat$ is diagonal, each state is a scalar recurrence $h_{k,j} = \bar\lambda_j h_{k-1,j} + b_{k,j}$
+with $b_{k,j} = (\bar\Bmat\uvec_k)_j$. Step $k$ is the pair $(\bar\lambda_j, b_{k,j})$, and two consecutive steps
+combine as $(a, b) \bullet (a', b') = (a'a,\ a'b + b')$. The operator is associative, so all $L$ states follow from a
+scan in $O(\log L)$ parallel rounds with $O(PL)$ total work <Cite id="martin2018" />. Nothing in the combination
+requires the pairs to be equal across steps. That is what later lets <NoteLink to="mamba">Mamba</NoteLink> make them
+depend on the input.
+
+### Discretisation and initialisation
+
+S5 parameterises the continuous diagonal matrix $\Lambdamat$, a step $\Delta_j$ per state, and discretises by the
+zero-order hold, $\bar\lambda_j = e^{\lambda_j\Delta_j}$ and $\bar\Bmat = \Lambdamat^{-1}(\bar\Lambdamat - \eye)\Bmat$
+<Cite id="smith2023s5" />. It initialises $\Lambdamat$ with the eigenvalues of **HiPPO-N**, the normal part of the
+<NoteLink to="hippo">HiPPO-LegS</NoteLink> matrix, which equals $-\tfrac12\eye$ plus a skew-symmetric matrix and so has
+eigenvalues $-\tfrac12 + i\omega$ and a well-conditioned eigenbasis. The steps are drawn log-uniformly from
+$[0.001, 0.1]$. Conjugate eigenvalues come in pairs, so only half are stored and the output takes twice the real part
+<Cite id="smith2023s5" />.
+
+A step per state has a second use. If observations arrive at irregular times, step $k$ can use the actual gap
+$\Delta t_k$, giving a different $\bar\Lambdamat_k$ at every position. The convolutional mode cannot represent this; the
+scan handles it unchanged <Cite id="smith2023s5" />.
+
+## The linear recurrent unit
+
+### A stable parameterisation
+
+A real matrix generally has complex eigenvalues. The rotation $\begin{pmatrix} 0 & 1 \\ -1 & 0 \end{pmatrix}$, for
+example, has eigenvalues $\pm i$. To keep the expressiveness of a dense recurrence in diagonal form, the LRU uses a
+complex diagonal $\Lambdamat$ <Cite id="orvieto2023" />. Each eigenvalue is written as
+
+$$
+\lambda_j = \exp\paren{-e^{\nu_j} + i\,e^{\theta_j}}, \qquad \nu_j, \theta_j \in \reals.
+$$
+
+Its modulus is $\abs{\lambda_j} = \exp(-e^{\nu_j})$. Because $e^{\nu_j} > 0$, the modulus lies in $(0, 1)$ for every
+value of $\nu_j$, so gradient steps can never make the recurrence unstable. Its phase is $e^{\theta_j}$. The exponential
+on the phase makes small phases easy to represent.
+
+### Initialisation on a ring
+
+The LRU draws eigenvalues uniformly, by area, on the ring $r_{\min} \le \abs\lambda \le r_{\max}$ with phases in
+$[0, \theta_{\max}]$. With $u_1, u_2$ uniform on $[0, 1]$,
+
+$$
+\nu = -\tfrac12\log\paren{u_1(r_{\max}^2 - r_{\min}^2) + r_{\min}^2}, \qquad \theta = \theta_{\max}u_2,
+\qquad \lambda = e^{-\nu + i\theta}.
+$$
+
+The modulus squared $e^{-2\nu}$ is then uniform on $[r_{\min}^2, r_{\max}^2]$, which is what uniform by area means for a
+ring <Cite id="orvieto2023" />. The defaults depend on the task. <NoteLink to="image-classification">Image
+classification</NoteLink> from pixel sequences used $[0.9, 0.999]$ with the full phase range $2\pi$.
+<NoteLink to="long-range-and-recall-benchmarks">Path-X</NoteLink>, with sequences of 16,384 steps, used
+$[0.999, 0.9999]$ and phases only up to $\pi/10$ <Cite id="orvieto2023" />.
+
+### Normalisation
+
+Eigenvalues near 1 make the state large. Feed the scalar recurrence $h_k = \lambda h_{k-1} + b_k$ with independent
+zero-mean inputs of variance $\sigma^2$. Unrolled, $h_k = \sum_{m \ge 0} \lambda^m b_{k-m}$, and the terms are
+uncorrelated, so
+
+$$
+\expect\abs{h_k}^2 = \sigma^2\sum_{m \ge 0}\abs\lambda^{2m} = \frac{\sigma^2}{1 - \abs\lambda^2}.
+$$
+
+At $\abs\lambda = 0.999$ the variance is 500 times the input's. The LRU multiplies the input of state $j$ by
+$\gamma_j = \sqrt{1 - \abs{\lambda_j}^2}$, which cancels the factor exactly at initialisation:
+
+$$
+\hvec_k = \Lambdamat\hvec_{k-1} + \gammavec \odot (\Bmat\uvec_k), \qquad \yvec_k = \operatorname{Re}(\Cmat\hvec_k) + \Dmat\uvec_k.
+$$
+
+The vector $\gammavec$ is stored as $\log\gamma_j$ and trained. Fixing $\gamma_j$ to $\sqrt{1 - \abs{\lambda_j}^2}$ at
+every step works about as well <Cite id="orvieto2023" />.
+
+### What the LRU shows
+
+Removing the recurrent nonlinearity improved accuracy rather than hurting it, and diagonal linear recurrences trained
+about 8 times faster than a dense <Gloss name="relu" /> recurrence on sequential <Gloss name="cifar-10" />
+<Cite id="orvieto2023" />. With all four changes the LRU reached 94.2% on Path-X, against 96.4% reported for S4 and
+98.6% for S5 in the same comparison. The conclusion is that a deep stack of linear recurrences with nonlinear layers
+between them is enough, and what S4 needed from its continuous-time theory was eigenvalues near the unit circle and a
+controlled forward pass. The LRU is the base of the gated recurrence of Griffin, described in
+<NoteLink to="gated-linear-recurrence" />.
+
+## Worked example
+
+Take an LRU with two states and one input channel, $\Bmat = (1, 1)^\tr$, with
+$\lambda_1 = 0.9\,e^{i\pi/4}$ and $\lambda_2 = 0.99\,e^{i\pi/20}$.
+
+**Normalisation.** $\gamma_1 = \sqrt{1 - 0.81} = 0.4359$ and $\gamma_2 = \sqrt{1 - 0.9801} = 0.1411$. Without them the
+white-noise gains $1/(1 - \abs\lambda^2)$ would be $5.26$ and $50.25$; with them both are 1.
+
+**Impulse response of state 1.** Feed $u = (1, 0, 0, \dots)$. Then $h_{0,1} = \gamma_1 = 0.4359$ and each step
+multiplies by $\lambda_1 = 0.6364 + 0.6364i$:
+
+| $k$ | $h_{k,1}$ | $\operatorname{Re} h_{k,1}$ |
+| --- | --- | --- |
+| 0 | $0.4359$ | $0.4359$ |
+| 1 | $0.2774 + 0.2774i$ | $0.2774$ |
+| 2 | $0.3531i$ | $0$ |
+| 3 | $-0.2247 + 0.2247i$ | $-0.2247$ |
+| 4 | $-0.2860$ | $-0.2860$ |
+| 5 | $-0.1820 - 0.1820i$ | $-0.1820$ |
+
+The modulus falls by $0.9$ per step and the phase turns by $45°$, so the real part oscillates with period 8 and decays
+with half-life 6.6 steps.
+
+**State 2.** $h_{0,2} = 0.1411$, $h_{1,2} = 0.1411 \times 0.99\,e^{i\pi/20} = 0.1380 + 0.0219i$, and after ten steps
+$h_{10,2} = 0.1411 \times 0.99^{10}\,e^{i\pi/2} = 0.1276i$. The state turns by $9°$ per step and halves every 69 steps.
+
+**Scan.** Two steps of state 1 combine as $(\lambda_1, b_1) \bullet (\lambda_1, b_2) = (\lambda_1^2,\ \lambda_1 b_1 +
+b_2)$. With $b_1 = 0.4359$ and $b_2 = 0$, the second component is $\lambda_1 \times 0.4359 = 0.2774 + 0.2774i$, the
+same $h_{1,1}$ as the sequential step.
+
+<LruRing />
+
+The figure draws the eigenvalues of a larger LRU from the ring and runs it on 32 steps of noise followed by silence.
+With $r_{\max} = 0.99$ the output is still ringing at the end of the 256-step window. Dragging both radii down to 0.9 or
+below silences it within about 30 steps of the end of the input. Reducing the maximum phase to $0.1\pi$ removes fast
+oscillation, which is the setting used for Path-X. With the normalisation switched off, the white-noise gain readout
+grows as $1/(1 - r^2)$ and the output scale grows with it. The scan and the convolution with the layer's kernel agree to
+rounding error for every setting.
+
+## Assumptions
+
+- **Time invariance, in the LRU and default S5.** The transition does not depend on the input. Selection by content
+  needs input-dependent coefficients, as in <NoteLink to="mamba" /> and
+  <NoteLink to="gated-linear-recurrence">gated linear recurrences</NoteLink>.
+- **Nonlinearity between layers.** The recurrence is linear; position-wise <Gloss name="mlp">multilayer
+  perceptrons</Gloss> or gated linear units between recurrent layers supply the nonlinearity <Cite id="orvieto2023" />.
+- **Complex arithmetic.** The state is complex and the output is a real part. Implementations store real and imaginary
+  parts, or pairs of conjugate eigenvalues.
+
+## Pitfalls
+
+- **Radii too far from 1.** With $r_{\max} = 0.9$ nothing older than about 30 steps survives. Long-range tasks need
+  radii within $10^{-3}$ of 1 or closer.
+- **Unconstrained eigenvalues.** Learning $\lambda$ directly, or the real part of $\log\lambda$ without the inner
+  exponential, lets an update push $\abs\lambda$ above 1 and the recurrence diverges on long sequences.
+- **Forgetting the normalisation.** Without $\gamma$, states with radii near 1 dominate the output at initialisation and
+  their gradients are large; training becomes unstable.
+- **Factor 2 in conjugate pairs.** Storing one eigenvalue of each conjugate pair requires the output to take twice the
+  real part. Mixing conventions between the scan and a convolution check gives outputs that differ by a factor of 2.

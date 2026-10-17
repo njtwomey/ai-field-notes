@@ -1,0 +1,218 @@
+---
+title: 'Graph Laplacian and the graph Fourier transform'
+kind: concept
+summary: 'The graph Laplacian $\Lmat=\Dmat-\Amat$ is positive semidefinite with $\xvec^\tr\Lmat\xvec=\tfrac12\sum_{ij}A_{ij}(x_i-x_j)^2$. Its eigenvectors are graph frequencies ordered by smoothness, and filtering a graph signal multiplies its spectrum by a function of the eigenvalues.'
+tags: [graph-neural-networks, graphs, linear-algebra, worked-example]
+aliases: ['graph Laplacian', 'normalised Laplacian', 'graph Fourier transform', 'graph signal processing', 'Dirichlet energy']
+requires: [eigendecomposition]
+related: [spectral-graph-convolution, spectral-clustering, laplacian-eigenmaps, discrete-fourier-transform, untrained-graph-propagation, positional-and-structural-encodings, oversmoothing]
+references: [shuman2013, vonluxburg2007, hammond2011, kipf2017]
+status: draft
+updated: 2026-10-17
+---
+
+import { GraphFrequencies } from './GraphFrequencies'
+import { LowPassFilter } from './LowPassFilter'
+
+<Definition>
+For an undirected graph on $n$ nodes with symmetric non-negative adjacency matrix $\Amat \in \reals^{n \times n}$ and
+degree matrix $\Dmat = \diag(d_1, \dots, d_n)$, $d_i = \sum_j A_{ij}$, the **graph Laplacian** is
+$\Lmat = \Dmat - \Amat$. It is symmetric and positive semidefinite, with
+<NoteLink to="eigendecomposition">eigendecomposition</NoteLink> $\Lmat = \Umat\Lambdamat\Umat^\tr$, eigenvalues
+$0 = \lambda_0 \le \lambda_1 \le \dots \le \lambda_{n-1}$ and orthonormal eigenvectors $\uvec_0, \dots, \uvec_{n-1}$,
+the columns of $\Umat$. A **graph signal** $\xvec \in \reals^n$ assigns a number to each node. Its **graph
+<NoteLink to="fourier-transform">Fourier transform</NoteLink>** is $\hat\xvec = \Umat^\tr\xvec$, with inverse
+$\xvec = \Umat\hat\xvec$, and a **spectral filter** with <NoteLink to="frequency-response">frequency response</NoteLink>
+$g$ maps $\xvec$ to $\Umat\, g(\Lambdamat)\, \Umat^\tr\xvec$ <Cite id="shuman2013" />.
+</Definition>
+
+## Intuition
+
+The ordinary Fourier transform writes a signal as a sum of sines and cosines, ordered from slow to fast. Low frequencies
+describe the broad shape and high frequencies the fine detail, so smoothing a signal means damping its high
+frequencies. A graph has no notion of "slow" or "fast" along an axis, but it does have a notion of smooth: a signal is
+smooth when nodes joined by an edge have similar values.
+
+The Laplacian turns that notion into a matrix. Row $i$ of $\Lmat\xvec$ is
+
+$$
+(\Lmat\xvec)_i = d_i x_i - \sum_j A_{ij} x_j = \sum_j A_{ij}(x_i - x_j),
+$$
+
+the total difference between node $i$ and its neighbours. It is zero when $x_i$ equals the average of its neighbours,
+and large when $x_i$ stands out. On a path graph with unit weights, $(\Lmat\xvec)_i = 2x_i - x_{i-1} - x_{i+1}$, the
+negative of the discrete second derivative. $\Lmat$ is the graph version of the operator $-\mathrm{d}^2/\mathrm{d}t^2$,
+whose eigenfunctions are exactly the sines and cosines of <NoteLink to="fourier-analysis">Fourier analysis</NoteLink>.
+The eigenvectors of $\Lmat$ play the same role on a graph.
+
+## The quadratic form and smoothness
+
+The central identity measures how much a signal varies across edges. Expand $\xvec^\tr\Lmat\xvec$ with
+$d_i = \sum_j A_{ij}$:
+
+$$
+\xvec^\tr\Lmat\xvec = \sum_i d_i x_i^2 - \sum_{i,j} A_{ij} x_i x_j
+= \tfrac12 \sum_{i,j} A_{ij} x_i^2 + \tfrac12 \sum_{i,j} A_{ij} x_j^2 - \sum_{i,j} A_{ij} x_i x_j
+= \tfrac12 \sum_{i,j} A_{ij}(x_i - x_j)^2.
+$$
+
+The middle step splits $\sum_i d_i x_i^2 = \sum_{i,j} A_{ij} x_i^2$ into two equal halves and uses the symmetry
+$A_{ij} = A_{ji}$ to rename indices in the second. Each edge appears twice in the double sum, so with unit weights
+$\xvec^\tr\Lmat\xvec = \sum_{\text{edges } (i,j)} (x_i - x_j)^2$. This quantity is the **Dirichlet energy** of $\xvec$.
+
+Three facts follow.
+
+- **Positive semidefinite.** A sum of squares with non-negative weights is non-negative, so $\xvec^\tr\Lmat\xvec \ge 0$
+  and every eigenvalue is $\ge 0$.
+- **Zero eigenvalues count components.** The energy is zero exactly when $x_i = x_j$ across every edge, so when $\xvec$
+  is constant on each connected component. The constant vector $\uvec_0 = \ones/\sqrt n$ always has $\lambda_0 = 0$, and
+  the number of zero eigenvalues equals the number of connected components <Cite id="vonluxburg2007" />.
+- **Eigenvalues measure smoothness.** For a unit eigenvector, $\uvec_k^\tr\Lmat\uvec_k = \lambda_k$: the eigenvalue is
+  the eigenvector's Dirichlet energy. By the Courant–Fischer theorem, $\uvec_1$ is the unit vector orthogonal to
+  $\ones$ with the smallest energy, $\uvec_2$ the smallest orthogonal to both, and so on. The eigenvectors are an
+  orthonormal basis ordered from the smoothest signal to the most oscillating one.
+
+On a cycle of $n$ nodes the eigenvalues are $2 - 2\cos(2\pi k/n)$ and the eigenvectors are the sampled cosines and
+sines of the <NoteLink to="discrete-fourier-transform" />. The graph Fourier transform reduces to the classical one on
+the graph that represents a periodic signal.
+
+<GraphFrequencies />
+
+## The graph Fourier transform
+
+Because $\Umat$ is orthogonal, $\hat\xvec = \Umat^\tr\xvec$ and $\xvec = \Umat\hat\xvec = \sum_k \hat x_k\uvec_k$. The
+coefficient $\hat x_k = \uvec_k^\tr\xvec$ is the amount of frequency $k$ in the signal. Two consequences mirror the
+classical transform:
+
+- **Parseval:** $\norm{\xvec}^2 = \norm{\hat\xvec}^2$, since an orthogonal matrix preserves length.
+- **Energy per frequency:** substituting $\xvec = \Umat\hat\xvec$ gives
+  $\xvec^\tr\Lmat\xvec = \hat\xvec^\tr\Lambdamat\hat\xvec = \sum_k \lambda_k \hat x_k^2$. A smooth signal has its
+  coefficients concentrated on small $\lambda_k$.
+
+**Filtering.** The <NoteLink to="convolution-theorem" /> says that convolution in time is multiplication of Fourier
+coefficients. Graphs have no shift operation, so the graph version is defined from the frequency side
+<Cite id="shuman2013" />: choose a gain $g(\lambda_k)$ for each frequency, multiply, and transform back,
+
+$$
+\yvec = \Umat\, g(\Lambdamat)\, \Umat^\tr\xvec = g(\Lmat)\,\xvec, \qquad g(\Lambdamat) = \diag(g(\lambda_0), \dots, g(\lambda_{n-1})).
+$$
+
+A **low-pass** filter has $g$ near 1 for small $\lambda$ and near 0 for large $\lambda$, and denoises a signal that is
+expected to be smooth. Two standard examples are the ideal low-pass $g(\lambda) = \indicator[\lambda \le \lambda_c]$
+with cut-off $\lambda_c$, and the **heat kernel** $g(\lambda) = e^{-t\lambda}$, which is the solution at time $t$ of
+the diffusion $\dot\xvec = -\Lmat\xvec$, the graph form of the <NoteLink to="heat-equation" />
+<Cite id="hammond2011" />. A high-pass filter keeps the large eigenvalues and detects where a signal changes abruptly.
+
+Computing $\Umat$ costs $O(n^3)$ time and $O(n^2)$ memory, and each transform is a dense $O(n^2)$ product. Filters that
+are polynomials in $\Lmat$ avoid both, because $\Umat\Lambdamat^k\Umat^\tr = \Lmat^k$ and $\Lmat$ is sparse; this is
+the step that leads to <NoteLink to="spectral-graph-convolution" />.
+
+<LowPassFilter />
+
+## Normalised Laplacians
+
+$\Lmat$ weights every node by its degree, so high-degree nodes dominate its quadratic form and its top eigenvectors
+often concentrate on hubs. Two normalised versions remove the degree scale <Cite id="vonluxburg2007" />:
+
+$$
+\Lmat_{\text{sym}} = \I - \Dmat^{-1/2}\Amat\Dmat^{-1/2}, \qquad \Lmat_{\text{rw}} = \I - \Dmat^{-1}\Amat.
+$$
+
+$\Lmat_{\text{sym}}$ is symmetric, with quadratic form
+$\xvec^\tr\Lmat_{\text{sym}}\xvec = \tfrac12\sum_{i,j} A_{ij}\paren{x_i/\sqrt{d_i} - x_j/\sqrt{d_j}}^2$, and its
+eigenvalues lie in $[0, 2]$. The value 2 is reached exactly when a connected component is bipartite. The derivation of
+this bound is in <NoteLink to="graph-convolutional-network" />.
+$\Lmat_{\text{rw}} = \Dmat^{-1/2}\Lmat_{\text{sym}}\Dmat^{1/2}$ has the same eigenvalues, and $\Dmat^{-1}\Amat$ is the
+transition matrix of a <NoteLink to="random-walk" /> on the graph, so smooth signals under $\Lmat_{\text{rw}}$ are those
+that one step of the walk barely changes. The propagation matrix of a graph convolutional network,
+$\tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2}$, equals $\I$ minus the symmetric Laplacian of the graph with
+self-loops <Cite id="kipf2017" />, so its large eigenvalues are the graph's low frequencies.
+
+## Uses of the spectrum
+
+The smoothest eigenvectors give cluster indicators in <NoteLink to="spectral-clustering" /> and low-dimensional
+coordinates in <NoteLink to="laplacian-eigenmaps" />. Fed to a network as node features, they become
+<NoteLink to="positional-and-structural-encodings">Laplacian positional encodings</NoteLink>. Repeated averaging over
+neighbours is a low-pass filter, which is why propagation alone separates communities in
+<NoteLink to="untrained-graph-propagation" />. Graph convolutions began as learned spectral filters
+<Cite id="shuman2013" />; <NoteLink to="spectral-graph-convolution" /> develops them.
+
+## Worked example
+
+Take the path $1{-}2{-}3{-}4{-}5$ with unit weights. The degrees are $(1, 2, 2, 2, 1)$ and
+
+$$
+\Lmat = \begin{bmatrix}
+1 & -1 & 0 & 0 & 0 \\
+-1 & 2 & -1 & 0 & 0 \\
+0 & -1 & 2 & -1 & 0 \\
+0 & 0 & -1 & 2 & -1 \\
+0 & 0 & 0 & -1 & 1
+\end{bmatrix}.
+$$
+
+**Spectrum.** For a path of $n$ nodes the eigenvalues are $\lambda_k = 2 - 2\cos(\pi k/n)$ and the eigenvectors are
+$u_k(i) = c_k\cos\paren{\pi k (i - \tfrac12)/n}$, $i = 1, \dots, n$, with $c_0 = 1/\sqrt n$ and $c_k = \sqrt{2/n}$
+otherwise: the basis of the discrete cosine transform. With $n = 5$:
+
+| $k$ | $\lambda_k$ | $\uvec_k$ | sign changes |
+| --- | --- | --- | --- |
+| 0 | 0 | $(0.447, 0.447, 0.447, 0.447, 0.447)$ | 0 |
+| 1 | 0.382 | $(0.602, 0.372, 0, -0.372, -0.602)$ | 1 |
+| 2 | 1.382 | $(0.512, -0.195, -0.632, -0.195, 0.512)$ | 2 |
+| 3 | 2.618 | $(0.372, -0.602, 0, 0.602, -0.372)$ | 3 |
+| 4 | 3.618 | $(0.195, -0.512, 0.632, -0.512, 0.195)$ | 4 |
+
+Eigenvector $k$ changes sign $k$ times along the path. Check $\uvec_1$ at node 2:
+$(\Lmat\uvec_1)_2 = 2(0.372) - 0.602 - 0 = 0.142$, and $\lambda_1 u_1(2) = 0.382 \times 0.372 = 0.142$.
+
+**A noisy ramp.** Let $\xvec = (0.5, 0.5, 2.5, 2.5, 4.5)$: the ramp $(0, 1, 2, 3, 4)$ plus the alternating pattern
+$\pm 0.5$. Its Dirichlet energy is the sum of squared differences along the four edges,
+$0^2 + 2^2 + 0^2 + 2^2 = 8$. The transform $\hat x_k = \uvec_k^\tr\xvec$ gives
+
+$$
+\hat\xvec = (4.696,\ -3.149,\ 0.391,\ -0.284,\ 1.023).
+$$
+
+For example, $\hat x_1 = 0.602(0.5) + 0.372(0.5) + 0 - 0.372(2.5) - 0.602(4.5) \approx -3.15$. The energy identity
+checks: $\sum_k \lambda_k\hat x_k^2 = 0.382(9.916) + 1.382(0.153) + 2.618(0.081) + 3.618(1.047) = 8.00$. The ramp has
+99.7% of its squared norm in $\hat x_0$ and $\hat x_1$. The alternating part puts $1.023^2 / 1.25 = 84\%$ of its squared
+norm in $\hat x_4$, the highest frequency.
+
+**Filter.** An ideal low-pass filter with cut-off between $\lambda_1$ and $\lambda_2$ keeps $k = 0, 1$:
+
+$$
+\yvec = 4.696\,\uvec_0 - 3.149\,\uvec_1 = (0.21,\ 0.93,\ 2.10,\ 3.27,\ 3.99).
+$$
+
+The alternation is gone and the ramp remains, with its two ends pulled towards the middle because the ramp itself has a
+small $\uvec_3$ component. The energy falls from 8 to $0.382 \times 3.149^2 = 3.79$. The heat kernel with $t = 1$ damps
+the frequencies by $e^{-\lambda_k} = (1, 0.68, 0.25, 0.07, 0.03)$ and gives $(0.86, 1.28, 2.06, 2.85, 3.46)$, smoother
+still.
+
+## Assumptions
+
+- **Undirected, non-negative weights.** Symmetry of $\Amat$ gives real eigenvalues and an orthonormal basis, and
+  non-negative weights give positive semidefiniteness. Directed graphs need other constructions, such as the magnetic
+  Laplacian, whose eigenvectors are complex.
+- **Smoothness is the right prior.** Low-pass filtering helps when connected nodes tend to have similar values
+  (homophily). When neighbours tend to differ, the useful information sits at high frequencies; see
+  <NoteLink to="graph-neural-networks-under-heterophily" />.
+- **One fixed graph.** The basis $\Umat$ belongs to one graph. Coefficients computed on one graph mean nothing on
+  another graph with different eigenvectors.
+
+## Pitfalls
+
+- **Eigenvectors are defined up to sign, and up to rotation within repeated eigenvalues.** $-\uvec_k$ is as valid as
+  $\uvec_k$, and a repeated eigenvalue has a whole subspace of eigenvectors. Any method that feeds eigenvectors to a
+  network, such as <NoteLink to="positional-and-structural-encodings">Laplacian positional encodings</NoteLink>, must
+  be invariant to these choices.
+- **Which Laplacian.** $\Lmat$, $\Lmat_{\text{sym}}$ and $\Lmat_{\text{rw}}$ have different eigenvectors on irregular
+  graphs, and a cut-off chosen for one does not transfer to another. State which one is used.
+- **Cost.** A full eigendecomposition is affordable up to a few thousand nodes. Beyond that, compute only a few extreme
+  eigenvectors by the Lanczos method, or use polynomial filters that need none.
+- **Frequency is relative to the graph.** A large eigenvalue on a dense graph and a large one on a sparse graph are not
+  comparable. The largest eigenvalue of $\Lmat$ is at most $2 d_{\max}$, and of $\Lmat_{\text{sym}}$ at most 2.
+- **Low-pass filtering over many steps destroys information.** Repeated averaging keeps only $\uvec_0$, and with it only
+  the degree profile; this is <NoteLink to="oversmoothing" /> in deep <NoteLink to="graph-neural-networks">graph
+  networks</NoteLink>.

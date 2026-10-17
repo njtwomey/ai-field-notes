@@ -1,71 +1,116 @@
 ---
 title: 'Graph neural networks'
 kind: overview
-summary: 'Neural networks on graphs: message passing, where each node updates its vector from an aggregate of its neighbours'' messages; the graph convolutional network derived from spectral filtering; graph attention; and the limits of oversmoothing and Weisfeiler–Lehman expressiveness.'
+summary: 'Networks that update each node from an order-free aggregate of its neighbours'' messages: graph convolution, attention and GIN layers, the Weisfeiler-Leman bound on what they distinguish, oversmoothing and oversquashing in deep stacks, and node, link and graph tasks.'
 tags: [graph-neural-networks, deep-learning, graphs, overview]
 aliases: [graph networks, geometric deep learning on graphs]
-requires: [multilayer-perceptron, backpropagation]
-related: [convolutional-networks, transformers, graph-and-network-data]
-references: [bronstein2021, gilmer2017]
+requires: [multilayer-perceptron, graph-and-network-data]
+related: [geometric-deep-learning, convolutional-networks, transformers, graph-and-network-data]
+references: [bronstein2021, gilmer2017, hamilton2020grl]
 status: draft
-updated: 2026-10-12
+updated: 2026-10-17
 ---
 
 <Definition>
-A **graph neural network** computes a vector for every node of a graph, and optionally for every edge or for the
-whole graph, by layers that combine each node's vector with those of its neighbours. The layers are shared across nodes
-and do not depend on how the nodes are numbered: relabelling the nodes relabels the outputs in the same way. Most such
-networks are instances of message passing <Cite id="gilmer2017" />.
+A **graph neural network** maps a graph with a feature vector per node, and optionally per edge, to a vector per node,
+per edge or per graph. Its layers update each node from its own vector and an aggregate of messages from its
+neighbours, using functions shared by all nodes. The aggregate ignores the order of the neighbours, so relabelling the
+nodes relabels the outputs in the same way. Most graph networks are instances of this message-passing scheme
+<Cite id="gilmer2017" />.
 </Definition>
 
 ## What it is for
 
-Much data is relational: molecules are atoms joined by bonds, social networks are people joined by friendships, a
-recommender's data is users joined to items they interacted with, and a road network is junctions joined by roads. A
-multilayer perceptron needs a fixed-length input in a fixed order, and a graph has neither. Graph neural networks take
-the graph as given and learn from both node features and connectivity.
+Molecules are atoms joined by bonds, citation networks are papers joined by references, and a recommender's data is
+users joined to the items they bought. A <NoteLink to="multilayer-perceptron" /> needs a fixed-length input in a fixed
+order. A graph has neither: a node can have any number of neighbours, and no numbering of the nodes is preferred. A
+graph neural network takes the graph as given and learns from node features and connectivity together
+<Cite id="hamilton2020grl" />.
 
-Typical tasks are node classification, such as labelling papers in a citation network; link prediction, such as
-recommending items; and graph-level prediction, such as a molecule's properties. In recommendation,
-<NoteLink to="lightgcn" /> propagates user and item embeddings over the interaction graph. The same symmetry argument
-that motivates graph networks also explains convolutional networks and transformers: each respects a symmetry of its
-input domain, translations of a grid or permutations of a set or graph <Cite id="bronstein2021" />.
+Predictions come at three levels: a label per node, such as a paper's field; a score per pair of nodes, for
+recommendation or knowledge-base completion; and a value per graph, such as a molecule's solubility. Graph generation
+runs the other way and produces new graphs.
 
 ## Main ideas
 
-**Messages from neighbours, aggregated without order.** A
-<NoteLink to="message-passing-neural-network" /> updates each node from its own vector and a sum, mean or maximum of
-messages from its neighbours. Because the aggregate ignores order, the layer commutes with any relabelling of the
-nodes. Stacking $K$ rounds lets information travel $K$ hops. A readout turns the node vectors into a graph-level
-output.
+**Permutation equivariance fixes the form of a layer.** Relabelling the nodes by a permutation matrix $\Pmat$ turns the
+node features $\Xmat \in \reals^{n \times d}$, for $n$ nodes with $d$ features each, into $\Pmat\Xmat$, and the
+adjacency matrix $\Amat$ into $\Pmat\Amat\Pmat^\tr$. A node-level layer must permute its output in the same way, and a
+graph-level readout must not change at all. Functions shared across nodes and combined by sums, means or maxima over
+neighbours satisfy both. <NoteLink to="graphs-as-neural-network-inputs" /> develops the argument and the input formats.
 
-**Graph convolution as spectral filtering.** The <NoteLink to="graph-convolutional-network" /> updates node features by
-a degree-normalised average over each node and its neighbours, followed by a shared linear map and a nonlinearity. It
-is derived as a first-order approximation of a filter defined through the eigenvectors of the graph Laplacian, the
-graph analogue of Fourier modes. The note applies it to semi-supervised node classification.
+**Nodes aggregate messages from their neighbours.** A <NoteLink to="message-passing-neural-network" /> computes, in
+each round, $\mvec_v = \bigoplus_{w \in \Ncal(v)} M(\hvec_v, \hvec_w, \evec_{vw})$ and
+$\hvec_v' = U(\hvec_v, \mvec_v)$. Here $\hvec_v$ is the vector of node $v$, $\Ncal(v)$ its set of neighbours,
+$\evec_{vw}$ an optional edge vector, $M$ and $U$ shared networks, and $\bigoplus$ an order-free aggregator. $K$ rounds
+carry information $K$ hops. The layers differ in how they weight the messages. The
+<NoteLink to="graph-convolutional-network" /> fixes the weights from node degrees, the
+<NoteLink to="graph-attention-network" /> learns them by a softmax over each neighbourhood, and
+<NoteLink to="gated-and-edge-conditioned-message-passing" /> computes the message map from the edge's features.
 
-**Learned neighbour weights.** The <NoteLink to="graph-attention-network" /> replaces the fixed degree-based weights
-with attention weights computed from both endpoints of each edge and normalised by a softmax over the neighbourhood.
-It is the graph form of the attention used in transformers, restricted to the edges of the graph.
+**Graph convolution is spectral filtering.** The graph Laplacian $\Lmat = \Dmat - \Amat$, with $\Dmat$ the diagonal
+matrix of node degrees, has eigenvectors ordered from smooth to oscillating, the graph analogue of Fourier modes. A
+spectral filter multiplies each mode by a function of its eigenvalue. A degree-$K$ polynomial in $\Lmat$ needs no
+eigenvectors and reaches exactly $K$ hops, and the graph convolutional network is its first-order case.
+<NoteLink to="graph-laplacian-and-graph-fourier-transform" /> and <NoteLink to="spectral-graph-convolution" /> derive
+both facts.
 
-**Depth and expressiveness are limited.** Many rounds of averaging make all node vectors in a connected graph similar,
-the oversmoothing problem, so graph networks are usually shallow. A message passing network can distinguish two graphs
-only if the Weisfeiler–Lehman colour refinement test does, so it cannot count triangles or detect some cycles. Both
-limits are derived in <NoteLink to="message-passing-neural-network" /> and
-<NoteLink to="graph-convolutional-network" />.
+**Colour refinement bounds what message passing distinguishes.** A message-passing network never separates two graphs
+to which the <NoteLink to="weisfeiler-leman-test" /> gives the same colour histogram. Such a network cannot tell a
+6-cycle from two disjoint triangles, and so cannot count triangles. Sum aggregation with an injective update reaches
+the bound, as in the <NoteLink to="graph-isomorphism-network" />. Extra node features
+(<NoteLink to="positional-and-structural-encodings" />) and
+<NoteLink to="higher-order-and-subgraph-graph-neural-networks" /> go past it at extra cost.
+
+**Depth meets two limits.** Repeated averaging drives node features towards the top eigenvector of the propagation
+matrix, so the nodes of a deep graph convolutional network become indistinguishable
+(<NoteLink to="oversmoothing" />). A node's receptive field grows exponentially with depth while its vector keeps a
+fixed width, so signal from distant nodes is squeezed through bottleneck edges
+(<NoteLink to="oversquashing-and-graph-rewiring" />).
+<NoteLink to="residual-and-jumping-knowledge-graph-networks">Residual and jumping-knowledge connections</NoteLink>,
+rewiring and the <NoteLink to="graph-transformer" />, in which every node attends to every other, counter these
+limits. Most message-passing models in use have two to six layers.
+
+**Each task needs its own output stage.** A pair of nodes is scored by a decoder on its two endpoint vectors
+(<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink>). A graph is summarised by a
+permutation-invariant readout such as a sum (<NoteLink to="graph-pooling-and-readout" />). Neighbour averaging hurts
+when linked nodes tend to have different labels
+(<NoteLink to="graph-neural-networks-under-heterophily">heterophily</NoteLink>). Gains reported on small fixed
+benchmark splits often vanish under realistic splits and tuned baselines
+(<NoteLink to="graph-learning-benchmarks">benchmark pitfalls</NoteLink>).
 
 ## How the notes fit together
 
-Start with the <NoteLink to="message-passing-neural-network" />, which defines the general framework. The
-<NoteLink to="graph-convolutional-network" /> and the <NoteLink to="graph-attention-network" /> are two choices of
-message and aggregation inside it. The graph convolution note also needs the
-<NoteLink to="eigendecomposition" /> for its spectral derivation; the attention note needs the
-<NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink>.
+Read the first two chapters first; the other four can follow in any order.
+
+- <NoteLink to="foundations-of-graph-neural-networks" /> covers graph inputs, the Laplacian and spectral filters.
+- <NoteLink to="message-passing-layers" /> defines the framework and its main layers.
+- <NoteLink to="expressiveness-of-graph-neural-networks" /> measures message passing against the Weisfeiler-Leman test
+  and covers the models that exceed it.
+- <NoteLink to="depth-and-long-range-information-in-graph-networks" /> derives oversmoothing and oversquashing and
+  compares the fixes.
+- <NoteLink to="graph-learning-tasks" /> takes one task per note, from node classification under heterophily to graph
+  generation, and ends with benchmarks.
+- <NoteLink to="scalable-heterogeneous-and-dynamic-graph-networks" /> adapts message passing to graphs that are large,
+  typed, timed or joined by hyperedges.
+
+Four notes on graph learning sit in other topics. <NoteLink to="graphsage" /> aggregates a fixed-size sample of each
+node's neighbours and embeds nodes unseen in training; it is in the recommender chapter, beside its descendant
+<NoteLink to="pinsage" />. <NoteLink to="geometric-deep-learning" /> derives message passing, convolution and
+rotation-equivariant layers from the symmetries of their input domains: permutations of a graph, translations of a
+grid, rotations of space <Cite id="bronstein2021" />. <NoteLink to="knowledge-graph-embeddings" /> gives each entity
+and relation of a knowledge graph a vector and scores triples, a lookup-table alternative to a graph network encoder
+for typed link prediction. <NoteLink to="self-supervised-learning-on-graphs" /> pretrains graph encoders without
+labels, by contrasting views of a graph or reconstructing masked node features.
 
 ## Prerequisites and next steps
 
-The notes assume the <NoteLink to="multilayer-perceptron" /> and <NoteLink to="backpropagation" />. The construction
-of graphs from data and the splitting of graph datasets are covered in <NoteLink to="graph-and-network-data" />.
-<NoteLink to="spectral-clustering" /> uses the same Laplacian eigenvectors without learning. Attention over all pairs
-of nodes, with no graph restriction, is the <NoteLink to="scaled-dot-product-attention" /> of
-<NoteLink to="transformers" />; graph recommenders in Part VII apply message passing to user-item graphs.
+The topic assumes the <NoteLink to="multilayer-perceptron" /> and <NoteLink to="backpropagation" />.
+<NoteLink to="graph-and-network-data" /> covers how graphs are built from data, featurised and split. The spectral notes
+use <NoteLink to="eigendecomposition" />, and the attention layers use the
+<NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink>.
+
+<NoteLink to="spectral-clustering" /> and <NoteLink to="label-spreading" /> use the same graph operators without
+learned weights. <NoteLink to="node-embeddings" /> learn one free vector per node instead of a function of features.
+Graph networks are applied to user-item graphs by <NoteLink to="lightgcn" /> and the other graph
+recommenders of Part VII, and to atoms by <NoteLink to="machine-learned-interatomic-potentials" />.

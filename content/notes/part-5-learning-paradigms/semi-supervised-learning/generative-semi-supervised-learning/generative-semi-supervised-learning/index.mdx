@@ -1,0 +1,218 @@
+---
+title: 'Generative semi-supervised learning'
+kind: technique
+summary: 'A generative model of $p(\xvec, y)$ uses unlabelled points through their marginal likelihood $\sum_y p(\xvec, y)$, fitted with the labelled likelihood by expectation-maximisation. It gains from unlabelled data when the model is right and loses accuracy when it is misspecified.'
+tags: [semi-supervised, expectation-maximisation, latent-variable-models, worked-example]
+aliases: ['semi-supervised EM', 'semi-supervised mixture model', 'EM-lambda']
+requires: [expectation-maximisation, gaussian-mixture-model]
+related:
+  [
+    semi-supervised-assumptions,
+    when-unlabelled-data-helps,
+    linear-discriminant-analysis,
+    naive-bayes,
+    mixture-discriminant-analysis,
+    when-semi-supervised-learning-fails,
+    semi-supervised-variational-autoencoders,
+    semi-supervised-generative-adversarial-networks,
+  ]
+references: [nigam2000em, cozman2003mixture, castelli1995exponential, dempster1977, sohn2020, zhu2009intro]
+status: draft
+updated: 2026-10-17
+---
+
+import { SemiSupervisedEm } from './SemiSupervisedEm'
+
+<Definition>
+**Generative semi-supervised learning** fits a <NoteLink to="weak-supervision-benchmarks">joint model</NoteLink>
+$p(\xvec, y \mid \thetavec) = \pi_y\, p(\xvec \mid y, \thetavec)$ of inputs and labels to $\ell$ labelled pairs and $u$
+unlabelled inputs at once. A labelled pair contributes its joint log-likelihood $\log p(\xvec_i, y_i \mid \thetavec)$.
+An unlabelled input contributes its marginal log-likelihood $\log \sum_y p(\xvec_j, y \mid \thetavec)$, in which the
+missing label is summed out. The parameters are fitted by
+<NoteLink to="expectation-maximisation">expectation-maximisation</NoteLink> with the missing labels as the latent
+variables, and the classifier is the posterior $p(y \mid \xvec, \thetavec)$ <Cite id="nigam2000em" />.
+</Definition>
+
+## Problem
+
+A classifier fitted to a handful of labels has high variance. With two labelled points per class, the class means of a
+<NoteLink to="linear-discriminant-analysis">linear discriminant</NoteLink> are each the average of two points, and the
+boundary can sit almost anywhere between the classes. Unlabelled points are often plentiful, but they carry information
+about $p(\xvec)$ only. They can improve the classifier only if the model ties $p(\xvec)$ to $p(y \mid \xvec)$, which is
+the role of the <NoteLink to="semi-supervised-assumptions">semi-supervised assumptions</NoteLink>.
+
+A generative classifier makes that tie explicit. Its input density is the mixture
+
+$$
+p(\xvec \mid \thetavec) = \sum_{k=1}^{K} \pi_k\, p(\xvec \mid y = k, \thetavec),
+$$
+
+so the same parameters $\thetavec$ that set the class posteriors also set the shape of $p(\xvec)$. Fitting the mixture
+to the unlabelled points pins down the components; the labels then say which component is which class. Castelli and
+Cover showed that when the mixture is identifiable, labelled points are needed only to name the components, and the
+error then falls exponentially fast in the number of labels <Cite id="castelli1995exponential" />.
+
+The method sits between two older ones. A supervised generative classifier
+(<Gloss name="linear-discriminant-analysis" />, <Gloss name="qda" />, <NoteLink to="naive-bayes">naive Bayes</NoteLink>)
+fits the same model to the labelled points alone. A <NoteLink to="gaussian-mixture-model">Gaussian mixture
+model</NoteLink> fits it to all points with every label missing, and the labels are attached afterwards
+(cluster-then-label). Semi-supervised EM keeps the model of the first and the data of the second, and lets both kinds of
+point shape the fit from the first iteration <Cite id="zhu2009intro" />.
+
+## Mechanism
+
+### The objective
+
+Let $L$ index the labelled points and $U$ the unlabelled ones, with $K$ classes. Write
+$p_k(\xvec) = p(\xvec \mid y = k, \thetavec)$ for the class-conditional density. The objective is the log-likelihood of
+everything observed:
+
+$$
+J(\thetavec) = \sum_{i \in L} \log \pi_{y_i}\, p_{y_i}(\xvec_i)
++ \lambda \sum_{j \in U} \log \sum_{k=1}^{K} \pi_k\, p_k(\xvec_j).
+$$
+
+The weight $\lambda \in [0, 1]$ scales the unlabelled term. With $\lambda = 1$, $J$ is the plain likelihood. With
+$\lambda = 0$, $J$ is the supervised likelihood and the unlabelled points are ignored. Nigam and coauthors introduced
+intermediate values as EM-$\lambda$ <Cite id="nigam2000em" />.
+
+The first sum splits into one term per class and has a closed-form maximiser. The second sum has a logarithm of a sum,
+which does not split. EM handles it by treating the labels of $U$ as latent variables.
+
+### The two steps
+
+Collect the class probabilities of each point in responsibilities $r_{ik} \in [0, 1]$ with $\sum_k r_{ik} = 1$.
+
+- **E-step.** For an unlabelled point, $r_{jk} = \pi_k p_k(\xvec_j) / \sum_m \pi_m p_m(\xvec_j)$, its posterior under
+  the current parameters. For a labelled point, $r_{ik} = 1$ if $k = y_i$ and 0 otherwise. The labelled responsibilities
+  are clamped: they never change.
+- **M-step.** Refit each class from all points, each weighted by $w_i r_{ik}$, where $w_i = 1$ for labelled and
+  $w_i = \lambda$ for unlabelled points.
+
+For Gaussian classes with one shared covariance (the model behind <Gloss name="latent-dirichlet-allocation" />), the
+M-step is a set of weighted averages. With $N_k = \sum_i w_i r_{ik}$ and $N = \sum_i w_i$,
+
+$$
+\pi_k = \frac{N_k}{N}, \qquad
+\muvec_k = \frac{1}{N_k} \sum_i w_i r_{ik}\, \xvec_i, \qquad
+\Sigmamat = \frac{1}{N} \sum_{k=1}^{K} \sum_i w_i r_{ik}\, (\xvec_i - \muvec_k)(\xvec_i - \muvec_k)^\top.
+$$
+
+These are the formulas of EM for a <NoteLink to="gaussian-mixture-model">Gaussian mixture</NoteLink>, with two changes:
+labelled points enter with hard, fixed responsibilities, and unlabelled points are down-weighted by $\lambda$. The start
+is the fit to the labelled points alone, so iteration 0 is the supervised classifier.
+
+<Derivation title="Why the M-step is a weighted average">
+Replace each unknown indicator $[y_j = k]$ of an unlabelled point by its expectation $r_{jk}$ under the current
+parameters. The expected complete-data log-likelihood is then
+
+$$
+Q(\thetavec) = \sum_i \sum_{k} w_i r_{ik} \paren{\log \pi_k - \tfrac12 \log \det(2\pi\Sigmamat)
+- \tfrac12 (\xvec_i - \muvec_k)^\top \Sigmamat^{-1} (\xvec_i - \muvec_k)}.
+$$
+
+Setting the gradient in $\muvec_k$ to zero gives $\sum_i w_i r_{ik} \Sigmamat^{-1}(\xvec_i - \muvec_k) = \zeros$, so
+$\muvec_k$ is the weighted mean. Maximising over $\pivec$ under $\sum_k \pi_k = 1$ with a Lagrange multiplier gives
+$\pi_k \propto N_k$. Differentiating in $\Sigmamat^{-1}$, with
+$\partial \log\det \Amat / \partial \Amat = \Amat^{-\top}$, gives the weighted pooled scatter. Each $w_i$ multiplies a
+whole term of $Q$, so the weighted problem has the same solution as an unweighted one in which point $i$ is repeated
+$w_i$ times.
+</Derivation>
+
+Each iteration never decreases $J$. The monotonicity argument of
+<NoteLink to="expectation-maximisation">expectation-maximisation</NoteLink> applies term by term: the unlabelled term is
+$\lambda$ times a marginal likelihood whose E-step bound touches it, and the labelled term has no latent variable and
+needs no bound <Cite id="dempster1977" />.
+
+## Worked example
+
+Take one input dimension, two classes with known unit variances and equal weights $\pi_0 = \pi_1 = \tfrac12$, so that
+only the means $\mu_0$ and $\mu_1$ are fitted. One point is labelled in each class: $x = -1$ in class 0 and $x = 1$ in
+class 1. Five points are unlabelled: $-2$, $0.5$, $2$, $3$ and $4$.
+
+**Start.** The labelled-only fit is $\mu_0 = -1$, $\mu_1 = 1$. With equal variances and weights, the log-odds of class 1
+at $x$ is $(\mu_1 - \mu_0)\,x - (\mu_1^2 - \mu_0^2)/2 = 2x$, so the boundary is at $x = 0$.
+
+**E-step.** The posterior of class 1 is the logistic function of the log-odds, $r_{j1} = 1/(1 + e^{-2x_j})$. For the
+five unlabelled points this gives $0.018$, $0.731$, $0.982$, $0.998$ and $1.000$. The point at $0.5$ is assigned to
+class 1 with probability $0.73$.
+
+**M-step.** Class 1 collects the labelled point at 1 with weight 1 and each unlabelled point with weight $r_{j1}$:
+$N_1 = 1 + 0.018 + 0.731 + 0.982 + 0.998 + 1.000 = 4.728$, and the weighted sum of positions is
+$1 + (-2)(0.018) + (0.5)(0.731) + (2)(0.982) + (3)(0.998) + (4)(1.000) = 10.285$. So $\mu_1 = 10.285 / 4.728 = 2.175$.
+Class 0 collects weight $N_0 = 1 + 0.982 + 0.269 + 0.018 + 0.002 + 0.000 = 2.272$ and positions summing to $-2.785$, so
+$\mu_0 = -1.226$.
+
+**Next E-step.** The boundary $(\mu_0 + \mu_1)/2$ has moved from $0$ to $0.475$. The point at $0.5$ now has $r = 0.522$,
+almost undecided.
+
+**Convergence.** Repeating the two steps converges to $\mu_0 = -1.005$ and $\mu_1 = 2.333$, with the boundary at
+$0.664$. The point at $0.5$ ends with $r = 0.367$: it has changed class. The three unlabelled points at 2, 3 and 4
+pulled the class-1 mean to the right, and the boundary followed them into the gap between $-2$ and $2$. The labelled
+pair alone put the boundary at 0, midway between two points; the unlabelled points moved it to where the data are
+sparse.
+
+The figure runs the same procedure in two dimensions.
+
+<SemiSupervisedEm />
+
+On the default data set, with two labels per class, the labelled-only fit labels 63% of the unlabelled points correctly
+and EM reaches 92%, the accuracy of the same model fitted with every label. On the skewed data set, the labelled-only
+fit reaches 94% and EM falls to 75%, while the model fitted with every label reaches 97%: the labels alone would place a
+good linear boundary, and the unlabelled points pull it away.
+
+## Cost
+
+One iteration costs $O((\ell + u)\,K d^2)$ for the responsibilities and scatter matrices in $d$ dimensions, plus
+$O(K d^3)$ to factor the covariances. The number of iterations is the larger cost. EM converges at a rate set by the
+fraction of missing information, and with a few labels among many unlabelled points almost all the label information is
+missing. The figure's runs take 15 to 60 iterations to settle, where EM on the fully labelled data would need one.
+
+## Trade-offs
+
+- **The model must be right.** Unlabelled data move the parameters towards the best fit of $p(\xvec)$, not towards the
+  best classifier. When the classes really are the model's shape, the two coincide and the unlabelled points cut the
+  variance of the fit. When they are not, the best fit of $p(\xvec)$ can put the boundary in the wrong place, and more
+  unlabelled data make that boundary more certain. Cozman and coauthors showed that unlabelled data can then raise the
+  error while more labelled data would lower it. In their asymptotic analysis the maximum-likelihood estimate converges
+  to a limit that depends on the ratio of labelled to unlabelled points: under a wrong model the unlabelled data change
+  the bias of the estimator, not only its variance <Cite id="cozman2003mixture" />.
+- **Hedging with $\lambda$.** A small $\lambda$ keeps the labelled points in charge and lets the unlabelled ones adjust
+  the fit. Nigam and coauthors chose $\lambda$ by <Gloss name="loo">leave-one-out cross-validation</Gloss> on the
+  labelled data. On their web page data the best $\lambda$ was larger when there were fewer labels: with very few
+  labels, heavy reliance on the unlabelled data helped despite the model's errors, and with more labels it hurt. With
+  the tuned $\lambda$, large unlabelled sets no longer degraded accuracy <Cite id="nigam2000em" />.
+- **A more flexible model.** Giving each class several mixture components, as
+  <NoteLink to="mixture-discriminant-analysis">mixture discriminant analysis</NoteLink> does, lets a class be
+  multimodal. Nigam and coauthors used this with naive Bayes for text classes made of several sub-topics
+  <Cite id="nigam2000em" />. The cost is more parameters to fit from the same few labels.
+- **Where it is used.** Mixture models fitted by semi-supervised EM suit low-dimensional data with a credible parametric
+  form, and <NoteLink to="text-classification">text classification</NoteLink> with naive Bayes, where Nigam and
+  coauthors cut the error by up to 30% <Cite id="nigam2000em" />. For images and other high-dimensional inputs the
+  class-conditional density is not Gaussian or multinomial in any useful sense. There the generative route continues
+  through deep latent-variable models (<NoteLink to="semi-supervised-variational-autoencoders">semi-supervised
+  variational autoencoders</NoteLink>, <NoteLink to="semi-supervised-generative-adversarial-networks">semi-supervised
+  GANs</NoteLink>), and the strongest methods since about 2020 are discriminative:
+  <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> and <NoteLink to="fixmatch">consistency
+  regularisation</NoteLink> on top of
+  <NoteLink to="self-supervised-pretraining-for-semi-supervised-learning">self-supervised pretraining</NoteLink>
+  <Cite id="sohn2020" />.
+
+## Pitfalls
+
+- **Misspecification looks like success.** The objective $J$ rises at every iteration whether or not accuracy does. On
+  the skewed data set in the figure, the objective per point climbs while accuracy falls from 94% to 75%. Only held-out
+  labelled data reveal the damage; the note on <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised
+  learning fails</NoteLink> collects the cases.
+- **Local maxima.** EM converges to a stationary point near its start. Starting from the labelled-only fit keeps the
+  components attached to the right classes, but with one label per class the start is poor and the run can end with a
+  component that covers parts of two classes.
+- **Degenerate covariances.** A covariance estimated from a few labelled points can be singular, and per-class
+  covariances can collapse onto a single point. A ridge on the starting covariance and a small floor on every variance
+  prevent both.
+- **<NoteLink to="class-weights">Class weights</NoteLink> follow the unlabelled data.** The M-step estimates $\pi_k$
+  mostly from the unlabelled points. If the unlabelled pool has different class proportions from the deployment data, or
+  contains classes absent from the labels, the priors and the boundary shift with it.
+- **Text-specific behaviour does not transfer.** Results with multinomial naive Bayes on documents depend on the
+  smoothing of word counts and on the length of the documents. They are not evidence that EM helps for a Gaussian model
+  of other data.

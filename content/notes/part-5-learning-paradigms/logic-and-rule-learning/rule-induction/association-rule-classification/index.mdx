@@ -1,0 +1,210 @@
+---
+title: 'Association-rule classification'
+kind: technique
+summary: 'Associative classifiers mine every rule whose consequent is a class label with a miner such as Apriori, rank the rules by confidence and support, and keep those that still classify a training row correctly. CBA predicts with the first matching rule; CMAR combines several.'
+tags: [logic, rule-learning, worked-example]
+aliases: ['CBA', 'classification based on associations', 'CMAR', 'associative classification', 'class association rule']
+requires: [pattern-mining, decision-lists-and-rule-sets]
+related:
+  [
+    bayesian-rule-lists,
+    certifiably-optimal-rule-lists,
+    sequential-covering,
+    rule-quality-measures,
+    subgroup-discovery,
+    chi-squared-distribution,
+  ]
+references: [liu1998cba, li2001cmar, agrawal1994, han2000, angelino2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { CbaBuilder } from './CbaBuilder'
+
+<Definition>
+**Association-rule classification** builds a classifier from **class association rules**, rules $X \to c$ whose
+antecedent $X$ is a set of attribute values and whose consequent $c$ is a class. A frequent-pattern miner finds every
+such rule whose support and confidence pass two thresholds. The rules are then ranked, and a subset of them is selected
+to cover the training data. <Gloss name="cba" /> keeps the selected rules as a
+<NoteLink to="decision-lists-and-rule-sets">decision list</NoteLink> and predicts with the first rule that matches
+<Cite id="liu1998cba" />. CMAR keeps several rules per case and lets all matching rules vote by a weighted $\chi^2$
+statistic <Cite id="li2001cmar" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="sequential-covering">sequential covering</NoteLink> learner chooses each rule by a greedy search over
+the rows that earlier rules left uncovered. A rule that would score well on the whole data set is never examined if the
+search turns away from it early, and every rule after the first is judged only on the leftover rows. Liu, Hsu and Ma
+call these "local" best rules <Cite id="liu1998cba" />.
+
+<NoteLink to="pattern-mining">Association rule mining</NoteLink> solves the opposite problem. Apriori and FP-growth
+enumerate every rule above a support and a confidence threshold, exhaustively and fast, but the rules have no designated
+target and no rule tells how to combine the others into predictions <Cite id="agrawal1994" />.
+
+Associative classification joins the two. It keeps the exhaustive miner, restricts the consequent to the class
+attribute, and adds a selection step that turns thousands of mined rules into a classifier. The search space is the set
+of all frequent conjunctions, the same pre-mined collection that <NoteLink to="bayesian-rule-lists">Bayesian rule
+lists</NoteLink> and <NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule lists</NoteLink> later
+optimise over. Associative classification selects from it by a fixed ranking and one pass over the data instead of by
+an objective.
+
+## Mechanism
+
+### Class association rules
+
+The data are $n$ rows, each a set of **items** (attribute-value pairs such as $\text{sex} = \text{female}$) and a class
+$y_i \in \{1, \dots, K\}$. Numeric attributes are discretised into intervals first, so every attribute is nominal. A
+row **contains** an item set $X$ when it has every item of $X$. For a rule $X \to c$:
+
+- the **condition count** $n_X$ is the number of rows that contain $X$;
+- the **rule count** $n_{X,c}$ is the number of those rows with class $c$;
+- the **support** is $\operatorname{supp}(X \to c) = n_{X,c}/n$, the share of all rows that the rule covers and
+  classifies correctly;
+- the **confidence** is $\operatorname{conf}(X \to c) = n_{X,c}/n_X$, the share of covered rows with class $c$.
+
+For each item set $X$, CBA keeps only the class of highest confidence. That rule is a class association rule (CAR) when
+its support is at least $\text{minsup}$ and its confidence at least $\text{minconf}$ <Cite id="liu1998cba" />.
+Confidence is the rule's <NoteLink to="rule-quality-measures">precision</NoteLink>, and support is its count of
+correctly covered rows divided by $n$.
+
+### Mining the rules
+
+The support of a rule cannot exceed the support of its item set, $n_{X,c} \le n_X$, and an item set is at most as
+frequent as any of its subsets. Hence every CAR is built on an item set that is frequent at the threshold
+$\text{minsup}$, and every subset of that item set is frequent too. A level-wise Apriori search over item sets, which
+extends only frequent item sets and counts the classes of the rows each one covers, therefore finds every CAR. CBA's
+rule generator works this way <Cite id="liu1998cba" />. CMAR mines the same rules with FP-growth, which reads the class
+distribution of every frequent pattern from a prefix tree in two passes over the data <Cite id="li2001cmar" />
+<Cite id="han2000" />.
+
+### Ranking
+
+CBA orders the rules totally. Rule $r_i$ precedes $r_j$ when $r_i$ has higher confidence; at equal confidence, when it
+has higher support; at equal confidence and support, when it was generated first, which means it has fewer conditions
+<Cite id="liu1998cba" />. The ranking is global: it is computed once on all rows, before any rule is selected.
+
+### Selecting rules by database coverage
+
+CBA's classifier builder, called M1 in the paper, walks down the ranking once <Cite id="liu1998cba" />.
+
+1. Take the next rule $r$. Find the remaining rows it covers.
+2. If $r$ classifies none of them correctly, skip it.
+3. Otherwise append $r$ to the list and delete every remaining row it covers, correct or not.
+4. Set the default class to the majority class of the rows still left, and record the total training errors: the errors
+   of the rules appended so far plus the errors the default would make on the rows left.
+5. Stop when no rule or no row is left. Cut the list after the first rule with the fewest recorded errors, and keep the
+   default class recorded at that rule.
+
+Two properties follow. Every training row is classified by the highest-ranked rule that covers it, because rules are
+taken in rank order and a row leaves as soon as a rule covers it. Every rule in the list classifies at least one row
+correctly at the moment it is chosen. The cut is a stopping rule on the training error: rules after it only add
+errors. The paper's faster builder, M2, selects rules with the same two properties in slightly more than one pass over
+the data.
+
+### Several rules per prediction: CMAR
+
+A single rule decides each CBA prediction, and the highest-confidence rule is often a small one. CMAR consults all the
+selected rules that match a case <Cite id="li2001cmar" />. It prunes the mined rules in three steps.
+
+- A rule is dropped when a more general rule, one whose items are a subset of its own, ranks higher.
+- A rule is dropped unless its antecedent and its class are positively correlated by a $\chi^2$ test on the
+  $2 \times 2$ table of (contains $X$ or not) by (class $c$ or not).
+- Database coverage as in CBA, except that a row leaves only after $\delta$ selected rules have covered it; the paper
+  uses $\delta = 4$.
+
+To classify a case, CMAR groups the matching rules by class and scores each group by its weighted $\chi^2$,
+
+$$
+\sum_{r \in \text{group}} \frac{\chi^2(r)^2}{\max\chi^2(r)},
+$$
+
+where $\max\chi^2(r)$ is the largest $\chi^2$ that a rule with the same condition count $n_X$ and class count could
+reach. Dividing by it stops a strongly correlated rule for a rare class from outvoting well-supported rules for a common
+one. The group with the largest score gives the class; when no rule matches, the majority class does.
+
+## Worked example
+
+Take the Titanic data: 2201 people described by class (1st, 2nd, 3rd, crew), sex and age (child, adult), of whom 711
+survived. Set $\text{minsup} = 1\%$ (22 rows), $\text{minconf} = 50\%$ and at most three conditions per rule.
+
+**Mining.** Apriori finds 36 frequent item sets. Of their highest-confidence rules, 33 pass both thresholds. The top of
+the ranking is
+
+1. $\text{class} = \text{2nd} \wedge \text{age} = \text{child} \to$ survived (24 of 24, confidence 100%),
+2. $\text{class} = \text{1st} \wedge \text{sex} = \text{female} \to$ survived (141 of 145, 97.2%),
+3. $\text{class} = \text{1st} \wedge \text{sex} = \text{female} \wedge \text{age} = \text{adult} \to$ survived (140 of
+   144, 97.2%),
+4. $\text{class} = \text{2nd} \wedge \text{sex} = \text{male} \wedge \text{age} = \text{adult} \to$ died (154 of 168,
+   91.7%).
+
+Rules 2 and 3 tie on confidence; rule 2 ranks first on support. The broad rule $\text{sex} = \text{male} \wedge
+\text{age} = \text{adult} \to$ died (1329 of 1667, 79.7%) only comes tenth, below several small rules of higher
+confidence.
+
+**Selection.** M1 walks down the ranking with all 2201 rows in play.
+
+- Rule 1 covers the 24 second-class children, all survivors. It joins; the default for the other 2177 rows is "died",
+  which is wrong for the $711 - 24 = 687$ survivors among them. Total errors: 687.
+- Rule 2 covers 145 first-class women with 4 deaths. It joins, and the default now misses $687 - 141 = 546$ survivors.
+  Total: $4 + 546 = 550$.
+- Rule 3 covers no remaining row, because rule 2 removed every first-class adult woman. It is skipped.
+- Rule 4 covers 168 second-class men and makes 14 errors. Those 14 survivors were default errors already, so the total
+  stays at 550. The next rule that joins, second-class women to survived, covers the 93 adult women left and lowers the
+  total to 483.
+- Rules for third-class men and third-class boys join without changing the total.
+- The tenth rule, adult men to died, covers the 1037 crew and first-class men still in play and misclassifies 249 of
+  them. The 224 rows left are third-class women and girls, crew women and five first-class boys, of whom 115 survived.
+  The default switches to "survived", and the total drops to 477.
+- Four more rules join and the totals run 483, 481, 478, 478. No row is left.
+
+The first minimum is 477, at the seventh rule appended. CBA's classifier is those seven rules followed by the default
+"survived", with training accuracy $1724/2201 = 0.783$. On the same data, the optimal three-rule list of
+<NoteLink to="certifiably-optimal-rule-lists">CORELS</NoteLink> makes 461 errors, the fewest any classifier of these
+three attributes can make. The confidence ranking spends rules on small groups that the broad rule "adult men died"
+would have covered almost as well, and M1 never revisits a choice. CMAR on the same 33 rules keeps 17 of them and
+classifies 1708 people correctly (0.776).
+
+The figure replays the selection. The thresholds can be changed to see how they change the mined rules and the list.
+
+<CbaBuilder />
+
+## Cost
+
+Mining dominates. The number of frequent item sets grows exponentially with the number of conditions allowed, and a
+low support threshold on data with many attributes yields very many rules. On 26 benchmark data sets with
+$\text{minsup} = 1\%$, CBA mined 35,140 rules per data set on average; pessimistic-error pruning of the mined rules cut
+that to 2,377, and the final classifiers averaged 69 rules <Cite id="liu1998cba" />. Liu et al. also capped the
+candidates at 80,000 and could not mine 16 of the 26 data sets completely under that cap. Selection costs one pass over
+the remaining rows per rule in M1, $O(\abs{R}\, n)$ for $\abs{R}$ rules, and about one pass in total in M2. CMAR's
+prefix trees reduce the memory needed to store the rules <Cite id="li2001cmar" />.
+
+## Trade-offs
+
+- **Global against local rules.** Every rule is scored on all the data, so a strong rule is never missed because the
+  search turned away from it. The price is the mining cost and a ranking that ignores how rules interact.
+- **Against covering learners.** CBA was slightly more accurate than
+  <NoteLink to="rules-from-decision-trees">C4.5rules</NoteLink> on average in its original evaluation, and CMAR slightly
+  more accurate than CBA <Cite id="liu1998cba" /> <Cite id="li2001cmar" />. The lists are longer: database coverage
+  keeps any rule that is right on one remaining row.
+- **Against optimised rule lists.** Bayesian rule lists and CORELS start from the same kind of pre-mined antecedents
+  but search over orderings with an explicit preference for short lists <Cite id="angelino2018" />. They find shorter
+  and more accurate lists, at a higher search cost.
+- **CBA against CMAR.** CBA's list explains each prediction by one rule. CMAR's vote over several rules is more robust
+  to a single overconfident rule and harder to read.
+
+## Pitfalls
+
+- **The support threshold.** Too high, and rare classes or small high-confidence groups get no rule at all. Too low, and
+  the number of rules explodes. One threshold for all classes disadvantages a minority class, whose rules have small
+  support by construction; a per-class threshold proportional to class frequency removes that bias.
+- **Confidence favours small rules.** A rule covering 24 rows with no error outranks a rule covering 1667 rows with 80%
+  confidence. Small perfect rules are often noise, the same problem that the Laplace and m-estimates address for
+  covering learners (see <NoteLink to="rule-quality-measures">rule quality measures</NoteLink>).
+- **Reading a rule out of its position.** A CBA rule holds only for the rows that higher-ranked rules did not cover, as
+  in any decision list.
+- **Confidence without the base rate.** A rule's confidence must be read against its class's share of the data; the
+  independence trap of association rules applies unchanged (see <NoteLink to="pattern-mining">frequent itemsets and
+  association rules</NoteLink>). CMAR's $\chi^2$ filter removes rules no more predictive than the class prior.
+- **Discretisation.** The intervals are fixed before mining. A split point that the discretiser did not produce cannot
+  appear in any rule.

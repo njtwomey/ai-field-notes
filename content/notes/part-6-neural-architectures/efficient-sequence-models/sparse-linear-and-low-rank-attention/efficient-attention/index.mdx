@@ -1,0 +1,239 @@
+---
+title: Efficient attention
+kind: concept
+summary: 'Self-attention over $n$ tokens costs $O(n^2 d)$ time and $O(n^2)$ memory per head. Efficient attention cuts this by tiling exact attention (FlashAttention), fixed or learned sparse patterns, low-rank projection or hashing, or kernel feature maps that make attention a recurrence.'
+tags: [deep-learning, transformer, attention, long-context, sequence-models, worked-example]
+aliases:
+  [
+    efficient transformer,
+    efficient transformers,
+    subquadratic attention,
+    X-former,
+    quadratic cost of attention,
+    long-sequence transformer,
+  ]
+requires: [scaled-dot-product-attention]
+related:
+  [
+    sparse-linear-and-low-rank-attention,
+    flash-attention,
+    sliding-window-and-sparse-attention,
+    trainable-sparse-attention,
+    low-rank-and-hashing-attention,
+    linear-attention,
+    key-value-cache,
+    multi-head-attention,
+    structured-state-space-models,
+    mamba,
+    hybrid-sequence-models,
+  ]
+references:
+  [
+    tay2022,
+    vaswani2017,
+    child2019,
+    beltagy2020,
+    zaheer2020,
+    wang2020linformer,
+    kitaev2020reformer,
+    xiong2021nystromformer,
+    katharopoulos2020,
+    choromanski2021,
+    dao2022,
+    yuan2025nsa,
+    lu2025moba,
+    deepseek2025v32,
+    gemmateam2025,
+    qwen2025next,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { AttentionPatterns } from '../../_shared/AttentionPatterns'
+import { AttentionCost } from './AttentionCost'
+
+<Definition>
+**Efficient attention** is the family of methods that compute, approximate or replace
+<NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink> with less than the $O(n^2)$ time or
+memory of the standard algorithm, where $n$ is the sequence length. The methods compute exact attention without storing
+the $n \times n$ score matrix, restrict which query–key pairs are scored, approximate the attention matrix by a low-rank
+or hashed form, or replace the softmax by a kernel so that attention becomes a recurrence <Cite id="tay2022" />.
+</Definition>
+
+## Intuition
+
+Attention compares every token with every other token. Doubling the length doubles the number of queries and doubles
+the number of keys each query reads, so the work grows four times. The rest of a transformer layer acts on each token
+separately and grows only twice. At short lengths the per-token parts dominate; past a length set by the layer width,
+attention does.
+
+Three different costs grow with $n$, and the methods cut different ones:
+
+- the **arithmetic** of the $n^2$ scores, in training and in reading a long prompt;
+- the **memory** of the $n \times n$ score matrix, if it is stored;
+- at generation, the **cache** of past keys and values that each new token reads.
+
+Every method keeps something and gives something up. Exact methods give up nothing in quality but keep the quadratic
+arithmetic. Approximate methods cut the arithmetic and lose the ability of every query to reach every key with an exact
+softmax weight.
+
+## Details
+
+### The cost of full attention
+
+A self-attention head takes $\Qmat, \Kmat \in \reals^{n \times d}$ and $\Vmat \in \reals^{n \times d_v}$ and computes
+
+$$
+\Omat = \operatorname{softmax}\paren{\frac{\Qmat\Kmat^\tr}{\sqrt d}}\Vmat.
+$$
+
+The score matrix $\Qmat\Kmat^\tr$ has $n^2$ entries, each a dot product of length $d$, so it costs $n^2 d$
+multiply–adds. The product with $\Vmat$ costs another $n^2 d_v$. The softmax normalises each row over all $n$ keys, so
+every entry is needed before any output is final. Standard implementations store the $n \times n$ matrix, and keep it
+for the backward pass <Cite id="vaswani2017" />.
+
+Everything else in a transformer layer is linear in $n$: the projections and the feed-forward network act on each token
+separately. For a layer of width $d_{\text{model}}$ with a feed-forward hidden width of $4d_{\text{model}}$, the four
+projections cost $4nd_{\text{model}}^2$ multiply–adds and the feed-forward network $8nd_{\text{model}}^2$. The heads'
+two $n \times n$ products cost $2n^2 d_{\text{model}}$ summed over heads, since the head widths add up to
+$d_{\text{model}}$. The two costs are equal when $2n^2 d_{\text{model}} = 12 n d_{\text{model}}^2$, at
+$n = 6d_{\text{model}}$.
+
+In 16-bit precision the score matrix of one head for one sequence takes 32 MiB at $n = 4096$, 2 GiB at
+$n = 32{,}768$ and 32 GiB at $n = 131{,}072$. At generation, a decoder reads its whole
+<NoteLink to="key-value-cache">key-value cache</NoteLink> for every new token, so producing token $t$ costs $O(td)$
+per head and the cache grows by one key and one value per token per layer.
+
+<AttentionCost />
+
+### Families of methods
+
+**Exact attention with less memory traffic.** <NoteLink to="flash-attention">FlashAttention</NoteLink> computes exact
+softmax attention in tiles held in on-chip memory and combines them with an online softmax <Cite id="dao2022" />. It
+keeps the $O(n^2 d)$ arithmetic but never stores the score matrix, so the extra memory is $O(n)$. Attention on
+<Gloss name="gpu" plural /> is limited by memory bandwidth rather than arithmetic at moderate lengths, so the tiled
+computation is also several times faster. Because it is exact, it is the default in current training and inference
+code, and the other methods are combined with it rather than compared against the naive algorithm.
+
+**Fixed sparse patterns.** Each query attends to a fixed subset of keys: a local window, a few global tokens, strided
+or random positions. Cost is proportional to the number of scored pairs. The Sparse Transformer's strided pattern costs
+$O(n\sqrt n)$ <Cite id="child2019" />; Longformer's sliding window plus global tokens and BigBird's window, global and
+random keys cost $O(n)$ <Cite id="beltagy2020" /> <Cite id="zaheer2020" />. The softmax is exact over the kept keys.
+Information between distant tokens flows through global tokens or through several layers, and a dependency the pattern
+does not cover is lost. See <NoteLink to="sliding-window-and-sparse-attention">sliding-window and sparse
+attention</NoteLink>.
+
+<AttentionPatterns initial="bigbird" />
+
+**Learned sparse patterns.** Each query scores cheap summaries of blocks of keys and attends in full only to the
+best-scoring blocks. Native sparse attention scores compressed block keys and keeps 16 blocks of 64 tokens per query
+beside a sliding window <Cite id="yuan2025nsa" />. MoBA scores the mean key of each block and keeps the top $k$
+<Cite id="lu2025moba" />. DeepSeek-V3.2 selects 2048 keys per query with a small scoring network
+<Cite id="deepseek2025v32" />. The pattern now depends on content, and the model is trained with it. A key in a block
+that scores low is missed. See <NoteLink to="trainable-sparse-attention">trainable sparse attention</NoteLink>.
+
+**Low-rank projection and hashing.** Linformer projects the $n$ keys and values along the sequence to $k \ll n$ rows,
+so the score matrix is $n \times k$ and costs $O(nk)$ <Cite id="wang2020linformer" />. Nyströmformer rebuilds the
+attention matrix from a few landmark rows and columns <Cite id="xiong2021nystromformer" />. Reformer hashes queries and
+keys with <Gloss name="lsh">locality-sensitive hashing</Gloss> so that each query scores only keys in its bucket, at
+$O(n \log n)$ <Cite id="kitaev2020reformer" />. Low-rank methods lose sharp attention to single tokens, which raises the
+rank, and Linformer's projections mix future positions, so it cannot be used causally. See
+<NoteLink to="low-rank-and-hashing-attention">low-rank and hashing attention</NoteLink>.
+
+**Kernel <NoteLink to="convolutional-layer">feature maps</NoteLink>.** <NoteLink to="linear-attention">Linear
+attention</NoteLink> writes the similarity as $\phi(\qvec)^\tr\phi(\kvec)$ for a feature map $\phi$ into $\reals^m$. The
+product $\phi(\Qmat)(\phi(\Kmat)^\tr\Vmat)$ is then computed right to left in $O(nmd_v)$ time
+<Cite id="katharopoulos2020" />. The Performer chooses random positive features whose inner product estimates the
+softmax kernel without bias <Cite id="choromanski2021" />. Causal linear attention is a recurrent network whose state
+has $m \times d_v$ entries, so generation needs no growing cache. The fixed state cannot hold many tokens exactly, so
+recall of one specific distant token is weaker than with softmax.
+
+**Replacing attention.** Structured state-space layers, <NoteLink to="mamba">Mamba</NoteLink> and linear-recurrent
+layers such as <NoteLink to="rwkv-and-retentive-networks">RetNet and RWKV</NoteLink> drop attention for a recurrence
+with a fixed-size state. <NoteLink to="hybrid-sequence-models">Hybrid models</NoteLink> keep a few attention layers
+among them.
+
+### Comparison
+
+Costs are per head for one sequence of $n$ tokens with head width $d$. $w$ is a window size, $s$ the number of keys a
+learned pattern keeps, $k$ a projection rank, $b$ a number of hash buckets and $m$ a feature dimension.
+
+| Method                                                | Keys per query     | Time               | Score memory      | Exact softmax     | Causal      | Generation state       |
+| ----------------------------------------------------- | ------------------ | ------------------ | ----------------- | ----------------- | ----------- | ---------------------- |
+| Full attention                                        | $n$                | $O(n^2 d)$         | $O(n^2)$          | yes               | yes         | <Gloss name="kv-cache" />, $O(nd)$ |
+| FlashAttention <Cite id="dao2022" />                  | $n$                | $O(n^2 d)$         | $O(n)$            | yes               | yes         | KV cache, $O(nd)$      |
+| Sparse Transformer <Cite id="child2019" />            | $O(\sqrt n)$       | $O(n\sqrt n\,d)$   | $O(n\sqrt n)$     | on the pattern    | yes         | KV cache               |
+| Sliding window <Cite id="beltagy2020" />              | $w$                | $O(nwd)$           | $O(nw)$           | on the pattern    | yes         | last $w$ keys, $O(wd)$ |
+| BigBird <Cite id="zaheer2020" />                      | $w + g + r$        | $O(n(w+g+r)d)$     | $O(n(w+g+r))$     | on the pattern    | encoder use | —                      |
+| Block selection <Cite id="lu2025moba" />              | $s$                | $O(nsd + n^2d/B)$  | $O(ns)$           | on the kept keys  | yes         | KV cache, $s$ read     |
+| Linformer <Cite id="wang2020linformer" />             | $k$ projected keys | $O(nkd)$           | $O(nk)$           | no                | no          | —                      |
+| Reformer <Cite id="kitaev2020reformer" />             | about $2n/b$       | $O(n \log n\, d)$  | $O(n^2/b)$        | on the buckets    | yes         | KV cache               |
+| Linear attention <Cite id="katharopoulos2020" />      | all, via a summary | $O(nmd)$           | $O(md)$ causal    | no                | yes         | $m \times d$ matrix    |
+| Performer <Cite id="choromanski2021" />               | all, via a summary | $O(nmd)$           | $O(md)$ causal    | unbiased estimate | yes         | $m \times d$ matrix    |
+
+"On the pattern" means that the softmax is exact over the keys the pattern keeps, and zero elsewhere. $B$ is the block
+length of block selection; scoring the $n/B$ block summaries for every query is quadratic but $B$ times cheaper than
+full attention.
+
+## Worked example
+
+Take a layer of width $d_{\text{model}} = 4096$ with heads of width $d = 128$, so 32 heads, and a feed-forward width of
+$4 \times 4096$.
+
+1. **Where attention starts to dominate.** The crossover is at $n = 6 \times 4096 = 24{,}576$ tokens. At $n = 8192$,
+   attention costs $2 \times 8192^2 \times 4096 = 5.50 \times 10^{11}$ multiply–adds and the rest of the layer
+   $12 \times 8192 \times 4096^2 = 1.65 \times 10^{12}$, so attention is 25% of the layer. At $n = 32{,}768$ it is 57%,
+   and at $n = 131{,}072$ it is 84%.
+2. **One head at $n = 32{,}768$.** Full attention costs $2 \times 32{,}768^2 \times 128 = 2.75 \times 10^{11}$
+   multiply–adds. Its score matrix takes 2 GiB in 16-bit; FlashAttention keeps two statistics per query instead, 128
+   KiB.
+3. **A window of $w = 4096$ keys.** The cost is $2nwd = 3.44 \times 10^{10}$, eight times less, because each query
+   scores $4096$ of $32{,}768$ keys.
+4. **Block selection with 16 kept blocks of 64.** Each query reads its own block and 16 others, $17 \times 64 = 1088$
+   keys, and scores $32{,}768 / 64 = 512$ block summaries. The cost is
+   $n d\,(1 + 512 + 2 \times 1088) = 1.13 \times 10^{10}$, 24 times less than full attention.
+5. **Linear attention with $m = d = 128$ features.** Building the $128 \times 128$ state and reading it cost
+   $2nmd = 1.07 \times 10^{9}$, about 250 times less. The causal state per head is $128 \times 128$ numbers at every
+   length, against a cache of $32{,}768$ keys and values.
+
+The figure above computes these costs for any layer and length.
+
+## Choosing a method
+
+- **Moderate lengths, quality first.** Exact attention with FlashAttention. There is no approximation to tune.
+- **Long contexts in decoder <Gloss name="language-model">language models</Gloss>.** Current open models mix layer types
+  instead of approximating every layer. Gemma 3 uses five sliding-window layers of span 1024 per global layer
+  <Cite id="gemmateam2025" />; Qwen3-Next uses three linear-attention layers of the
+  <NoteLink to="delta-rule-and-test-time-training">Gated DeltaNet</NoteLink> kind per attention layer
+  <Cite id="qwen2025next" />; DeepSeek-V3.2 keeps attention in every layer but lets each query select 2048 keys
+  <Cite id="deepseek2025v32" />.
+- **Very long documents in an encoder.** Sparse patterns with global tokens, which keep exact softmax locally and give
+  every token a two-hop path to every other.
+- **Long generation with bounded memory.** A sliding window caps the KV cache at $w$ tokens. Linear attention and
+  recurrent layers cap it at a fixed state, and lose exact recall of distant tokens. Sharing keys and values across
+  heads shrinks the cache without changing the cost in $n$; see
+  <NoteLink to="multi-query-and-grouped-query-attention">multi-query and grouped-query attention</NoteLink>.
+- **Extending a trained model's context.** Besides the cost, positions beyond the training length must also be handled;
+  see <NoteLink to="long-context-methods">long-context methods</NoteLink>.
+
+## Assumptions
+
+- **Leading-order costs.** The counts ignore the softmax exponentials, hashing and sorting, and the halving that a
+  <NoteLink to="causal-masking">causal mask</NoteLink> allows. They compare growth with $n$, not wall-clock time.
+- **Arithmetic is not time.** On accelerators, a method is fast only if it maps to dense tiles. A sparse pattern scored
+  key by key, or a mask applied to a dense kernel, saves no time; block-sparse kernels make the saving real.
+
+## Pitfalls
+
+- **Asymptotics at short lengths.** Below $n = 6d_{\text{model}}$ the per-token parts of the layer cost more than
+  attention, so an approximate attention saves little and still loses accuracy.
+- **Recall.** Every approximate method weakens exact retrieval of a single distant token: a fixed pattern may not cover
+  it, a learned selection may score its block low, a low-rank or kernel summary blurs it. Tasks such as copying and
+  associative recall expose this first; see <NoteLink to="long-range-and-recall-benchmarks">long-range and recall
+  benchmarks</NoteLink>.
+- **Causality and fixed length.** Linformer's projections mix all positions and fix the sequence length, so it cannot
+  serve a decoder. Hashing with buckets that change from step to step complicates caching at generation.
+
+Tay et al. survey further variants, including memory tokens, downsampling and clustering-based routing
+<Cite id="tay2022" />.

@@ -1,0 +1,223 @@
+---
+title: 'Residual and jumping-knowledge graph networks'
+kind: technique
+summary: 'Deep graph networks stay trainable with residual connections, initial-residual and identity mappings (GCNII), jumping knowledge (each node combines all layers'' outputs by concatenation, max or attention), DropEdge and normalisation such as PairNorm.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['jumping knowledge network', 'JK-Net', 'GCNII', 'deep GCN', 'initial residual connection', 'DropEdge']
+requires: [oversmoothing, residual-connections]
+related:
+  [
+    residual-network,
+    depth-versus-width,
+    graph-convolutional-network,
+    oversquashing-and-graph-rewiring,
+    depth-and-long-range-information-in-graph-networks,
+    semi-supervised-node-classification,
+    graph-augmentation,
+  ]
+references: [kipf2017, xu2018jk, chen2020gcnii, gasteiger2019appnp, li2019deepgcns, rong2020dropedge, zhao2020pairnorm]
+status: draft
+updated: 2026-10-17
+---
+
+import { DepthRemedies } from './DepthRemedies'
+
+<Definition>
+Residual and jumping-knowledge graph networks are <Gloss name="gnn">message passing</Gloss> networks whose layers are
+connected by skip paths, so that adding layers does not erase the input. A **residual** layer adds its input to its
+output, $\Hmat^{(\ell+1)} = \Hmat^{(\ell)} + F(\Hmat^{(\ell)})$. An **initial residual** layer mixes in the first layer,
+$(1-\alpha)\hat\Amat\Hmat^{(\ell)} + \alpha\Hmat^{(0)}$, and GCNII adds an identity mapping to its weights
+<Cite id="chen2020gcnii" />. A **jumping-knowledge** network feeds the outputs of all layers to the final layer, which
+combines them per node <Cite id="xu2018jk" />. DropEdge and PairNorm are used alongside them.
+</Definition>
+
+## Problem
+
+A <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> with $L$ layers lets each node
+read its $L$-hop neighbourhood. Many tasks need a large neighbourhood, but a deep stack of graph convolutions
+<NoteLink to="oversmoothing">oversmooths</NoteLink>: repeated multiplication by the propagation matrix
+$\hat\Amat = \tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2}$ drives all node features towards one vector scaled by
+$\sqrt{\tilde d_i}$, where $\tilde d_i$ is the degree of node $i$ plus one. On the Cora citation graph, the accuracy of
+a plain GCN falls from 81.1% at 2 layers to 28.7% at 64 <Cite id="chen2020gcnii" />. Deep stacks also suffer from the
+<NoteLink to="vanishing-and-exploding-gradients">vanishing gradients</NoteLink> of any deep network.
+
+The techniques in this note keep part of the input, or part of each early layer, available to the last layer. They
+borrow the idea of <NoteLink to="residual-connections">residual connections</NoteLink> from
+<NoteLink to="residual-network">residual networks</NoteLink> for images, and change it where the graph setting
+demands it.
+
+## Mechanism
+
+Throughout, $\Hmat^{(\ell)} \in \reals^{N \times F}$ holds the features of the $N$ nodes after layer $\ell$,
+$\Hmat^{(0)}$ is the input (or a linear map of it), $\Wmat^{(\ell)} \in \reals^{F \times F}$ is a weight matrix and
+$\sigma$ a nonlinearity.
+
+### Residual connections
+
+The residual GCN layer of Kipf and Welling is $\Hmat^{(\ell+1)} = \sigma(\hat\Amat\Hmat^{(\ell)}\Wmat^{(\ell)}) +
+\Hmat^{(\ell)}$ <Cite id="kipf2017" />. As in any deep network, the identity path gives the gradient a route to every
+layer. DeepGCNs combined residual and dense connections with dilated neighbourhoods to train a 56-layer graph network
+for point-cloud segmentation <Cite id="li2019deepgcns" />.
+
+A residual connection does not remove oversmoothing. Without weights and with the sum halved to keep the scale, the
+layer is $\tfrac12(\Hmat + \hat\Amat\Hmat)$, a lazy <NoteLink to="random-walk">random walk</NoteLink>. Its matrix
+$\tfrac12(\I + \hat\Amat)$ has the same eigenvectors as $\hat\Amat$ and eigenvalues $(1 + \mu_k)/2$, where $\mu_k$ are
+those of $\hat\Amat$. The top eigenvalue is still 1 and every other one still has magnitude below 1. The features
+converge to the same degree profile, more slowly <Cite id="chen2020gcnii" />.
+
+### Initial residual connections
+
+An initial residual connection mixes the first layer, not the previous one, into every layer:
+
+$$
+\Hmat^{(\ell+1)} = (1 - \alpha)\, \hat\Amat\Hmat^{(\ell)} + \alpha\, \Hmat^{(0)}, \qquad 0 < \alpha \le 1.
+$$
+
+Each layer keeps at least a fraction $\alpha$ of the input. This changes the limit. A fixed point $\Hmat^\ast$
+satisfies $\Hmat^\ast = (1-\alpha)\hat\Amat\Hmat^\ast + \alpha\Hmat^{(0)}$, so
+
+$$
+\Hmat^\ast = \alpha\paren{\I - (1-\alpha)\hat\Amat}^{-1}\Hmat^{(0)}
+= \alpha \sum_{k=0}^{\infty} (1-\alpha)^k\, \hat\Amat^k\, \Hmat^{(0)} .
+$$
+
+The inverse exists because every eigenvalue of $(1-\alpha)\hat\Amat$ has magnitude at most $1 - \alpha < 1$, and the
+series is its Neumann expansion. The error after $L$ layers is
+$\Hmat^{(L)} - \Hmat^\ast = \paren{(1-\alpha)\hat\Amat}^L\paren{\Hmat^{(0)} - \Hmat^\ast}$, which shrinks by at least
+$1 - \alpha$ per layer. The limit is a weighted sum of all propagation depths, with weight $\alpha(1-\alpha)^k$ on $k$
+hops: personalised PageRank with restart probability $\alpha$. It depends on the input, so it is not oversmoothed. The
+APPNP model uses exactly this propagation, applied to the outputs of a <Gloss name="mlp">multilayer perceptron</Gloss>
+<Cite id="gasteiger2019appnp" />.
+
+### GCNII
+
+GCNII adds the initial residual and an identity mapping to every GCN layer <Cite id="chen2020gcnii" />:
+
+$$
+\Hmat^{(\ell+1)} = \sigma\paren{\paren{(1-\alpha_\ell)\hat\Amat\Hmat^{(\ell)} + \alpha_\ell\Hmat^{(0)}}
+\paren{(1-\beta_\ell)\I + \beta_\ell\Wmat^{(\ell)}}},
+\qquad \beta_\ell = \log\paren{\frac{\lambda}{\ell} + 1} .
+$$
+
+The authors set $\alpha_\ell = 0.1$ and tune $\lambda > 0$. The weight $\beta_\ell \approx \lambda/\ell$ shrinks with
+depth, so deep layers stay close to the identity map. Two arguments motivate the identity mapping. With
+$\beta_\ell \to 0$ the network reduces to the initial-residual propagation above, so a deep GCNII can represent APPNP's
+propagation. And the singular values of $(1-\beta_\ell)\I + \beta_\ell\Wmat^{(\ell)}$ stay close to 1, which keeps the
+factor $s$ in the oversmoothing bound $(s\lambda)^{2L}$ from shrinking the signal. Chen et al. prove that a $K$-layer
+GCNII can express a polynomial filter $\sum_{\ell=0}^{K}\theta_\ell\tilde\Lmat^\ell$ of the
+<NoteLink to="graph-laplacian-and-graph-fourier-transform">normalised Laplacian</NoteLink>
+$\tilde\Lmat = \I - \hat\Amat$ with arbitrary coefficients, whereas a plain $K$-layer GCN fixes them. GCNII reached
+85.5% on Cora with 64 layers, against 81.1% for the best plain GCN.
+
+### Jumping knowledge
+
+Xu et al. observe that the right neighbourhood size differs between nodes <Cite id="xu2018jk" />. In a $k$-layer GCN
+the influence of node $u$ on node $v$ is, in expectation, proportional to the probability that a $k$-step random walk
+from $v$ ends at $u$. A node in a dense core reaches most of the graph in a few steps; a node at the end of a long path
+reaches only a few nodes in the same number. One fixed depth cannot suit both.
+
+A jumping-knowledge network keeps every layer's output and combines them per node at the end:
+
+$$
+\hvec_v^{\text{final}} = \operatorname{AGG}\paren{\hvec_v^{(1)}, \dots, \hvec_v^{(L)}} .
+$$
+
+Three aggregators are used:
+
+- **Concatenation:** $[\hvec_v^{(1)} \Vert \dots \Vert \hvec_v^{(L)}]$, followed by a linear layer. The weights of
+  the linear layer choose one mixture of depths for the whole graph.
+- **Max-pooling:** the elementwise maximum over layers. Each feature of each node picks its most informative layer,
+  without extra parameters.
+- **Attention:** a score per layer and per node, from a bidirectional <Gloss name="lstm" /> run over the layer
+  sequence, normalised by a softmax. Each node gets its own weighted average of depths.
+
+Jumping knowledge does not change the layers, so it combines with any message passing layer.
+
+### DropEdge and normalisation
+
+DropEdge removes a random fraction $p$ of the edges at every training step and uses the full graph at test time
+<Cite id="rong2020dropedge" />. It slows the convergence towards the oversmoothed limit and acts as data augmentation,
+but a deep enough stack still converges <Cite id="chen2020gcnii" />. PairNorm centres the features and rescales them
+to a fixed total spread after each layer <Cite id="zhao2020pairnorm" />; the
+<NoteLink to="oversmoothing" /> note defines it and shows its limits.
+
+## Worked example
+
+Take the two triangles joined by one edge from the <NoteLink to="oversmoothing" /> note: nodes 1, 2, 3 and 4, 5, 6,
+with the bridge 3–4, and the scalar input $\xvec = (3, 1, 2, 0, 1, -1)$. The eigenvalues of $\hat\Amat$ are
+$1, 0.860, 0.167, 0, 0, -0.194$. Compare three weight-free stacks: plain $\hat\Amat\Hmat$, averaged residual
+$\tfrac12(\Hmat + \hat\Amat\Hmat)$ and initial residual with $\alpha = 0.1$. Each cell gives the Dirichlet energy $E$
+and the gap between the mean of the first triangle and the mean of the second.
+
+| layer | plain $E$ | plain gap | residual $E$ | residual gap | initial residual $E$ | initial residual gap |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 5.048 | 2.000 | 5.048 | 2.000 | 5.048 | 2.000 |
+| 1 | 0.610 | 1.659 | 1.746 | 1.829 | 0.664 | 1.693 |
+| 4 | 0.244 | 1.064 | 0.472 | 1.455 | 0.378 | 1.254 |
+| 16 | 0.0066 | 0.175 | 0.080 | 0.610 | 0.208 | 0.883 |
+| 64 | 0.0000 | 0.000 | 0.0001 | 0.019 | 0.202 | 0.865 |
+
+**Residual.** The averaged residual's second eigenvalue is $(1 + 0.860)/2 = 0.930$, so the community gap decays by
+about 0.93 per layer instead of 0.86. At layer 16 it keeps 0.610 of a gap of 2, against 0.175 for the plain stack. By
+layer 64 it has collapsed as well.
+
+**Initial residual.** The first layer is $0.9\,\hat\Amat\xvec + 0.1\,\xvec$. For node 1,
+$0.9 \times 1.911 + 0.1 \times 3 = 2.020$. The stack converges to the fixed point
+
+$$
+\hvec^\ast = (1.528,\ 1.328,\ 1.429,\ 0.735,\ 0.577,\ 0.377),
+$$
+
+with energy 0.202 and gap 0.865. Nodes 1 and 2 have the same neighbours, so $\hat\Amat$ gives them the same value and
+their difference in $\hvec^\ast$ comes from the restart alone: $\alpha(x_1 - x_2) = 0.1 \times 2 = 0.2$, which is
+$1.528 - 1.328$. The plain stack sends both to 0.946 and loses that difference.
+
+**Jumping knowledge.** Concatenate the plain layers 0 to 16 of node $v$ into a vector of 17 numbers. A linear readout
+with weight 1 on layer 1 and 0 elsewhere recovers the layer-1 features, gap 1.659, from a 16-layer network. A readout
+with weights on layers 0 and 1 recovers the input as well. The deep layers are still computed, but the readout can
+ignore them.
+
+The figure repeats the comparison on a 40-node graph and measures the accuracy of a linear readout at every depth.
+
+<DepthRemedies />
+
+## Cost
+
+- **Residual and initial residual.** One addition per layer, $O(NF)$, and one stored copy of $\Hmat^{(0)}$ for the
+  initial residual. No extra parameters.
+- **GCNII.** The same parameters as a GCN of the same depth, $F^2$ per layer. Each layer costs one sparse product
+  over the edges, $O(\abs{\Ecal}F)$, and one dense product, $O(NF^2)$. Time and activation memory grow linearly with
+  depth, so a 64-layer GCNII costs about 32 times a 2-layer GCN.
+- **Jumping knowledge.** Every layer's output is kept until the final layer, $O(LNF)$ memory. Concatenation gives the
+  final linear layer $L$ times as many inputs. Max-pooling adds nothing; LSTM attention adds a small recurrent
+  network.
+- **DropEdge.** One random draw per edge per step, and a fresh normalisation of the thinned graph.
+
+## Trade-offs
+
+- **Locality against reach.** In the initial residual, the weight on $k$ hops is $\alpha(1-\alpha)^k$, so the mean
+  number of hops is $(1-\alpha)/\alpha$: 9 for $\alpha = 0.1$, 1 for $\alpha = 0.5$. Small $\alpha$ reaches far but
+  approaches the oversmoothed limit; $\alpha = 1$ ignores the graph and gives a multilayer perceptron.
+- **Parameters against labels.** Concatenation multiplies the readout's parameters by the depth and overfits when few
+  nodes are labelled. Max-pooling and decoupled propagation add no parameters.
+- **Depth against benefit.** On homophilous citation graphs, deep models gain a few points over shallow ones. GCNII at
+  64 layers reached 85.5% on Cora, against 83.3% for APPNP, which applies the same initial-residual propagation to the
+  outputs of a shallow perceptron <Cite id="chen2020gcnii" />. Most graph networks in practice use 2 to 6 layers with
+  residual connections and a normalisation layer, and buy a wider receptive field with decoupled propagation, rewiring
+  or global attention.
+- **Randomness.** DropEdge regularises like <NoteLink to="dropout" />, with the same mismatch between the thinned
+  graphs of training and the full graph of testing.
+
+## Pitfalls
+
+- **A plain residual does not stop the collapse.** Without the learned weights doing extra work, a residual layer is a
+  slower random walk with the same limit. Only a path to the input, or to each early layer, changes the limit.
+- **Depth without long-range signal.** Deep residual networks keep the features from collapsing, but information from
+  distant nodes still passes through every bottleneck of the graph. That limit is
+  <NoteLink to="oversquashing-and-graph-rewiring">oversquashing</NoteLink>, which skip connections do not address.
+- **Heterophily.** All of these methods keep low-pass propagation as the main operation. When neighbours tend to have
+  different labels, a large restart weight or the input layer of jumping knowledge does most of the work; see
+  <NoteLink to="graph-neural-networks-under-heterophily">graph neural networks under heterophily</NoteLink>.
+- **Tuning.** GCNII's $\lambda$ and $\alpha$, DropEdge's $p$ and PairNorm's scale interact with depth,
+  <Gloss name="learning-rate">learning rate</Gloss> and <Gloss name="weight-decay">weight decay</Gloss>. Results for
+  deep graph networks are sensitive to these settings, and comparisons should tune each depth separately.

@@ -1,0 +1,191 @@
+---
+title: 'Inductive logic programming'
+kind: concept
+summary: 'Inductive logic programming learns a logic program $H$ that, with background knowledge $B$, entails every positive example and no negative one. Its hypotheses are first-order clauses, so it learns relations such as grandparent, and recursive definitions, from few examples.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['ILP', 'relational learning from entailment', 'learning logic programs']
+requires: [horn-clauses-and-logic-programs]
+related: [propositionalisation-and-relational-learning, foil, sequential-covering, theta-subsumption, least-general-generalisation, inverse-entailment-and-progol, meta-interpretive-learning, learning-from-failures, predicate-invention, knowledge-graph-rule-mining, differentiable-inductive-logic-programming, statistical-relational-learning, program-synthesis-from-examples]
+references: [muggleton1991ilp, muggleton1994ilp, cropper2022ilp30, deraedt2008, nienhuyscheng1997, quinlan1990, muggleton1990golem, muggleton1995progol, muggleton2015mil, cropper2021popper, plotkin1972thesis]
+status: draft
+updated: 2026-10-17
+---
+
+import { HypothesisCoverage } from './HypothesisCoverage'
+
+<Definition>
+An **inductive logic programming** problem has three inputs: **background knowledge** $B$, a logic program; a set
+$E^+$ of **positive examples**; and a set $E^-$ of **negative examples**, both sets of ground atoms of a **target
+predicate**. A solution is a **hypothesis** $H$, a set of definite clauses from a **hypothesis space** $\Hcal$, that is
+**complete**, $B \cup H \models e$ for every $e \in E^+$, and **consistent**, $B \cup H \not\models e$ for every
+$e \in E^-$ <Cite id="muggleton1991ilp" />. The examples are covered by entailment, so the learnt program can name
+objects through variables, chain relations and call itself.
+</Definition>
+
+## Intuition
+
+A propositional rule learner sees each example as a row of a table with fixed columns. "Bob is a grandparent of Gus"
+fits no such row. The fact relates two people, and it is true because of a third person, Eve, who is Bob's child and
+Gus's parent. The relevant evidence lives in other facts of a database, and a different example may need a different
+number of them.
+
+<Gloss name="ilp" /> keeps the data as facts and writes hypotheses as clauses with variables:
+
+$$
+\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z) \land \text{parent}(Z, Y).
+$$
+
+The variable $Z$ stands for whichever person links $X$ and $Y$. One clause covers every grandparent pair in any family,
+of any size. A clause can also mention its own head, so a two-clause program defines ancestor for chains of any length.
+Rule learners over attribute vectors cannot express either, unless the relevant joins are computed in advance as
+features (<NoteLink to="propositionalisation-and-relational-learning">propositionalisation and relational
+learning</NoteLink>).
+
+The background knowledge does two jobs. It holds the facts about the examples, here the parent relation. It also
+supplies the vocabulary of the hypotheses: a learner can only write clauses over predicates that $B$ defines, so a
+user who adds a well-chosen predicate to $B$ makes a hard concept easy to learn. Few examples often suffice, because a
+short clause that explains every positive and no negative is rarely an accident.
+
+## Details
+
+### Problem setting
+
+<NoteLink to="propositional-and-first-order-logic-for-learning">Propositional and first-order logic for
+learning</NoteLink> defines coverage: $H$ covers an example $e$ when $B \cup H \models e$. Muggleton and De Raedt's
+**normal setting** states four conditions on a solution <Cite id="muggleton1994ilp" />.
+
+1. **Prior satisfiability.** $B$ together with the negation of every negative example is consistent: the background
+   does not already entail a negative.
+2. **Posterior satisfiability.** $B \cup H$ together with the negations of the negatives is consistent: $B \cup H$
+   entails no negative example.
+3. **Prior necessity.** $B \not\models E^+$: some positive is not already explained, so there is something to learn.
+4. **Posterior sufficiency.** $B \cup H \models E^+$: the hypothesis explains every positive.
+
+For definite clauses, entailment of a ground atom is membership in the least Herbrand model of $B \cup H$
+(<NoteLink to="horn-clauses-and-logic-programs">Horn clauses and logic programs</NoteLink>). A learner tests coverage by
+running each example as a query with <NoteLink to="unification-and-resolution">SLD resolution</NoteLink>, usually with a
+depth or step bound, because a candidate recursive program may not terminate.
+
+When the negatives are not given, most systems take them from the **closed-world assumption**: every ground atom of the
+target that is not a positive is negative. With $c$ constants, a binary target has $c^2$ ground atoms. Seven people give
+49 grandparent pairs, and the 4 true ones leave 45 closed-world negatives.
+
+### The hypothesis space and its bias
+
+The space of all clauses over the predicates of $B$ is infinite: a body can add literals with new variables without end.
+Every ILP system fixes a **language bias** that makes the space finite or searchable
+<Cite id="nienhuyscheng1997" />.
+
+- **Size bounds.** At most $k$ body literals, $v$ variables or $m$ clauses.
+- **Mode declarations.** Each argument of a predicate is marked input (bound before the literal is called), output
+  (bound by it) or constant. `parent(+person, -person)` may only extend a clause from a person already named.
+- **Metarules.** Second-order templates such as $P(A, B) \leftarrow Q(A, C) \land R(C, B)$, whose predicate variables
+  $P, Q, R$ the learner fills in (<NoteLink to="meta-interpretive-learning">meta-interpretive learning</NoteLink>).
+- **Types and determinacy.** Arguments carry types, and some systems allow only literals whose output is determined by
+  their input.
+
+The bias is the <NoteLink to="inductive-bias">inductive bias</NoteLink> of the learner. A bias that is too weak makes
+the search intractable, and one that is too strong excludes the target.
+
+### Searching the space
+
+Clauses are ordered by generality. The order used in practice is
+<NoteLink to="theta-subsumption">θ-subsumption</NoteLink>: $C$ is at least as general as $D$ when a substitution maps
+every literal of $C$ onto a literal of $D$. It implies entailment, so a more general clause covers at least the examples
+of a more specific one. The order gives the search a direction
+(<NoteLink to="generality-ordering-and-refinement">generality ordering and refinement</NoteLink>), and the classical
+systems differ in which way they walk it.
+
+| Approach | Starts from | Moves by | Example system |
+| --- | --- | --- | --- |
+| Top-down | the clause with an empty body | adding the literal with the best score | <NoteLink to="foil">FOIL</NoteLink> <Cite id="quinlan1990" /> |
+| Bottom-up | the examples as clauses | <NoteLink to="least-general-generalisation">least general generalisation</NoteLink> | Golem <Cite id="muggleton1990golem" /> |
+| Bounded by a bottom clause | the most specific clause entailing one example | top-down search of clauses above it | <NoteLink to="inverse-entailment-and-progol">Progol, Aleph</NoteLink> <Cite id="muggleton1995progol" /> |
+| Meta-interpretive | the examples as goals | proving them while instantiating metarules | Metagol <Cite id="muggleton2015mil" /> |
+| Generate, test and constrain | an empty set of constraints | turning each failed program into constraints | <NoteLink to="learning-from-failures">Popper</NoteLink> <Cite id="cropper2021popper" /> |
+
+Most of these learn one clause at a time and wrap the clause search in
+<NoteLink to="sequential-covering">sequential covering</NoteLink>: learn a clause that covers some positives and no
+negatives, remove the positives it covers, and repeat. Meta-interpretive learning and Popper search for whole programs
+instead, which lets them learn mutually dependent clauses, recursion and
+<NoteLink to="predicate-invention">invented predicates</NoteLink> that a clause-by-clause learner cannot find.
+
+### Scoring and noise
+
+The exact definition demands zero errors. Real data have mislabelled examples and missing facts, so practical systems
+relax consistency and score clauses. FOIL uses an information gain, Progol and Aleph a compression score that rewards
+positives covered and penalises negatives and clause length, and both accept a clause that covers a few negatives when
+the gain from the positives outweighs them. A length penalty is a form of the
+<NoteLink to="minimum-description-length">minimum description length</NoteLink> principle: a clause is worth keeping
+when it is shorter than the list of examples it explains.
+
+### Where inductive logic programming sits
+
+ILP is the first-order case of rule learning: a propositional rule set is a logic program whose literals are attribute
+tests (<NoteLink to="decision-lists-and-rule-sets">decision lists and rule sets</NoteLink>). It is also a form of
+<NoteLink to="program-synthesis-from-examples">program synthesis from examples</NoteLink> restricted to logic programs.
+Three extensions address its weaknesses. <NoteLink to="statistical-relational-learning">Statistical relational
+learning</NoteLink> attaches probabilities or weights to clauses. <NoteLink to="knowledge-graph-rule-mining">Rule mining
+on knowledge graphs</NoteLink> scales clause search to millions of facts by restricting the rule shape.
+<NoteLink to="differentiable-inductive-logic-programming">Differentiable ILP</NoteLink> relaxes the discrete search to
+<NoteLink to="gradient-descent">gradient descent</NoteLink> on clause weights. The modern view of the field is surveyed
+by Cropper and Dumančić <Cite id="cropper2022ilp30" />.
+
+## Worked example
+
+The family database has seven people over four generations. $B$ holds six parent facts, drawn as arrows in the
+figure: Ann is the parent of Bob and Cid, Bob of Dee and Eve, Cid of Fay, and Eve of Gus. Five people are female. The
+target is $\text{grandparent}/2$.
+
+1. **Examples.** $E^+$ has the four true pairs: (ann, dee), (ann, eve), (ann, fay) and (bob, gus). $E^-$ has five
+   chosen pairs: (ann, bob) is a parent pair, (cid, gus) and (bob, fay) are unrelated, (dee, ann) is reversed, and
+   (ann, gus) is a great-grandparent pair.
+2. **Prior necessity.** $B$ defines no grandparent fact, so $B$ entails no positive and a hypothesis is needed.
+3. **The empty body.** $\text{grandparent}(X, Y)$ covers every pair: 4 positives and all 5 negatives. It is complete
+   and as inconsistent as a clause can be.
+4. **One literal.** $\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Y)$ covers no positive and one negative,
+   (ann, bob). $\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z)$ says only that $X$ has a child. It covers all
+   4 positives and 4 negatives; it misses only (dee, ann), because Dee has no child.
+   $\text{grandparent}(X, Y) \leftarrow \text{parent}(Z, Y)$ says only that $Y$ has a parent, and also covers 4 and 4.
+5. **Two literals joined by $Z$.** $\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z) \land \text{parent}(Z, Y)$
+   requires the child of $X$ to be the parent of $Y$. For (ann, dee), $Z = \text{bob}$ satisfies both literals. For the
+   negative (ann, gus), Ann's children are Bob and Cid, and neither is Gus's parent, so the query fails. The clause
+   covers 4 positives and 0 negatives: it is complete and consistent.
+6. **A literal too many.** Adding $\text{female}(X)$ keeps consistency but loses (bob, gus), because Bob is not female.
+   The clause is consistent and not complete.
+
+Steps 3 to 6 move down the generality order: each added literal can only remove covered examples. The shared variable
+$Z$ is what separates step 5 from step 4. The literals $\text{parent}(X, Z)$ and $\text{parent}(W, Y)$ with different
+variables cover the same 4 negatives as $\text{parent}(X, Z)$ alone, because nothing ties the two people together. The
+ancestor task in the figure needs two clauses, one of them recursive; the non-recursive pair of clauses misses (ann,
+gus), three generations apart.
+
+<HypothesisCoverage />
+
+## Assumptions
+
+- **The background knowledge contains the right vocabulary.** A learner can only combine predicates that $B$ defines.
+  Without parent facts, no clause over the remaining predicates separates grandparents from other pairs.
+- **Examples are ground facts, and negatives are trustworthy.** Closed-world negatives assume $B$ and $E^+$ are
+  complete. An unlisted true fact becomes a <Gloss name="fn">false negative</Gloss> that forbids the correct clause.
+- **Coverage is decidable within the bounds.** Entailment over arbitrary clauses is undecidable. Systems bound proof
+  depth or restrict $B$ and $H$ to Datalog, where the least model is finite.
+- **The target is expressible in the bias.** A clause-length bound of 2 cannot express great-grandparent without an
+  invented predicate, however many examples are given.
+
+## Pitfalls
+
+- **Search cost grows with the bias.** Each extra allowed literal multiplies the candidates, and each coverage test is a
+  theorem-proving problem. Large background knowledge bases need indexing, sampling of negatives or a restricted rule
+  shape.
+- **Greedy search misses literals that only pay off together.** A literal that introduces a new variable, such as
+  $\text{parent}(X, Z)$, often removes few negatives on its own. Top-down systems add lookahead or prefer such
+  literals when no literal has a positive gain (<NoteLink to="foil">FOIL</NoteLink>).
+- **Recursive hypotheses can loop.** A candidate such as $\text{ancestor}(X, Y) \leftarrow \text{ancestor}(X, Z) \land
+  \text{parent}(Z, Y)$ makes depth-first proof search run forever. Coverage tests need a depth bound, and a bound that
+  is too small makes correct recursive clauses look incomplete.
+- **Too few negatives give over-general clauses.** With only the negatives (dee, ann) and (gus, bob), the clause
+  $\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z) \land \text{parent}(W, Y)$ is complete and consistent. It
+  says only that $X$ has a child and $Y$ has a parent, so it also covers unrelated pairs such as (cid, gus).
+- **Noise breaks exact consistency.** One mislabelled negative can rule out the correct clause. Systems that allow a
+  noise threshold trade this against accepting genuinely wrong clauses.

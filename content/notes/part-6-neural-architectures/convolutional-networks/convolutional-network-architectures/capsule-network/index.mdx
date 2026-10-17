@@ -1,0 +1,228 @@
+---
+title: 'Capsule network'
+kind: concept
+summary: 'A capsule network replaces scalar feature detectors by vector capsules whose length is the probability that an entity is present and whose direction encodes its pose. Routing by agreement sends each lower capsule''s output to the higher capsules whose predictions it matches.'
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases: ['CapsNet', 'capsules', 'dynamic routing', 'routing by agreement', 'squash function', 'EM routing']
+requires: [convolutional-layer]
+related:
+  [
+    pooling-and-strides,
+    symmetry-and-equivariance,
+    group-equivariant-convolutional-network,
+    scaled-dot-product-attention,
+    expectation-maximisation,
+    autoencoder,
+  ]
+references:
+  [
+    sabour2017capsules,
+    hinton2011transforming,
+    hinton2018emrouting,
+    kosiorek2019stacked,
+    paik2019capsule,
+    gu2020capsule,
+    locatello2020slot,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { RoutingByAgreement } from './RoutingByAgreement'
+
+<Definition>
+A capsule is a group of units whose output is a vector $\vvec_j$. The length $\norm{\vvec_j} \in [0, 1)$ is the
+probability that the entity the capsule represents is present, and the direction encodes the entity's instantiation
+parameters, such as its position, orientation and scale. Each capsule $i$ in one layer predicts the output of each
+capsule $j$ in the next by a learned matrix, $\hat{\uvec}_{j \mid i} = \Wmat_{ij} \uvec_i$. Routing by agreement assigns
+each lower capsule to the upper capsules whose outputs agree with its predictions <Cite id="sabour2017capsules" />.
+</Definition>
+
+## Intuition
+
+A unit of a <NoteLink to="convolutional-layer">convolutional layer</NoteLink> outputs one number: how strongly its
+pattern is present at one position. Max <NoteLink to="pooling-and-strides">pooling</NoteLink> then keeps the strongest
+response in a window and discards where in the window it was. A network built this way recognises a face from the
+presence of eyes, a nose and a mouth, and has no direct record of whether they are in the right places relative to
+each other. Recognising a rotated or tilted object requires either detectors replicated for every orientation or
+training images of every orientation <Cite id="sabour2017capsules" />.
+
+A capsule outputs a vector instead. Its length says whether the part is there, and its direction says how the part is
+posed. A part and the whole it belongs to are related by a fixed geometric transformation: given the pose of a nose,
+the pose of the face follows. A capsule network learns that transformation as the matrix $\Wmat_{ij}$, so each part
+capsule predicts the pose of each whole. When the predictions of several parts agree, the whole is present, at the
+agreed pose. When the object turns, every part pose turns with it, the predictions turn together and still agree. The
+transformation matrices do not depend on the viewpoint, so knowledge learned at one viewpoint transfers to others
+<Cite id="hinton2011transforming" />.
+
+Routing decides which whole each part belongs to. Every part starts by sending its output equally to every whole. Each
+whole forms its output from the predictions it receives. A part whose prediction lines up with a whole's output sends
+more of its output there in the next round, and less elsewhere. Routing replaces pooling's selection of the strongest
+response with a selection of the parent that explains the part.
+
+## Details
+
+### The squash nonlinearity
+
+A capsule's total input $\svec_j$ can have any length. The squash function shrinks it to a length below 1 without
+changing its direction:
+
+$$
+\vvec_j = \frac{\norm{\svec_j}^2}{1 + \norm{\svec_j}^2} \, \frac{\svec_j}{\norm{\svec_j}}.
+$$
+
+The output length $\norm{\svec_j}^2 / (1 + \norm{\svec_j}^2)$ is close to $\norm{\svec_j}^2$ for short inputs and close
+to 1 for long ones. An input of length 0.3 gives an output of length 0.08, and an input of length 3 gives 0.9.
+
+### Predictions and couplings
+
+Let layer $l$ have capsules $i = 1, \dots, n$ with outputs $\uvec_i \in \reals^{d}$, and layer $l + 1$ have capsules
+$j = 1, \dots, m$ with outputs in $\reals^{d'}$. Each pair has a weight matrix $\Wmat_{ij}$ of shape $d' \times d$ and
+makes the prediction $\hat{\uvec}_{j \mid i} = \Wmat_{ij} \uvec_i$. The total input of capsule $j$ is a weighted sum of
+the predictions it receives:
+
+$$
+\svec_j = \sum_{i=1}^{n} c_{ij} \, \hat{\uvec}_{j \mid i}, \qquad \vvec_j = \operatorname{squash}(\svec_j).
+$$
+
+The coupling coefficients $c_{ij} \ge 0$ are not learned weights. They are computed for each input by routing, and the
+couplings of each lower capsule sum to 1 over the upper capsules, $\sum_j c_{ij} = 1$. A lower capsule therefore
+distributes one unit of its output among the possible parents.
+
+### Routing by agreement
+
+The couplings are a <NoteLink to="softmax-and-log-sum-exp">softmax</NoteLink> of logits $b_{ij}$:
+$c_{ij} = \exp(b_{ij}) / \sum_k \exp(b_{ik})$. Dynamic routing runs $r$ iterations, usually 3
+<Cite id="sabour2017capsules" />:
+
+1. Set $b_{ij} = 0$ for all $i, j$, so every lower capsule starts with $c_{ij} = 1/m$.
+2. Compute the couplings $c_{ij}$ from $b_{ij}$ by the softmax over $j$.
+3. Compute $\svec_j = \sum_i c_{ij} \hat{\uvec}_{j \mid i}$ and $\vvec_j = \operatorname{squash}(\svec_j)$ for every
+   upper capsule.
+4. Add the agreement $a_{ij} = \hat{\uvec}_{j \mid i}^\top \vvec_j$ to each logit: $b_{ij} \leftarrow b_{ij} + a_{ij}$.
+5. Repeat steps 2 to 4 $r$ times and return the last $\vvec_j$.
+
+The agreement is a <NoteLink to="dot-product">dot product</NoteLink>. It is large when the prediction points the same
+way as the output it helped form and is long. A prediction that agrees with a parent raises that parent's coupling and
+lowers the others, because the softmax over $j$ makes the parents compete for each part. Gradients flow through the
+unrolled iterations, so the matrices $\Wmat_{ij}$ are trained by ordinary
+<NoteLink to="backpropagation">backpropagation</NoteLink> through the routing.
+
+Routing resembles <NoteLink to="scaled-dot-product-attention">attention</NoteLink> run in reverse. In attention, each
+output normalises its weights over the inputs. In routing, each input normalises its weights over the outputs, so an
+input cannot be fully explained by two parents at once. Sabour et al. call this explaining away
+<Cite id="sabour2017capsules" />.
+
+### The CapsNet architecture and loss
+
+The CapsNet of Sabour et al. classifies $28 \times 28$ digit images with three layers <Cite id="sabour2017capsules" />.
+
+- **Conv1:** 256 convolution kernels of $9 \times 9$ with stride 1 and <Gloss name="relu" />, giving a
+  $20 \times 20 \times 256$ map.
+- **PrimaryCaps:** a convolution with $9 \times 9$ kernels and stride 2 to 32 channels of 8-dimensional capsules,
+  giving a $6 \times 6$ grid of 32 capsule types, $1152$ capsules in all, each squashed. Capsules of one type share
+  weights across the grid, as in a convolutional layer.
+- **DigitCaps:** one 16-dimensional capsule per class, routed from all 1152 primary capsules with 3 routing
+  iterations. Each pair has a $16 \times 8$ matrix, $1152 \cdot 10 \cdot 128 = 1{,}474{,}560$ weights in all.
+
+Routing runs only between PrimaryCaps and DigitCaps, because Conv1's outputs are scalars with no direction to agree on.
+The classifier's output for class $k$ is the length $\norm{\vvec_k}$. The loss is a margin loss on each class capsule,
+
+$$
+L_k = T_k \max(0, m^+ - \norm{\vvec_k})^2 + \lambda (1 - T_k) \max(0, \norm{\vvec_k} - m^-)^2,
+$$
+
+where $T_k = 1$ when class $k$ is present and 0 otherwise, $m^+ = 0.9$, $m^- = 0.1$ and $\lambda = 0.5$. Summing a loss
+per class lets several classes be present at once. A decoder of three dense layers reconstructs the image from the
+correct class capsule, with the other capsules masked to zero. Its squared error, scaled by $0.0005$, is added to the
+loss, which forces the 16 dimensions to encode the digit's pose and style. The network has 6.8 million parameters
+without the decoder and 8.2 million with it.
+
+### Results and later variants
+
+On <Gloss name="mnist" />, this CapsNet reaches a test error of 0.25%, against 0.39% for a convolutional baseline with
+35.4 million parameters <Cite id="sabour2017capsules" />. The capsule claim is clearer under a change of viewpoint.
+Trained on translated digits only and tested on affNIST, where each digit has a small random affine transformation,
+CapsNet classified 79% correctly and a convolutional network of similar size 66%. On MultiMNIST, pairs of digits that
+overlap by 80% on average, the error was 5.2% against the baseline's 8.1%. On <Gloss name="cifar-10" />, an ensemble of
+seven CapsNets reached 10.6% error, the level of <NoteLink to="convolutional-networks">convolutional networks</NoteLink>
+of 2013.
+
+Matrix capsules replace the pose vector by a $4 \times 4$ pose matrix with a separate activation probability, and
+replace dynamic routing by a few iterations of
+<NoteLink to="expectation-maximisation">expectation-maximisation</NoteLink> that fit a cluster of agreeing votes for
+each parent <Cite id="hinton2018emrouting" />. Stacked capsule autoencoders learn parts and objects without labels, as
+an <NoteLink to="autoencoder">autoencoder</NoteLink> that explains an image as a set of posed templates, and cluster
+MNIST to 98.7% accuracy <Cite id="kosiorek2019stacked" />.
+
+<RoutingByAgreement />
+
+## Worked example
+
+Two lower capsules ($i = 1, 2$) route to two upper capsules ($j = 1, 2$) in two dimensions. The predictions are
+$\hat{\uvec}_{1 \mid 1} = (1.5, 0.5)$ and $\hat{\uvec}_{1 \mid 2} = (1.5, 0.9)$ for upper capsule 1, which nearly
+agree, and $\hat{\uvec}_{2 \mid 1} = (-0.5, 1.5)$ and $\hat{\uvec}_{2 \mid 2} = (1, -1)$ for upper capsule 2, which
+point in opposite directions. Three iterations of routing follow, rounded to three decimals.
+
+**Iteration 1.**
+
+1. All logits are 0, so every coupling is $c_{ij} = 0.5$.
+2. Upper capsule 1 receives $\svec_1 = 0.5 (1.5, 0.5) + 0.5 (1.5, 0.9) = (1.5, 0.7)$. Its squared length is
+   $1.5^2 + 0.7^2 = 2.74$, so its output length is $2.74 / 3.74 = 0.733$ and $\vvec_1 = (0.664, 0.310)$.
+3. Upper capsule 2 receives $\svec_2 = 0.5 (-0.5, 1.5) + 0.5 (1, -1) = (0.25, 0.25)$, of squared length 0.125. Its
+   output length is $0.125 / 1.125 = 0.111$ and $\vvec_2 = (0.079, 0.079)$. The two predictions nearly cancel, so the
+   capsule is almost off.
+4. The agreements are $a_{11} = 1.5 \cdot 0.664 + 0.5 \cdot 0.310 = 1.151$,
+   $a_{21} = 1.5 \cdot 0.664 + 0.9 \cdot 0.310 = 1.275$, $a_{12} = -0.5 \cdot 0.079 + 1.5 \cdot 0.079 = 0.079$ and
+   $a_{22} = 0.079 - 0.079 = 0.000$. They become the logits.
+
+**Iteration 2.**
+
+1. Lower capsule 1 has logits $(1.151, 0.079)$, so $c_{11} = 1 / (1 + e^{-1.072}) = 0.745$ and $c_{12} = 0.255$.
+   Lower capsule 2 has $(1.275, 0.000)$, so $c_{21} = 0.782$ and $c_{22} = 0.218$.
+2. $\svec_1 = 0.745 (1.5, 0.5) + 0.782 (1.5, 0.9) = (2.290, 1.076)$, and $\norm{\vvec_1} = 0.865$.
+3. $\svec_2 = 0.255 (-0.5, 1.5) + 0.218 (1, -1) = (0.091, 0.164)$, and $\norm{\vvec_2} = 0.034$.
+4. The new agreements are added, giving logits $(2.509, 0.115)$ for lower capsule 1 and $(2.780, -0.013)$ for lower
+   capsule 2.
+
+**Iteration 3.** The couplings to upper capsule 1 are now $c_{11} = 0.916$ and $c_{21} = 0.942$. The outputs have
+lengths $\norm{\vvec_1} = 0.905$ and $\norm{\vvec_2} = 0.005$.
+
+Routing has moved 92% and 94% of the two lower capsules' outputs to the parent their predictions agree with. The agreed
+parent's presence rose from 0.733 to 0.905, and the parent with conflicting predictions fell from 0.111 to 0.005.
+Without routing, the network would report the second parent as present with probability 0.111 from two votes that
+contradict each other.
+
+## Assumptions
+
+- **One entity of each type per location.** A capsule represents at most one instance of its entity in its
+  <NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink>, so two overlapping objects of the
+  same class cannot both be represented <Cite id="sabour2017capsules" />.
+- **Parts and wholes are related by a fixed transformation.** Rigid objects made of rigid parts fit. Textures, scenes
+  and deformable objects fit less well.
+- **The image can be explained.** Routing assigns every part to some parent, so clutter and background must be modelled
+  or assigned to an extra none-of-the-above capsule; this is one reason CapsNet was weaker on CIFAR-10
+  <Cite id="sabour2017capsules" />.
+
+## Pitfalls
+
+- **Routing contributes less than claimed.** Paik et al. found that five routing algorithms often did no better than
+  uniform or random couplings, and that more iterations mainly polarise the couplings towards 0 and 1
+  <Cite id="paik2019capsule" />. Gu and Tresp found that dynamic routing helped neither accuracy nor affine robustness,
+  and raised affNIST accuracy from 79% to 93% with a capsule network that has no routing at all
+  <Cite id="gu2020capsule" />. In Sabour et al.'s own ablation, 3 iterations against 1 changed the MNIST error from
+  0.29% to 0.25% <Cite id="sabour2017capsules" />.
+- **Cost.** Every lower capsule predicts every upper capsule, so a fully connected capsule layer holds $n m d d'$
+  weights and computes $n m$ predictions per image, repeated in every routing iteration. The 1152-to-10 layer of
+  CapsNet holds 1.5 million weights, more than a fifth of the network, to produce ten output capsules.
+- **A single long prediction can switch a parent on.** Dynamic routing has no rule that a whole needs several agreeing
+  parts. One part capsule with a long prediction and no competition gives a long output on its own, as the figure shows
+  when one part is turned away from the arrangement.
+- **Equivariance is learned, not guaranteed.** Agreement under rotation holds only as far as the learned matrices and
+  primary capsules generalise. <NoteLink to="group-equivariant-convolutional-network">Group-equivariant convolutional
+  networks</NoteLink> build equivariance to rotations into the layer itself; see
+  <NoteLink to="symmetry-and-equivariance">symmetry and equivariance</NoteLink>.
+
+Capsule networks are rarely used in practice as of 2026. Their ideas continue in object-centric models: slot attention
+runs a few rounds of attention whose softmax is taken over a set of slots, so the slots compete for each input feature
+as parents compete for a part <Cite id="locatello2020slot" />.

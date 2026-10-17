@@ -1,0 +1,172 @@
+---
+title: Residual network
+kind: concept
+summary: A residual network builds each block as $\yvec = \xvec + F(\xvec)$, so the block learns a correction to the identity. The identity path gives the gradient a route through every block unchanged, which lets networks with hundreds of layers train.
+tags: [deep-learning, computer-vision, convolutional-networks, worked-example]
+aliases: [ResNet, residual block, skip connection, shortcut connection, bottleneck block, projection shortcut]
+requires: [convolutional-layer, backpropagation]
+related:
+  [
+    residual-connections,
+    classic-convolutional-network-architectures,
+    densely-connected-network,
+    normalisation-in-convolutional-networks,
+    one-by-one-convolution,
+    modern-convolutional-networks,
+    transformer,
+  ]
+references: [he2016, he2016b, veit2016, goyal2017, xie2017resnext, wightman2021resnet, liu2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { ResidualBlockDiagram } from './ResidualBlockDiagram'
+import { ShortcutCost } from './ShortcutCost'
+
+<Definition>
+A residual block computes $\yvec = \xvec + F(\xvec; \theta)$, where $F$ is a small stack of layers with parameters
+$\theta$ and the addition is elementwise. The path that carries $\xvec$ unchanged is the shortcut or skip connection. A
+residual network is a stack of such blocks <Cite id="he2016" />.
+</Definition>
+
+## Intuition
+
+Adding layers to a network should never make its training error worse: the extra layers could learn the identity and
+reproduce the shallower network. In practice, plain deep networks trained with <NoteLink to="gradient-descent">gradient
+descent</NoteLink> do get worse. On <Gloss name="cifar-10" />, a plain 56-layer network has higher training error than a
+plain 20-layer one <Cite id="he2016" />. This is the degradation problem. It is an optimisation failure, not
+overfitting, because the training error itself rises.
+
+A residual block makes the identity the default. When $F = 0$ the block passes its input through, so setting the
+weights of $F$ near zero recovers a shallower network. The block only has to learn the difference between the identity
+and the desired map. If the desired map is close to the identity, that difference is small and easy to find.
+
+<ResidualBlockDiagram />
+
+## Why the identity path matters
+
+Consider blocks $l, l+1, \dots, L-1$ with pure identity shortcuts and no operation after the addition, as in the
+pre-activation design <Cite id="he2016b" />: $\xvec_{m+1} = \xvec_m + F_m(\xvec_m)$, where $\xvec_m$ is the input of
+block $m$. Unrolling the recursion gives
+
+$$
+\xvec_L = \xvec_l + \sum_{m=l}^{L-1} F_m(\xvec_m).
+$$
+
+The output of any deeper block is the output of any shallower block plus a sum of residuals. Differentiating, the
+gradient of a loss $\ell$ at block $l$ is $\partial \ell / \partial \xvec_L$ plus terms that pass through the residual
+branches. The first term reaches block $l$ without passing through any weight layer, so the gradient at a shallow block
+cannot vanish because the network is deep. <NoteLink to="residual-connections">Residual connections</NoteLink> derives
+this from the per-layer Jacobian $\I + \partial F / \partial \xvec$, shows that the signal's mean square instead grows
+by a factor $1 + \alpha^2$ per block for a branch scale $\alpha$, and gives the branch scalings that control the growth.
+
+The original ResNet applied a <Gloss name="relu" /> after the addition, so its shortcut is not quite the identity.
+Moving the <NoteLink to="batch-normalisation">batch normalisation</NoteLink> and ReLU inside $F$ (pre-activation) makes
+the shortcut an exact identity. The pre-activation form trains a 1001-layer network on CIFAR-10 <Cite id="he2016b" />.
+
+## Block designs
+
+**Basic block.** $F$ is two $3 \times 3$ convolutions with batch normalisation and a ReLU between them. It is used in
+ResNet-18 and ResNet-34.
+
+**Bottleneck block.** $F$ is a $1 \times 1$ convolution that reduces the channels by a factor of 4, a $3 \times 3$
+convolution at the reduced width, and a $1 \times 1$ convolution that restores the width. It is used in
+<NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink>, -101 and -152. The
+<NoteLink to="one-by-one-convolution">one-by-one convolutions</NoteLink> do the channel mixing, so the expensive
+$3 \times 3$ convolution runs on a quarter of the channels.
+
+**Stages.** A ResNet for <Gloss name="imagenet" /> has a stem (a $7 \times 7$ stride-2 convolution and a max pool), then
+four stages of 64, 128, 256 and 512 channels at the bottleneck width. The first block of stages 2 to 4 halves the
+resolution with stride 2. <NoteLink to="pooling-and-strides">Global average pooling</NoteLink> and one dense layer
+classify.
+
+**Normalisation.** Each convolution is followed by batch normalisation. Setting the scale of the last normalisation in
+each branch to zero makes every block the identity at initialisation, which helps large-batch training
+<Cite id="goyal2017" />. Detection and segmentation networks train with a few images per device, where batch statistics
+are noisy; they freeze the batch statistics or use group normalisation instead, as
+<NoteLink to="normalisation-in-convolutional-networks">normalisation in convolutional networks</NoteLink> explains.
+
+## Identity against projection shortcuts
+
+When a block changes the number of channels or downsamples with stride 2, $\xvec$ and $F(\xvec)$ have different shapes,
+and the shortcut must change shape too. He et al. compared three choices <Cite id="he2016" />:
+
+- **A.** Every shortcut is an identity. Where the resolution halves, the shortcut takes every second pixel; where the
+  channels grow, the extra channels are padded with zeros. A adds no parameters.
+- **B.** A shortcut that changes shape is a projection, a $1 \times 1$ convolution $\Wmat_s$ with the block's stride:
+  $\yvec = \Wmat_s \xvec + F(\xvec)$. All other shortcuts are identities. The ImageNet ResNets use B.
+- **C.** Every shortcut is a projection, including those between blocks of the same shape.
+
+The cost of a projection from $C$ to $C'$ channels is $CC'$ weights. In ResNet-34 three blocks change shape, at the
+start of stages 2, 3 and 4. Option B adds $64 \cdot 128 + 128 \cdot 256 + 256 \cdot 512 = 172{,}032$ weights, 0.8% of
+the network's 21.8 million. Option C projects all 16 shortcuts and adds 1.09 million weights, 5.0% of the network. The
+ImageNet top-1 errors of ResNet-34 with A, B and C were 25.03%, 24.52% and 24.19% <Cite id="he2016" />. B gains over A
+because the zero-padded channels of A carry no residual. C gains a little more from its extra parameters. The
+differences are small next to the gain of any of them over a plain network, so projections are not what solves the
+degradation problem.
+
+Projections cost much more in <NoteLink to="autoencoder">bottleneck networks</NoteLink>, because a bottleneck shortcut
+connects the two wide ends of a block. In ResNet-50 the four shape-changing blocks are at the start of every stage,
+including stage 1, whose first block widens 64 channels to 256. Option B's four projections hold
+$64 \cdot 256 + 256 \cdot 512 + 512 \cdot 1024 + 1024 \cdot 2048 = 2{,}768{,}896$ weights, 10.8% of the network's 25.6
+million. A projection on a 256-channel bottleneck block has $256^2 = 65{,}536$ weights, about as many as the block's
+branch ($69{,}632$, counted below), so option C would nearly double the size and the multiply-adds of every block.
+Identity shortcuts are what keep bottleneck networks cheap <Cite id="he2016" />.
+
+<ShortcutCost />
+
+## Worked example
+
+Compare the weights of a bottleneck block on 256 channels with a basic block of two $3 \times 3$ convolutions at 256
+channels, ignoring biases and normalisation.
+
+1. The bottleneck's first $1 \times 1$ convolution maps 256 channels to 64. It has $256 \cdot 64 = 16{,}384$ weights.
+2. Its $3 \times 3$ convolution at 64 channels has $9 \cdot 64 \cdot 64 = 36{,}864$ weights.
+3. Its last $1 \times 1$ convolution maps 64 channels back to 256, with $16{,}384$ weights. The branch has
+   $16{,}384 + 36{,}864 + 16{,}384 = 69{,}632$ weights.
+4. The basic block's two $3 \times 3$ convolutions at 256 channels have $2 \cdot 9 \cdot 256^2 = 1{,}179{,}648$
+   weights.
+5. An identity shortcut adds nothing. A projection shortcut would add $256^2 = 65{,}536$ weights, 94% of the
+   bottleneck branch.
+
+The bottleneck block uses about 17 times fewer weights than the basic block while keeping 256-channel inputs and
+outputs. That saving is what makes a 152-layer network affordable. ResNet-152 needs 11.3 billion multiply-adds per
+$224 \times 224$ image, fewer than the 15.3 billion of the 16-layer VGG-16 <Cite id="he2016" />.
+
+## Variants and practice
+
+The residual block is the base of most later convolutional designs. A <NoteLink to="densely-connected-network">densely
+connected network</NoteLink> concatenates each layer's output to its input instead of adding it, so later layers read
+earlier features unchanged. ResNeXt splits the $3 \times 3$ convolution into groups <Cite id="xie2017resnext" /> (see
+<NoteLink to="depthwise-and-grouped-convolution">grouped convolution</NoteLink>).
+<NoteLink to="squeeze-and-excitation">Squeeze-and-excitation</NoteLink> rescales the branch's channels before the
+addition. <NoteLink to="efficient-convolutional-networks">MobileNetV2</NoteLink> inverts the bottleneck, and
+<NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> rebuilds the ResNet block with the design of
+<Gloss name="vit">vision transformers</Gloss>. The <NoteLink to="transformer">transformer</NoteLink> wraps every
+attention and feed-forward layer in the same identity shortcut.
+
+ResNet-50 remains the standard baseline of <NoteLink to="image-classification">image classification</NoteLink> and the
+default backbone of many detection and segmentation models. Its accuracy depends strongly on training. With the 2021
+training recipe of the timm library (longer schedules, stronger augmentation, a <Gloss name="bce">binary
+cross-entropy</Gloss> loss), an unchanged ResNet-50 reaches 80.4% top-1 on ImageNet <Cite id="wightman2021resnet" />,
+against 76.1% with the original 90-epoch recipe <Cite id="liu2022" />. Both figures are single $224 \times 224$ crops.
+
+## Assumptions
+
+- $F(\xvec)$ and $\xvec$ have the same shape, or a projection or zero-padding makes them match.
+- The desired mapping is close to the identity, or can be built from many small corrections to it. Deep networks whose
+  layers each refine a representation fit this assumption.
+
+## Pitfalls
+
+- **Operations on the shortcut.** Anything placed on the identity path, such as a ReLU after the addition,
+  <NoteLink to="dropout">dropout</NoteLink> or a scaling, reintroduces a product of factors along the shortcut. He et
+  al. found that constant scaling and gating of the shortcut both hurt optimisation <Cite id="he2016b" />.
+- **Variance growth.** Each addition adds the variance of $F(\xvec)$ to the variance of $\xvec$. Without normalisation
+  inside $F$ or a small initialisation of its last layer, activations grow with depth; see
+  <NoteLink to="residual-connections">residual connections</NoteLink> for the rate.
+- **Projections everywhere.** Projecting every shortcut (option C) nearly doubles the weights of each bottleneck block
+  and takes ResNet-50 from 25.6 to 40.1 million parameters for a small gain, and it removes the exact identity path that
+  the gradient argument relies on.
+- **Effective depth.** Many paths through a residual network are short. Much of the gradient flows through paths that
+  skip most blocks, so a 100-block network does not behave like a 100-layer plain network <Cite id="veit2016" />.

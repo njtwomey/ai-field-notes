@@ -1,0 +1,178 @@
+---
+title: 'Inverse entailment and Progol'
+kind: technique
+summary: 'Progol picks a positive example, builds its bottom clause, the most specific clause that with the background knowledge entails it, and searches the clauses that θ-subsume the bottom clause, scored by compression. Aleph implements the same scheme (Muggleton).'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['Progol', 'Aleph', 'bottom clause', 'mode-directed inverse entailment', 'saturation', 'mode declarations']
+requires: [least-general-generalisation, foil]
+related: [meta-interpretive-learning, theta-subsumption, generality-ordering-and-refinement, inductive-logic-programming, learning-from-failures]
+references: [muggleton1995progol, srinivasan2001aleph, cropper2022ilp30, deraedt2008]
+status: draft
+updated: 2026-10-17
+---
+
+import { BottomClauseSearch } from './BottomClauseSearch'
+
+<Definition>
+**Inverse entailment** turns the requirement that a clause $H$, with background knowledge $B$, entails an example $e$
+into a bound on $H$. Muggleton's **bottom clause** $\bot(B, e)$ is the most specific clause, within a language bias,
+that together with $B$ entails $e$; every clause $H$ the learner considers must θ-subsume it
+<Cite id="muggleton1995progol" />. **Progol** learns a program by <NoteLink to="sequential-covering">sequential
+covering</NoteLink>: it picks an uncovered positive example, builds its bottom clause by **saturation** under user-given
+**mode declarations**, searches the clauses between the empty body and $\bot(B, e)$ for the one with the best
+compression score, adds that clause and removes the positives it covers. **Aleph** is a widely used reimplementation of
+the same scheme <Cite id="srinivasan2001aleph" />.
+</Definition>
+
+## Problem
+
+A top-down learner such as <NoteLink to="foil">FOIL</NoteLink> starts from an empty body and considers every literal
+the background predicates allow. Most of those literals are irrelevant to every example, and the greedy choice can
+commit to one of them early. A bottom-up learner based on the
+<NoteLink to="least-general-generalisation">relative least general generalisation</NoteLink> uses only literals that
+the examples share, but the relative lgg of two examples over a large background has a number of literals that grows
+with the square of the background, and with its $n$-th power for $n$ examples.
+
+Progol takes the useful part of each. It builds a specific clause from one example, as a bottom-up learner does, but
+only out of literals the language bias allows and the background makes true of that example. It then searches top-down,
+from the empty body, but only among clauses whose literals come from that specific clause. The bottom clause bounds the
+search from below, and the empty body from above, so the search space is finite and every candidate is relevant to at
+least one positive example.
+
+## Mechanism
+
+### Inverting entailment
+
+A clause $H$ explains an example $e$ when $B \land H \models e$. By contraposition this holds exactly when
+$B \land \neg e \models \neg H$. For a clause $H$, the negation $\neg H$ is, after replacing its variables by new
+constants, a conjunction of ground literals. Let $\neg\bot$ be the conjunction of all ground literals true in every
+model of $B \land \neg e$. Every literal of $\neg H$ is among them, so $\neg\bot \models \neg H$, and by contraposition
+$H \models \bot$: every hypothesis that explains $e$ is at least as general as $\bot$. Muggleton restricted this
+condition to θ-subsumption: Progol searches only clauses $H$ with $H \succeq \bot$ <Cite id="muggleton1995progol" />.
+For a <NoteLink to="horn-clauses-and-logic-programs">definite clause</NoteLink>, $\bot$ has the example as its head and,
+as its body, the ground facts derivable from $B$ that concern the example, with constants replaced
+<NoteLink to="cyclic-factor-and-by-terms">by variables</NoteLink>.
+
+The restriction to θ-subsumption makes the search finite and decidable. It also makes it incomplete: a clause that
+entails the example only through a recursive call to itself need not θ-subsume the bottom clause, so Progol can miss
+some recursive definitions.
+
+### Mode declarations and saturation
+
+Mode declarations fix which literals may appear. A head mode such as `modeh(daughter(+person, +person))` says the target
+is called with both arguments bound. A body mode such as `modeb(parent(+person, -person))` says a parent literal may be
+added when its first argument is a person already in the clause, and binds its second argument as a new person. An
+argument marked `#` must be a constant. Progol's modes also carry a **recall**, the number of answers of a literal to
+keep, and a type for each argument.
+
+**Saturation** builds $\bot(B, e)$ for a ground example $e$:
+
+1. **Head.** Replace the constants in $e$'s input positions by variables, one per distinct constant. Those constants
+   are the **known terms**.
+2. **Layer $i$.** For each body mode, fill its input positions with known terms of the right types in every possible
+   way, and query $B$ for the answers. Each answer gives a ground literal. Replace its constants by variables, the same
+   constant always by the same variable, and add it to the body if it is new.
+3. **New terms.** The constants in output positions of the new literals join the known terms for the next layer.
+4. **Stop** after a fixed number of layers, the **variable depth** $i$, or when no literal is new.
+
+### Searching above the bottom clause
+
+Every clause in the search has the head of $\bot$ and a body that is a subset of $\bot$'s body. A literal may join a
+body only when its input variables already occur in the head or in an earlier literal, which keeps clauses connected.
+The search runs general to specific. Progol uses a best-first search guided by a compression measure that rewards the
+positives a clause covers and penalises the negatives it covers and its length <Cite id="muggleton1995progol" />. Aleph
+offers several orders and scores; its compression score is
+
+$$
+f(C) = P - N - L + 1,
+$$
+
+with $P$ and $N$ the positive and negative examples $C$ covers and $L$ the number of literals in $C$, including the
+head <Cite id="srinivasan2001aleph" />. Coverage is computed by running each example as a query against $B \cup
+\set{C}$.
+
+Two pruning rules follow from the generality order. A clause that covers no negative is not refined, because adding
+literals cannot cover more positives and only lengthens it. A clause $C$ whose refinements can score at most
+$P - 0 - (L + 1) + 1 = P - L$ is pruned when that bound does not beat the best score found so far.
+
+### The covering loop
+
+1. While some positive example is uncovered: pick one, the **seed**.
+2. Saturate it to $\bot(B, e)$ with depth $i$.
+3. Search the clauses above $\bot(B, e)$ and keep the best one that meets the noise bound (the number of negatives a
+   clause may cover).
+4. Add it to the program and remove the positives it covers.
+
+Aleph's defaults bound the variable depth to 2 and the clause length to 4 literals <Cite id="srinivasan2001aleph" />.
+
+## Worked example
+
+The background is the family database: Ann is the parent of Bob and Cid, Bob of Dee and Eve, Cid of Fay, Eve of Gus;
+Ann, Cid, Dee, Eve and Fay are female. The target is daughter, with positives (cid, ann), (dee, bob), (eve, bob) and
+(fay, cid), and negatives (bob, ann), (gus, eve), (ann, cid) and (dee, ann). The modes are
+`daughter(+person, +person)` for the head and `female(+person)`, `parent(+person, -person)` and
+`parent(-person, +person)` for the body, with variable depth 1.
+
+1. **Seed and head.** The seed is $\text{daughter}(\text{cid}, \text{ann})$. The head is $\text{daughter}(A, B)$ with
+   $A$ for Cid and $B$ for Ann; the known terms are Cid and Ann.
+2. **female(+person).** Both Ann and Cid are female: $\text{female}(B)$ and $\text{female}(A)$.
+3. **parent(+person, −person).** Ann's children are Bob and Cid, giving $\text{parent}(B, C)$ with $C$ for Bob and
+   $\text{parent}(B, A)$. Cid's child Fay gives $\text{parent}(A, D)$ with $D$ for Fay.
+4. **parent(−person, +person).** Cid's parent is Ann, which gives $\text{parent}(B, A)$ again, and Ann has no parent.
+   No new literal.
+5. **Bottom clause.** $\text{daughter}(A, B) \leftarrow \text{female}(B) \land \text{female}(A) \land
+   \text{parent}(B, C) \land \text{parent}(B, A) \land \text{parent}(A, D)$. Its five body literals span a lattice of
+   $2^5 = 32$ clauses.
+6. **Top of the search.** The empty body covers all 4 positives and 4 negatives: $f = 4 - 4 - 1 + 1 = 0$.
+   $\text{female}(A)$ covers 4 positives and 2 negatives, (ann, cid) and (dee, ann), so $f = 4 - 2 - 2 + 1 = 1$.
+   $\text{parent}(B, A)$ also scores 1: it covers the negatives (bob, ann) and (gus, eve).
+7. **Best clause.** The twelfth clause evaluated, $\text{daughter}(A, B) \leftarrow \text{female}(A) \land
+   \text{parent}(B, A)$, covers 4 positives and no negative: $f = 4 - 0 - 3 + 1 = 2$. It is not refined.
+8. **Pruning.** $\text{parent}(B, C) \land \text{parent}(B, A)$ covers 4 positives and 2 negatives with 3 literals.
+   Any refinement scores at most $4 - 3 = 1 < 2$, so it is pruned. The search evaluates 24 of the 32 clauses and
+   returns the best one, which covers every positive, so the covering loop stops.
+
+With variable depth 2 the bottom clause grows to 8 body literals, adding $\text{female}(D)$ and Bob's two children, and
+the search evaluates 32 clauses to reach the same answer. Each seed in the figure has a different bottom clause, of 4 or
+5 literals, and every one leads to the same clause.
+
+<BottomClauseSearch />
+
+## Cost
+
+- **Saturation.** The bottom clause grows with the number of answers of each mode and with the variable depth: each
+  layer can multiply the known terms by the fan-out of the relations. Recall bounds and depths of 2 or 3 keep it to
+  tens or hundreds of literals.
+- **Search.** With $k$ literals in the bottom clause, the lattice has up to $2^k$ clauses; a clause-length bound of
+  $m$ limits it to $\sum_{j \le m} \binom{k}{j}$. Pruning by coverage removes most of them in practice.
+- **Coverage tests.** Each clause is tested against every example by <NoteLink to="unification-and-resolution">SLD
+  resolution</NoteLink>, with a depth bound. On large example sets the tests dominate, and Aleph can sample examples or
+  cache coverage.
+- **Covering loop.** One saturation and one search per clause learnt, so the cost scales with the number of clauses in
+  the final program rather than with the number of examples.
+
+## Trade-offs
+
+- **Bounded complete search against greedy search.** Within the bottom clause and the length bound, the search finds
+  the best-scoring clause, including clauses whose literals pay off only together. FOIL's hill climbing is faster and
+  can miss them.
+- **Depends on the seed.** The bottom clause contains only literals true of the seed. An atypical seed yields a bottom
+  clause that lacks the literals the target needs, and the clause found covers few other positives. Aleph can saturate
+  several seeds and keep the best clause.
+- **Mode declarations as prior knowledge.** Modes encode what the user knows about how predicates are called. Good
+  modes make the search small; wrong modes exclude the target.
+- **Clause by clause.** Like FOIL, Progol learns one clause at a time, so it struggles with recursive programs whose
+  base case and recursive case must be learnt together, and it cannot invent predicates.
+  <NoteLink to="meta-interpretive-learning">Meta-interpretive learning</NoteLink> and
+  <NoteLink to="learning-from-failures">learning from failures</NoteLink> search whole programs instead.
+
+## Pitfalls
+
+- **Bottom clauses that are too large.** A depth of 3 over a dense background can produce thousands of literals, and
+  every coverage test of a long clause is an expensive θ-subsumption problem. Start with depth 1 or 2 and tight recall.
+- **Missing literals from the background.** Saturation reads facts from $B$. A fact missing about the seed removes the
+  literal from the bottom clause and from every clause above it.
+- **Score ties.** Compression ties are common on small data; on the daughter task, $\text{female}(A)$ and
+  $\text{parent}(B, A)$ both score 1. The result then depends on the search order.
+- **Noise bound set to zero.** With no tolerated negatives, one mislabelled negative example rules out the right
+  clause, and Progol returns a long clause that steers around it, or the seed itself as a fact.

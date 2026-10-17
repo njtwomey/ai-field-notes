@@ -1,0 +1,235 @@
+---
+title: 'Label spreading'
+kind: technique
+summary: 'Label spreading iterates $\Fmat \leftarrow \alpha \Smat \Fmat + (1 - \alpha) \Ymat$ with the normalised affinity $\Smat = \Dmat^{-1/2} \Wmat \Dmat^{-1/2}$, so labelled points may change label and noisy labels are smoothed. The fixed point is $(1 - \alpha)(\I - \alpha \Smat)^{-1} \Ymat$ (Zhou et al.).'
+tags: [semi-supervised, graphs, nonparametric, classification, worked-example]
+aliases: ['learning with local and global consistency', 'local and global consistency']
+requires: [label-propagation]
+related:
+  [
+    graph-construction-for-semi-supervised-learning,
+    manifold-regularisation,
+    spectral-clustering,
+    learning-with-noisy-labels,
+    semi-supervised-node-classification,
+  ]
+references: [zhou2004lgc, zhu2003, gasteiger2019appnp, huang2021correctsmooth, iscen2019labelprop]
+status: draft
+updated: 2026-10-17
+---
+
+import { NoisyLabels } from './NoisyLabels'
+
+<Definition>
+Given $n$ points with a symmetric non-negative affinity matrix $\Wmat$ ($n \times n$, zero diagonal), degrees
+$d_i = \sum_j W_{ij}$ and a one-hot label matrix $\Ymat$ ($n \times C$, zero rows for unlabelled points), **label
+spreading** computes class scores $\Fmat$ ($n \times C$) by iterating
+
+$$
+\Fmat^{(t+1)} = \alpha\,\Smat\,\Fmat^{(t)} + (1 - \alpha)\,\Ymat, \qquad \Smat = \Dmat^{-1/2}\Wmat\Dmat^{-1/2},
+$$
+
+from $\Fmat^{(0)} = \Ymat$, with $\alpha \in (0, 1)$. The iteration converges to
+$\Fmat^* = (1 - \alpha)(\I - \alpha\Smat)^{-1}\Ymat$, and each point takes the class of its largest score. No row is
+clamped, so a given label can be overruled <Cite id="zhou2004lgc" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="label-propagation">Label propagation</NoteLink> fixes every labelled score to its given label and makes
+each unlabelled score the weighted average of its neighbours. Two weaknesses follow from that rule.
+
+- **A wrong label is permanent.** A mislabelled point keeps its wrong label, and the harmonic solution spreads that
+  label to every point that is closer to it, along the graph, than to a correctly labelled point. Labels gathered by
+  annotators or by a heuristic contain such errors.
+- **Normalisation at one end.** The average $f_i = \sum_j W_{ij} f_j / d_i$ divides by the degree of the receiving
+  point only. The weight of point $j$ in that average does not depend on $d_j$, so a hub inside a dense region passes
+  its score to each of its many neighbours as strongly as an isolated point passes its score to its few.
+
+Label spreading, proposed by Zhou, Bousquet, Lal, Weston and Schölkopf as "learning with local and global consistency",
+changes both <Cite id="zhou2004lgc" />. It keeps the graph and the idea that scores should vary little across strong
+edges. It replaces clamping by a penalty for moving away from the given labels, and it normalises every edge by the
+degrees at both of its ends.
+
+## Mechanism
+
+### The objective
+
+Label spreading minimises
+
+$$
+Q(\Fmat) = \frac{1}{2}\paren{\sum_{i, j} W_{ij}\norm{\frac{\fvec_i}{\sqrt{d_i}} - \frac{\fvec_j}{\sqrt{d_j}}}^2
++ \mu \sum_i \norm{\fvec_i - \yvec_i}^2},
+$$
+
+where $\fvec_i$ and $\yvec_i$ are the rows of $\Fmat$ and $\Ymat$ (length $C$) and $\mu > 0$ weighs the fit to the
+labels <Cite id="zhou2004lgc" />. The first term is the **smoothness** term: it is small when strongly linked points
+have similar scores after each score is divided by the square root of its point's degree. The second is the **fitting**
+term. It applies to unlabelled points too, where $\yvec_i = \zeros$ pulls the scores towards zero, so a point far from
+every label ends with small scores.
+
+**The smoothness term is a quadratic form.** Expanding the square and using the symmetry of $\Wmat$,
+
+$$
+\frac{1}{2}\sum_{i, j} W_{ij}\norm{\frac{\fvec_i}{\sqrt{d_i}} - \frac{\fvec_j}{\sqrt{d_j}}}^2
+= \sum_i \norm{\fvec_i}^2 - \sum_{i, j}\frac{W_{ij}}{\sqrt{d_id_j}}\fvec_i^\top\fvec_j
+= \trace\paren{\Fmat^\top(\I - \Smat)\Fmat},
+$$
+
+because $\sum_j W_{ij} = d_i$ turns the two squared terms into $\norm{\fvec_i}^2$ each. The matrix $\I - \Smat$ is the
+**normalised graph Laplacian**, the operator of <NoteLink to="spectral-clustering">spectral clustering</NoteLink>.
+
+**The minimiser.** $Q$ is a convex quadratic in $\Fmat$, so its minimiser is where the gradient vanishes:
+
+$$
+\frac{\partial Q}{\partial \Fmat} = (\I - \Smat)\Fmat + \mu(\Fmat - \Ymat) = \zeros
+\quad\Longrightarrow\quad
+\Fmat = \frac{1}{1 + \mu}\Smat\Fmat + \frac{\mu}{1 + \mu}\Ymat.
+$$
+
+Write $\alpha = 1/(1 + \mu)$, so $1 - \alpha = \mu/(1 + \mu)$. The condition reads
+$(\I - \alpha\Smat)\Fmat = (1 - \alpha)\Ymat$, and the minimiser is
+
+$$
+\Fmat^* = (1 - \alpha)(\I - \alpha\Smat)^{-1}\Ymat.
+$$
+
+The inverse exists because the eigenvalues of $\Smat$ lie in $[-1, 1]$ (derivation below), so those of
+$\I - \alpha\Smat$ lie in $[1 - \alpha, 1 + \alpha]$ and are positive. A large $\alpha$ (small $\mu$) trusts the graph;
+a small $\alpha$ (large $\mu$) trusts the given labels.
+
+<Derivation title="Why the eigenvalues of S lie in [−1, 1], and why the iteration converges">
+$\Smat = \Dmat^{-1/2}\Wmat\Dmat^{-1/2} = \Dmat^{1/2}(\Dmat^{-1}\Wmat)\Dmat^{-1/2}$ is similar to the random-walk
+matrix $\Pmat = \Dmat^{-1}\Wmat$, whose rows are non-negative and sum to 1. Similar matrices share eigenvalues. For an
+eigenvector $\vvec$ of $\Pmat$ with eigenvalue $\lambda$, take the entry $i$ of largest magnitude:
+$\abs{\lambda}\abs{v_i} = \abs{\sum_j P_{ij}v_j} \le \sum_j P_{ij}\abs{v_j} \le \abs{v_i}$, so $\abs{\lambda} \le 1$.
+The eigenvalue 1 is attained by the constant vector, $\Pmat\ones = \ones$, and for $\Smat$ by the vector
+$\sqrt{\dvec}$ with entries $\sqrt{d_i}$.
+
+Unrolling the iteration from $\Fmat^{(0)} = \Ymat$ gives
+
+$$
+\Fmat^{(t)} = (\alpha\Smat)^t\Ymat + (1 - \alpha)\sum_{k=0}^{t-1}(\alpha\Smat)^k\Ymat.
+$$
+
+Every eigenvalue of $\alpha\Smat$ has magnitude at most $\alpha < 1$, so $(\alpha\Smat)^t \to \zeros$ and the geometric
+series converges to $(\I - \alpha\Smat)^{-1}$. The limit is $\Fmat^*$ <Cite id="zhou2004lgc" />. The error after $t$
+steps shrinks at least as fast as $\alpha^t$.
+</Derivation>
+
+### What the iteration does
+
+Each step gives every point the normalised sum of its neighbours' current scores, weighted by $\alpha$, plus a share
+$1 - \alpha$ of its own given label. The diagonal of $\Wmat$ is zero, so a point receives nothing from its own previous
+score. A labelled point is therefore pulled towards its neighbours' consensus at every step.
+
+The series form gives a random-walk reading. $\Fmat^* = (1 - \alpha)\sum_k \alpha^k\Smat^k\Ymat$ adds the label mass
+that reaches each point along walks of every length $k$, with weight $(1 - \alpha)\alpha^k$. These weights are a
+geometric distribution on the walk length with mean $\alpha/(1 - \alpha)$: 1 step at $\alpha = 0.5$, 9 steps at
+$\alpha = 0.9$, 99 steps at $\alpha = 0.99$. Replacing $\Smat$ by the random-walk matrix $\Pmat = \Dmat^{-1}\Wmat$ gives
+personalised PageRank with restart probability $1 - \alpha$, the propagation used by APPNP to spread a neural
+network's predictions over a graph <Cite id="gasteiger2019appnp" />.
+
+### Relation to the harmonic solution
+
+The two methods share the graph and differ in three choices.
+
+| | Harmonic label propagation | Label spreading |
+| --- | --- | --- |
+| Labelled scores | clamped to the labels | penalised for leaving them, weight $\mu = (1 - \alpha)/\alpha$ |
+| Edge normalisation | $W_{ij}/d_i$ (receiving end) | $W_{ij}/\sqrt{d_id_j}$ (both ends) |
+| Unlabelled scores | weighted average of neighbours, between 0 and 1 | shrunk towards zero far from labels |
+
+As $\mu \to \infty$ ($\alpha \to 0$), label spreading returns $\Ymat$ itself and gives unlabelled points no score. As
+$\alpha \to 1$ on a connected graph, every eigenvalue of $\alpha\Smat$ except the top one stays bounded below 1, and the
+top eigenvector term $\sqrt{\dvec}\,\sqrt{\dvec}^\top\Ymat / \sum_i d_i$ dominates. Every row of $\Fmat^*$ then becomes
+proportional to the same vector, and every point takes the same class. The useful range of $\alpha$ lies between these
+limits, close to 1 but not so close that this single term takes over.
+
+## Worked example
+
+Four points are all joined to each other with weight 1, so every degree is 3 and $\Smat = \Wmat/3$. Points 1 and 2 are
+labelled A, point 3 is labelled B by mistake, and point 4 is unlabelled. The label matrix has columns
+$\yvec_A = (1, 1, 0, 0)$ and $\yvec_B = (0, 0, 1, 0)$.
+
+**Harmonic solution.** Points 1 to 3 keep their labels. Point 4 averages its three neighbours: score
+$(1 + 1 + 0)/3 = 2/3$ for A and $1/3$ for B. Point 3 stays B.
+
+**First step of label spreading, $\alpha = 0.9$.** Point 3 receives $\alpha$ times the sum of its neighbours' labels
+divided by 3: $0.9 \times (1 + 1 + 0)/3 = 0.6$ for A and $0.9 \times 0/3 = 0$ for B. It adds $(1 - \alpha) = 0.1$ of
+its own label, giving $(0.6, 0.1)$. After one step point 3 already leans to A.
+
+**The fixed point.** The matrix $\Smat = (\ones\ones^\top - \I)/3$ has eigenvalue 1 on the constant vector and $-1/3$ on
+every vector orthogonal to it. Split each label column into its mean part and the rest:
+$\yvec_A = \frac{1}{2}\ones + (0.5, 0.5, -0.5, -0.5)$ and $\yvec_B = \frac{1}{4}\ones + (-0.25, -0.25, 0.75, -0.25)$.
+The operator $(1 - \alpha)(\I - \alpha\Smat)^{-1}$ leaves the mean part unchanged and multiplies the rest by
+$r = (1 - \alpha)/(1 + \alpha/3)$. Point 3 therefore scores
+
+$$
+F_{3A} = 0.5 - 0.5\,r, \qquad F_{3B} = 0.25 + 0.75\,r.
+$$
+
+Point 3 switches to A when $0.5 - 0.5r > 0.25 + 0.75r$, that is when $r < 0.2$. Solving
+$(1 - \alpha) < 0.2(1 + \alpha/3)$ gives $\alpha > 0.75$.
+
+- At $\alpha = 0.5$, $r = 0.5/(7/6) = 0.429$, so $F_3 = (0.286, 0.571)$: the wrong label survives.
+- At $\alpha = 0.9$, $r = 0.1/1.3 = 0.077$, so $F_3 = (0.462, 0.308)$: point 3 is relabelled A, with normalised scores
+  $(0.6, 0.4)$.
+
+Point 4 scores $(0.5 - 0.5r, 0.25 - 0.25r)$, always in the ratio 2 to 1, which is the harmonic answer after
+normalisation. The scores of a labelled point stay below 1: at $\alpha = 0.9$ point 1 scores $(0.538, 0.231)$, and the
+row sum below 1 is the shrinkage of the fitting term.
+
+The figure repeats the experiment on two moons with 200 points, ten labels per class, and four of the labels flipped.
+
+<NoisyLabels />
+
+## Cost
+
+- **Direct solve.** $\Fmat^* = (1 - \alpha)(\I - \alpha\Smat)^{-1}\Ymat$ costs $O(n^3)$ for a dense factorisation, the
+  same as the harmonic solution.
+- **Iteration.** One step costs $O(\abs{E}C)$ on a sparse graph with $\abs{E}$ edges. The error shrinks like
+  $\alpha^t$, so reaching a tolerance $\varepsilon$ needs about $\ln\varepsilon / \ln\alpha$ steps: about 690 steps for
+  $\varepsilon = 10^{-3}$ at $\alpha = 0.99$.
+- **<Gloss name="cg" />.** $\I - \alpha\Smat$ is symmetric positive definite with condition number at most
+  $(1 + \alpha)/(1 - \alpha)$, 199 at $\alpha = 0.99$. Conjugate gradient converges in a number of steps that grows with
+  the square root of the condition number, a few dozen here, which is why large-scale implementations solve the
+  system with it <Cite id="iscen2019labelprop" />.
+
+## Trade-offs
+
+- **Robustness against fidelity.** Clamping, in the harmonic solution, is right when the labels are exact. Label
+  spreading is right when some labels are wrong: on the two moons above, with four of twenty labels flipped, harmonic
+  propagation reaches 0.88 accuracy on average over six draws and label spreading at $\alpha = 0.99$ reaches 1.00,
+  overruling most flipped labels.
+- **The choice of $\alpha$.** Zhou et al. fixed $\alpha = 0.99$ in all their experiments <Cite id="zhou2004lgc" />, and
+  scikit-learn's `LabelSpreading` defaults to $\alpha = 0.2$. A small $\alpha$ keeps the given labels and spreads them
+  only a step or two, which leaves distant points with little mass. An $\alpha$ very close to 1 drifts towards the
+  single-class limit above. Tuning $\alpha$ needs labelled validation data, which semi-supervised problems rarely have.
+- **Symmetric normalisation.** Dividing by $\sqrt{d_id_j}$ makes the operator symmetric, so the theory of symmetric
+  matrices and conjugate gradient apply. The scores of low-degree points are smaller than those of hubs before
+  <NoteLink to="row-normalisation">row normalisation</NoteLink>, which can bias the arg max when classes differ in
+  density.
+
+**Use today.** Label spreading is the propagation step in several current methods. Iscen et al. build a
+nearest-neighbour graph on a deep network's embeddings, spread the few labels over it to produce pseudo-labels for the
+unlabelled images, retrain the network on them and repeat <Cite id="iscen2019labelprop" />. Correct and Smooth fits a
+simple model to node features, then spreads its residual errors and its predictions over the graph with the
+label-spreading iteration; on several node-classification benchmarks it matches or exceeds <Gloss name="gnn">graph
+neural networks</Gloss> with far fewer parameters <Cite id="huang2021correctsmooth" />.
+
+## Pitfalls
+
+- **Too few labels to outvote a wrong one.** A label is overruled only when the mass spread from correctly labelled
+  points outweighs the point's own share $1 - \alpha$. With one or two labels per class, a wrong label usually has no
+  correct label near it and survives.
+- **Disconnected components.** As with the harmonic solution, a component with no labelled point gets zero scores
+  and no class.
+- **The graph still decides.** Label spreading changes how labels move, not where the graph's edges are. An edge that
+  joins two classes carries labels across whatever the propagation rule; see
+  <NoteLink to="graph-construction-for-semi-supervised-learning">graph construction</NoteLink>.
+- **Transductive only.** The scores exist only for the points in the graph. A new point must be added to the graph,
+  or a classifier that extends to new points must be used, such as
+  <NoteLink to="manifold-regularisation">manifold regularisation</NoteLink>.
+- **Class proportions.** The arg max of $\Fmat^*$ ignores the class priors. Class mass normalisation, as described for
+  <NoteLink to="label-propagation">label propagation</NoteLink>, applies here too <Cite id="zhu2003" />.

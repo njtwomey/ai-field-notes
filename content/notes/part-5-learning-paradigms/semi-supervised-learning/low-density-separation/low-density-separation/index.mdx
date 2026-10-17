@@ -1,0 +1,235 @@
+---
+title: 'Low-density separation'
+kind: concept
+summary: 'Low-density separation places the decision boundary where unlabelled points are sparse, which is the cluster assumption stated geometrically. Entropy minimisation, the transductive SVM and density-sensitive distances or cluster kernels are three ways to impose it.'
+tags: [semi-supervised, worked-example]
+aliases: ['density-sensitive distance', 'cluster kernels', 'rho-path distance', 'connectivity kernel']
+requires: [semi-supervised-assumptions]
+related:
+  [
+    entropy-minimisation,
+    transductive-support-vector-machine,
+    spectral-clustering,
+    label-propagation,
+    when-unlabelled-data-helps,
+    isomap,
+    multidimensional-scaling,
+    graph-construction-for-semi-supervised-learning,
+    pseudo-labelling,
+  ]
+references:
+  [
+    chapelle2006,
+    chapelle2005lds,
+    grandvalet2005,
+    joachims1999transductive,
+    chapelle2002cluster,
+    bijral2011density,
+    szummer2002information,
+    singh2008unlabeled,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { DensityPathDistance } from './DensityPathDistance'
+import { UnlabelledLosses } from './UnlabelledLosses'
+
+<Definition>
+**Low-density separation** is the assumption that the decision boundary of a classifier should pass through regions
+where the input density $p(\xvec)$ is small, and the family of semi-supervised methods that impose it
+<Cite id="chapelle2006" />. The methods take two routes. Some add to the supervised loss a penalty on unlabelled points
+that lie near the boundary, as <NoteLink to="entropy-minimisation">entropy minimisation</NoteLink> and the
+<NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink> do. Others change the
+geometry of the input space, with a density-sensitive distance or a cluster kernel, so that points in one dense region
+become close and points across a gap far apart, and then train an ordinary classifier.
+</Definition>
+
+## Intuition
+
+Two dense clouds of points are separated by an empty corridor, and one point in each cloud is labelled. Many boundaries
+separate the two labels. A boundary through the corridor separates the clouds as well; a boundary through a cloud splits
+it. If each cloud holds one class, which is the <NoteLink to="semi-supervised-assumptions">cluster
+assumption</NoteLink>, only the corridor boundary is right, and the corridor is exactly where few unlabelled points lie.
+Low-density separation turns this into a rule a learner can follow: among the boundaries that fit the labels, prefer one
+with few unlabelled points near it.
+
+The two routes do this differently. A penalty route keeps the input space and moves the boundary: each unlabelled point
+near the boundary adds to the loss, so the boundary slides until few points are near it. A geometry route keeps a simple
+classifier and moves the points: it measures distance along chains of nearby points, so that two points in the same
+cloud are close even when far apart in a straight line, and a corridor, which no chain of short steps can cross, becomes
+wide. A nearest-neighbour rule or a kernel machine on the new distance then puts its boundary in the corridor by itself.
+
+## Details
+
+### Penalties on unlabelled points near the boundary
+
+Write $z = f(\xvec)$ for a classifier's score on an input, with the boundary at $z = 0$: the logit of a logistic model
+or the decision value of a <Gloss name="svm">support vector machine</Gloss>. The penalty methods minimise
+
+$$
+\frac{1}{\ell}\sum_{i=1}^{\ell} L\paren{y_i, f(\xvec_i)} + \frac{\lambda}{u}\sum_{j=1}^{u} \phi\paren{f(\xvec_j)},
+$$
+
+over $\ell$ labelled pairs and $u$ unlabelled inputs, with a supervised loss $L$, a weight $\lambda \ge 0$ and a loss
+$\phi$ on unlabelled scores that is largest at $z = 0$, symmetric in $z$, and decreasing in $\abs{z}$. Four choices of
+$\phi$ are in use.
+
+- **Entropy** of the prediction, $\entropy(\sigma(z))$ for two classes, in
+  <NoteLink to="entropy-minimisation">entropy minimisation</NoteLink> <Cite id="grandvalet2005" />.
+- **Hard pseudo-label loss** $-\log\max(\sigma(z), 1 - \sigma(z))$, which
+  <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> minimises when it trains on its own arg-max labels.
+- **Symmetric hinge** $\max(0, 1 - \abs{z})$, in the
+  <NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink>
+  <Cite id="joachims1999transductive" />.
+- **Symmetric sigmoid** $\exp(-3z^2)$, a smooth version of the symmetric hinge <Cite id="chapelle2005lds" />.
+
+<UnlabelledLosses />
+
+Every such $\phi$ is non-convex. Convexity would require $\phi(0) \le \frac12\phi(a) + \frac12\phi(-a)$ for any
+$a \ne 0$, the value at the midpoint at most the average of the ends. Symmetry makes the right side $\phi(a)$, and
+$\phi$ is largest at 0, so the inequality fails whenever $\phi(a) < \phi(0)$. The total loss is therefore non-convex in
+the model's parameters even when $f$ is linear. Each gap in the data through which the boundary could pass gives a
+local minimum, and the solvers of both methods rely on continuation: they start from the supervised solution and raise
+the weight on the unlabelled term gradually <Cite id="grandvalet2005" /> <Cite id="chapelle2005lds" />.
+
+Each penalty also needs a limit on the scale of $f$. Multiplying a linear $f$ by a large constant keeps its boundary and
+drives every unlabelled score away from 0. The SVM's margin term $\frac12\norm{\wvec}^2$ provides the limit for the
+transductive SVM, and <Gloss name="weight-decay">weight decay</Gloss> provides it for entropy minimisation.
+
+### Density-sensitive distances
+
+The geometry route replaces the Euclidean distance by one that is short along dense regions and long across sparse
+ones. Chapelle and Zien build it on a graph whose nodes are all the labelled and unlabelled points
+<Cite id="chapelle2005lds" />. An edge between points at Euclidean distance $d$ costs $e^{\rho d} - 1$, for a softening
+parameter $\rho \ge 0$, and the cost of a path is the sum of its edge costs. The **ρ-path distance** between two points
+is
+
+$$
+D_\rho(\xvec, \xvec') = \frac{1}{\rho}\log\paren{1 + \min_{\text{paths from } \xvec \text{ to } \xvec'}
+\sum_{\text{edges}} \paren{e^{\rho d} - 1}}.
+$$
+
+The edge cost grows faster than linearly in $d$, so for $\rho > 0$ two short edges are cheaper than one long edge of the
+same total length, and cheapest paths hop between nearby points. The two limits show what $\rho$ controls.
+
+- **As $\rho \to 0$**, $e^{\rho d} - 1 \approx \rho d$ and $\frac{1}{\rho}\log(1 + \rho S) \approx S$, so $D_\rho$ tends
+  to the length of the shortest path. On the full graph the straight edge is a shortest path, by the triangle
+  inequality, and $D_0$ is the Euclidean distance.
+- **As $\rho \to \infty$**, the sum is dominated by its largest term, and $D_\rho$ tends to the smallest achievable
+  value of the longest edge on a path, $\min_{\text{paths}}\max_{\text{edges}} d$. The minimax distance underlies the
+  connectivity kernel <Cite id="chapelle2005lds" />.
+
+For a large $\rho$ the distance depends on the largest step a path must take. Suppose two points lie in one cluster and
+are joined by a path of $m$ edges, each at most $h$ long. The path costs at most $m(e^{\rho h} - 1)$, so
+$D_\rho \le \frac{1}{\rho}\log\paren{1 + m(e^{\rho h} - 1)}$, which approaches $h + \frac{\log m}{\rho}$ as $\rho$
+grows. Suppose instead that every path between two points must cross a gap of width $g$. Each such path has an edge at
+least $g$ long, which costs at least $e^{\rho g} - 1$, so $D_\rho \ge g$. When $\rho$ is large enough that
+$h + \frac{\log m}{\rho} < g$, points across the gap are farther apart than points within a cluster, whatever their
+Euclidean distances. The ρ-path distance thus writes the cluster assumption into the geometry.
+
+Chapelle and Zien turn the distances into a kernel, $\exp(-D_\rho^2/2\sigma^2)$, and train an SVM on it, or embed the
+points by <NoteLink to="multidimensional-scaling">multidimensional scaling</NoteLink> of $D_\rho^2$ and train a
+transductive SVM in the embedding. The second combination, which they call LDS, implements low-density separation twice
+<Cite id="chapelle2005lds" />. Bijral, Ratliff and Srebro estimate density-based distances by shortest paths in the same
+spirit and use them in any distance-based learner, such as <NoteLink to="nearest-neighbours">nearest
+neighbours</NoteLink> <Cite id="bijral2011density" />. At $\rho = 0$ on a sparse neighbour graph, $D_0$ is the graph
+geodesic of <NoteLink to="isomap">Isomap</NoteLink>.
+
+### Cluster kernels and information regularisation
+
+Chapelle, Weston and Schölkopf reshape a kernel instead of a distance <Cite id="chapelle2002cluster" />. They form the
+<Gloss name="rbf-kernel" /> matrix $\Kmat$ over all labelled and unlabelled points, its degree matrix $\Dmat$ with
+$D_{ii} = \sum_j K_{ij}$, and the normalised matrix $\Lmat = \Dmat^{-1/2}\Kmat\Dmat^{-1/2}$ with eigenvalues
+$\lambda_k$. A transfer function $\varphi$ replaces each $\lambda_k$ by $\varphi(\lambda_k)$, and the new matrix,
+renormalised to a unit diagonal, is the kernel. The identity $\varphi(\lambda) = \lambda$ leaves the kernel unchanged. A
+step that keeps the $k$ largest eigenvalues gives the representation of <NoteLink to="spectral-clustering">spectral
+clustering</NoteLink>, in which points of one cluster map near one direction. A power $\varphi(\lambda) = \lambda^t$
+gives a kernel built from a $t$-step <NoteLink to="random-walk">random walk</NoteLink> on the points, which stays within
+a cluster with high probability. Szummer and Jaakkola take a third view: information regularisation penalises how much
+information about the label the model implies within each small region, weighted by how much probability the region
+holds, so the label may change only where $p(\xvec)$ is small <Cite id="szummer2002information" />.
+
+### Relation to the other assumptions
+
+Low-density separation is the <NoteLink to="semi-supervised-assumptions">cluster assumption</NoteLink> stated in terms
+of the boundary: if every high-density cluster is pure, a boundary that cuts no cluster passes between them, where the
+density is low. Graph methods such as <NoteLink to="label-propagation">label propagation</NoteLink> reach the same
+boundaries through smoothness along a neighbour graph, and the ρ-path distance can be read as a graph method whose edge
+weights exaggerate long steps. Whether the unlabelled data can locate the gap at all depends on its width relative to
+the sample size: Singh, Nowak and Zhu show that unlabelled data help when the gap can be resolved from the unlabelled
+sample but not from the labelled one <Cite id="singh2008unlabeled" /> (see
+<NoteLink to="when-unlabelled-data-helps">when unlabelled data help</NoteLink>).
+
+## Worked example
+
+The line data of the chapter: ten inputs, a dense run $0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4$ and a short run
+$3.4, 3.8, 4.2$. The input $0$ is labelled class 0 and $4.2$ class 1; the true classes are the runs. Classify each
+unlabelled input by its nearer labelled input under $D_\rho$ on the full graph.
+
+**Step 1: Euclidean distance ($\rho = 0$).** The input $2.4$ is $2.4$ from the class-0 label and $1.8$ from the class-1
+label, so it is assigned class 1, which is wrong. Every other unlabelled input is assigned correctly: 7 of 8.
+
+**Step 2: the cheapest paths.** Edges of length $0.4$ cost $e^{0.4\rho} - 1$ and the gap edge of length $1.0$ costs
+$e^{\rho} - 1$. Because the edge cost is convex in length, skipping a point never pays, and the cheapest path from $2.4$
+to $0$ walks the six steps of $0.4$ along the run. The cheapest path to $4.2$ crosses the gap once and then takes two
+steps of $0.4$. The path costs are
+
+$$
+S_0 = 6\paren{e^{0.4\rho} - 1}, \qquad S_1 = \paren{e^{\rho} - 1} + 2\paren{e^{0.4\rho} - 1}.
+$$
+
+**Step 3: $\rho = 1$.** $e^{0.4} - 1 = 0.492$ and $e - 1 = 1.718$, so $S_0 = 2.951$ and $S_1 = 2.702$. The distances are
+$D_0 = \log(3.951) = 1.374$ and $D_1 = \log(3.702) = 1.309$. The input $2.4$ is still assigned class 1.
+
+**Step 4: $\rho = 2$.** $e^{0.8} - 1 = 1.226$ and $e^2 - 1 = 6.389$, so $S_0 = 7.353$ and $S_1 = 8.840$. The distances
+are $D_0 = \frac12\log(8.353) = 1.061$ and $D_1 = \frac12\log(9.840) = 1.143$. The input $2.4$ is now nearer the class-0
+label. The same calculation for $2.0$ gives $0.982$ against $1.202$, and for $3.4$ gives $1.345$ against $0.619$: all 8
+unlabelled inputs are classified correctly. The two distances to $2.4$ are equal at $\rho \approx 1.36$.
+
+**Step 5: the large-$\rho$ limit.** As $\rho \to \infty$, $D_0$ tends to the longest edge on the path to $0$, which is
+$0.4$, and $D_1$ to the longest edge on the path to $4.2$, which is the gap, $1.0$. The distance no longer depends on
+how far apart the inputs are, only on the largest step between them.
+
+The same data give the same boundary under the penalty route: entropy minimisation with $\lambda = 1$ moves the
+threshold to $3.04$, and the hard-margin transductive SVM puts it at $2.9$ (see their notes). If the true boundary cut
+the dense run, as in case 2 of <NoteLink to="semi-supervised-assumptions">semi-supervised assumptions</NoteLink>, all
+three would move it into the gap and be wrong.
+
+<DensityPathDistance />
+
+The figure applies the rule to two moons with one label per class. With the default data, the nearest-label rule
+classifies 60% of the unlabelled points correctly at $\rho = 0$, 79% at $\rho = 4$, 95% at $\rho = 8$ and all of them
+at $\rho = 16$.
+
+## Assumptions
+
+- **The classes are separated by low-density regions.** A class may span several clusters, but no cluster may span two
+  classes.
+- **The unlabelled points come from the same distribution as the labelled ones**, so that their density shows where
+  the gaps are.
+- **The geometry reveals the gaps.** Densities and distances are measured in a chosen feature space. Raw pixel
+  distances in images rarely show class gaps; learned representations often do.
+- **The gap is wide enough to be seen** at the number of unlabelled points available, and narrow enough that the labels
+  alone do not already find it.
+
+## Pitfalls
+
+- **Bridges and outliers.** A few points in a gap connect two clusters with short edges. The minimax distance of
+  $\rho \to \infty$ is fooled by a single bridge; a finite $\rho$ is more robust. On handwritten digits Chapelle and
+  Zien found the best $\rho$ at 4, not at infinity, and attribute it to outliers that merge clusters
+  <Cite id="chapelle2005lds" />.
+- **Overlapping classes.** When the classes overlap, no gap exists. Penalty methods force a confident boundary through
+  the overlap, and density-sensitive distances join the classes.
+- **Gaps inside a class.** A class made of several clusters is consistent with the assumption only if every cluster
+  holds a label or is reached by one. An unlabelled cluster is given the class of whichever label is nearest under the
+  new geometry, which may be wrong.
+- **Local minima.** Every penalty $\phi$ is non-convex, so the penalty methods can stop in a gap that splits a cluster
+  where it is thin. Low unlabelled loss does not certify the right boundary.
+- **Cost.** The ρ-path distances from every labelled point need one run of Dijkstra's algorithm per labelled point, at
+  $O(\abs{E}\log n)$ each on a graph of $n$ points and $\abs{E}$ edges. The full graph has $O(n^2)$ edges, and the
+  multidimensional scaling of the LDS method costs $O(n^3)$, which limits it to a few thousand points
+  <Cite id="chapelle2005lds" />.
+- **A wrong assumption hurts.** When the true boundary crosses a dense region, every method of the family moves the
+  boundary away from it, and more unlabelled data make it more confident (see
+  <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised learning fails</NoteLink>).

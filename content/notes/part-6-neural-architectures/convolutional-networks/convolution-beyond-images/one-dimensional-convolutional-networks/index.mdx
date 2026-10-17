@@ -1,0 +1,227 @@
+---
+title: 'One-dimensional convolutional networks'
+kind: concept
+summary: 'A one-dimensional convolution slides a kernel along time or position. With $C$ input channels and $C''$ kernels it is a learned filter bank over audio, sensor or text sequences, with $kCC''$ weights however long the sequence.'
+tags: [convolutional-networks, sequence-models, deep-learning, worked-example]
+aliases: ['1D convolution', '1-D CNN', 'temporal convolution', 'learned filter bank']
+requires: [convolutional-layer]
+related: [convolution, finite-impulse-response-filters, matched-filter, wavenet-and-causal-convolution, temporal-convolutional-networks, receptive-field-and-dilated-convolution, time-series-classification, video-and-three-dimensional-convolution]
+references: [kiranyaz2019, turin1960, wang2016fcn, ismailfawaz2020, dempster2020, kim2014cnn, baevski2020, radford2023, hannun2019, gu2023mambacode]
+status: draft
+updated: 2026-10-17
+---
+
+import { EcgFilterBank } from './EcgFilterBank'
+
+<Definition>
+A one-dimensional convolutional layer maps a sequence with $C$ channels and $n$ positions, an array of shape
+$[C, n]$, to a sequence with $C'$ channels. Output channel $c'$ at position $i$ is a bias $b_{c'}$ plus the sum, over
+the $C$ input channels and $k$ consecutive positions starting at $si - p$, of the input values times weights
+$w_{c', c, u}$. The same $k \times C$ kernel is used at every position, so the layer is a bank of $C'$ learned
+finite impulse response filters. It has $kCC' + C'$ parameters whatever the length $n$.
+</Definition>
+
+## Intuition
+
+Many signals are sequences of measurements on a regular grid in one dimension: an audio waveform at 16,000 samples per
+second, an <Gloss name="ecg" /> at 360 samples per second, the three axes of an accelerometer at 50 samples per second,
+or the word vectors of a sentence, one per word. The two assumptions behind the
+<NoteLink to="convolutional-layer">convolutional layer</NoteLink> carry over from images unchanged
+<Cite id="kiranyaz2019" />.
+
+- **Locality.** A useful feature, such as a heartbeat, a footstep or a three-word phrase, occupies a short stretch of
+  the sequence. Each output reads a window of $k$ positions.
+- **Stationarity.** A feature means the same thing wherever it occurs. A heartbeat at second 3 has the same shape as a
+  heartbeat at second 30. One kernel is applied at every position.
+
+Each kernel is a template. Its output is large where the window of the input looks like the kernel and small
+elsewhere, so a layer with $C'$ kernels is a bank of $C'$ detectors swept along the sequence. In signal processing the
+same operation is a <NoteLink to="finite-impulse-response-filters">finite impulse response filter</NoteLink>, and a
+filter designed to detect a known shape is the <NoteLink to="matched-filter">matched filter</NoteLink>. A
+one-dimensional convolutional network learns its filters from labelled data instead of designing them.
+
+A one-dimensional input still has channels. The three accelerometer axes are three channels. Each word vector of
+dimension 300 is a column of a $[300, n]$ array, so a sentence of $n$ words has 300 channels. A kernel spans all input
+channels and $k$ positions, so it detects patterns across channels as well as along time.
+
+## Details
+
+### The layer in full
+
+Write the input as $x_{c, j}$ for channel $c \in \set{1, \dots, C}$ and position $j \in \set{0, \dots, n - 1}$, with
+zeros outside that range after padding $p$ positions at each end. With stride $s$, output channel $c'$ at position $i$
+is
+
+$$
+y_{c', i} = b_{c'} + \sum_{c=1}^{C} \sum_{u=0}^{k-1} w_{c', c, u}\; x_{c,\, si - p + u}.
+$$
+
+Libraries store a mini-batch of $N$ sequences as a tensor of shape $[N, C, n]$, the weights as $[C', C, k]$ and the
+biases as a vector of length $C'$. The output has shape $[N, C', m]$ with $m = \lfloor (n + 2p - k)/s \rfloor + 1$, the
+output-size formula of the convolutional layer along one axis. As there, the sum slides the kernel without flipping
+it: deep-learning libraries compute a cross-correlation and call it convolution.
+
+The layer has $kCC'$ weights and $C'$ biases, and each output value costs $kC$ multiply-accumulates. A full output
+costs $kCC'm$ multiply-accumulates. A layer from $C = 3$ accelerometer channels to $C' = 16$ channels with $k = 5$ has
+$5 \cdot 3 \cdot 16 + 16 = 256$ parameters, whether the recording lasts one second or one day. A dense layer from 1,000
+time steps of 3 channels to 1,000 steps of 16 channels would have $3{,}000 \times 16{,}000 = 4.8 \times 10^7$ weights.
+
+### Stacks, pooling and the receptive field
+
+A network stacks layers with nonlinearities between them. Each layer widens the
+<Gloss name="receptive-field" />, the stretch of input that can change one output, by $k - 1$ times the product of the
+strides before it; <NoteLink to="receptive-field-and-dilated-convolution">receptive field and dilated
+convolution</NoteLink> derives the recursion. Strides and pooling shorten the sequence and make later layers cheaper.
+Dilation widens the field without shortening the sequence, which matters when every position needs an output;
+<NoteLink to="wavenet-and-causal-convolution">WaveNet and causal convolution</NoteLink> develops it.
+
+The feature encoder of wav2vec 2.0 shows the arithmetic on raw audio at 16 kHz <Cite id="baevski2020" />. It stacks
+seven layers of 512 channels with kernel sizes $10, 3, 3, 3, 3, 2, 2$ and strides $5, 2, 2, 2, 2, 2, 2$. The total
+stride is $5 \cdot 2^6 = 320$ samples, so it emits one vector every 20 milliseconds. The receptive field is
+
+$$
+r = 1 + 9 \cdot 1 + 2 \cdot 5 + 2 \cdot 10 + 2 \cdot 20 + 2 \cdot 40 + 1 \cdot 80 + 1 \cdot 160 = 400
+$$
+
+samples, or 25 milliseconds: each term is a layer's $k - 1$ times the product of the strides before it. The encoder
+turns a waveform into a sequence of short-time features, the job a
+<NoteLink to="mel-spectrogram">mel spectrogram</NoteLink> does by hand.
+
+A task that needs one label per sequence ends with a global pooling layer, the maximum or the mean of each channel over
+all positions. The result has $C'$ numbers whatever $n$ is, so one network classifies sequences of any length. Global
+max pooling also makes the output invariant to where in the sequence a pattern occurs.
+
+### Learned filters and matched filters
+
+A trained kernel often looks like the event it detects. The first gradient step shows why. Take one channel whose
+output $z_t = b + \sum_u w_u\, x_{t - o + u}$ is passed through a sigmoid and trained by
+<NoteLink to="log-loss-and-brier-score">binary cross-entropy</NoteLink> to equal a target $y_t \in [0, 1]$ at every
+position $t$, where $o$ is the offset of the window. Write $\xvec_{(t)}$ for the window of $k$ inputs that output $t$
+reads. The loss is $\ell = \sum_t \paren{\log(1 + e^{z_t}) - y_t z_t}$, and its gradient in the weights is
+
+$$
+\nabla_{\wvec}\, \ell = \sum_t \paren{\sigma(z_t) - y_t}\, \xvec_{(t)}.
+$$
+
+At $\wvec = \zeros$ every $z_t$ equals $b$, and the bias that minimises the loss there gives $\sigma(b) = \bar y$, the
+mean target. The steepest-descent direction is then
+
+$$
+-\nabla_{\wvec}\, \ell = \sum_t (y_t - \bar y)\, \xvec_{(t)} = \sum_t y_t\, \paren{\xvec_{(t)} - \bar\xvec},
+$$
+
+where $\bar\xvec$ is the mean window. The second form follows because $\sum_t \bar y\, \xvec_{(t)} = \bar y\, n\,
+\bar\xvec = \paren{\sum_t y_t}\, \bar\xvec$. With targets of 1 at the events and 0 elsewhere, the first step sets the
+kernel to the average window at an event minus the average window. That is the template of the average event, the
+matched filter for it in white noise <Cite id="turin1960" />.
+
+Training does not stop there. Later steps also push down the output at every position where the kernel responds but
+the target is zero: shifted copies of the event, and other events that resemble it. The trained kernel keeps the
+template's main features and adds whatever separates the event from those look-alikes. Weight decay pulls it back
+towards the template.
+
+<Derivation title="Strong weight decay gives the matched filter">
+Add a penalty $\lambda \norm{\wvec}^2$ to the loss, with $\lambda > 0$, and leave the bias unpenalised. At a minimiser
+$\wvec_\lambda$ the gradient of the total is zero, so
+$\wvec_\lambda = -\nabla_{\wvec}\, \ell(\wvec_\lambda) / (2\lambda)$. The gradient of $\ell$ is bounded on bounded sets,
+so $\wvec_\lambda \to \zeros$ as $\lambda \to \infty$. By continuity
+$\nabla_{\wvec}\, \ell(\wvec_\lambda) \to \nabla_{\wvec}\, \ell(\zeros)$, with the bias at its optimum for
+$\wvec = \zeros$. Hence $2 \lambda \wvec_\lambda \to -\nabla_{\wvec}\, \ell(\zeros) = \sum_t y_t \paren{\xvec_{(t)} -
+\bar\xvec}$: under strong weight decay the trained kernel points along the matched filter of the average event, and only
+its length shrinks.
+</Derivation>
+
+The figure trains a one-layer network on a synthetic ECG. One channel must fire on the R spike of every normal beat,
+the other on every ectopic beat, a premature ventricular contraction, whose complex is wide and has no P wave.
+
+<EcgFilterBank />
+
+The matched normal-beat filter fires on the ectopic beats too, because both beats have a large positive deflection. The
+trained kernels at low weight decay suppress most of those false alarms and are less like the templates. With strong
+weight decay they become the templates, false alarms included, as the derivation predicts.
+
+### In practice
+
+- **Time-series classification.** A fully convolutional network of three convolutional blocks, each a convolution,
+  batch normalisation and a ReLU, followed by global average pooling, was a strong baseline on the UCR archive
+  <Cite id="wang2016fcn" />. InceptionTime ensembles five networks whose blocks run kernels of lengths 10, 20 and 40 in
+  parallel <Cite id="ismailfawaz2020" />. ROCKET skips training of the convolutions altogether: it applies 10,000
+  random kernels with random lengths and dilations, keeps two numbers per kernel, the maximum and the proportion of
+  positive outputs, and fits a linear classifier on them <Cite id="dempster2020" />. See
+  <NoteLink to="time-series-classification">time-series classification</NoteLink>.
+- **Medical signals.** A deep one-dimensional network trained on 91,232 single-lead ECGs from 53,549 patients
+  classified 12 rhythm classes with an average F1 score above that of the average cardiologist on a test set labelled
+  by expert consensus <Cite id="hannun2019" />.
+- **Speech and audio.** Self-supervised speech encoders start with a strided convolutional stack on the raw waveform,
+  as in wav2vec 2.0 above <Cite id="baevski2020" />. Whisper passes its log-mel spectrogram, 80 channels per frame,
+  through two convolutions of width 3, the second with stride 2, before its transformer <Cite id="radford2023" />.
+- **Text.** Kim's sentence classifier runs kernels of widths 3, 4 and 5 words, 100 of each, over pretrained word
+  vectors and takes the maximum of each channel over the sentence <Cite id="kim2014cnn" />. Transformers have replaced
+  such networks for most text tasks.
+- **Inside sequence models.** Mamba applies a short causal depthwise convolution, width 4 in the reference code, to
+  each channel before its state-space layer <Cite id="gu2023mambacode" />; see
+  <NoteLink to="mamba">Mamba</NoteLink>. Depthwise means one kernel per channel, $k$ weights per channel instead of
+  $kC'$.
+
+## Worked example
+
+Take one input channel of length $n = 12$,
+
+$$
+\xvec = (0,\ 1,\ 0,\ 0,\ 1,\ 2,\ 3,\ 2,\ 1,\ 0,\ 0,\ 1),
+$$
+
+which holds a bump centred at position 6 and two isolated spikes. Use two kernels of size $k = 5$, stride 1, no padding
+and zero bias: a bump template $\wvec^{(1)} = (1, 2, 3, 2, 1)$ and a slope detector
+$\wvec^{(2)} = (-1, -1, 0, 1, 1)$. The output length is $m = 12 - 5 + 1 = 8$, and output $i$ reads positions $i$ to
+$i + 4$.
+
+1. **First output of the bump channel.** The window is $(0, 1, 0, 0, 1)$. The weighted sum is
+   $1 \cdot 0 + 2 \cdot 1 + 3 \cdot 0 + 2 \cdot 0 + 1 \cdot 1 = 3$.
+2. **The peak.** At $i = 4$ the window is $(1, 2, 3, 2, 1)$, the bump itself, and the sum is
+   $1 + 4 + 9 + 4 + 1 = 19$.
+3. **All eight outputs.** Sliding the window one position at a time gives
+
+   $$
+   \yvec^{(1)} = (3,\ 5,\ 10,\ 16,\ 19,\ 16,\ 10,\ 5).
+   $$
+
+   The maximum sits at $i = 4$, whose window is centred on position $i + 2 = 6$, the centre of the bump. The spikes at
+   positions 1 and 11 give only 3 and 5: they match one tap each.
+4. **The slope channel.** The kernel subtracts the two left values of the window from the two right values. At $i = 2$
+   the window $(0, 0, 1, 2, 3)$ gives $-0 - 0 + 0 + 2 + 3 = 5$; at $i = 6$ the window $(3, 2, 1, 0, 0)$ gives
+   $-3 - 2 + 0 + 0 + 0 = -5$. All eight outputs are
+
+   $$
+   \yvec^{(2)} = (0,\ 2,\ 5,\ 4,\ 0,\ -4,\ -5,\ -2),
+   $$
+
+   positive on the rising side of the bump, zero at its top and negative on the falling side.
+5. **Equivariance.** Shift the input two positions to the right, keeping its length by dropping the last two values and
+   adding two zeros at the start. The bump's centre moves to position 8, and the peak of $\yvec^{(1)}$ moves to $i = 6$
+   with the same value 19. The layer reports the same feature at the shifted place.
+6. **Parameters.** The layer holds $5 \cdot 1 \cdot 2 = 10$ weights and 2 biases. Applied to a sequence of a million
+   samples it would hold the same 12 numbers.
+
+## Assumptions
+
+- The positions are equally spaced. Irregularly sampled series, such as clinical measurements taken when a nurse
+  visits, break the meaning of a kernel tap as a fixed time lag.
+- The statistics are roughly the same at every position. A kernel shared along a recording assumes a heartbeat looks
+  alike at every time; a sequence whose position carries meaning, such as the fields of a fixed-format record, does not
+  satisfy this.
+- The patterns that matter are short compared with the receptive field. Dependencies longer than the field are
+  invisible to the network.
+
+## Pitfalls
+
+- **Channel and time axes swapped.** Libraries expect $[N, C, n]$. A $[N, n, C]$ array passed unchanged convolves
+  across channels and treats time as channels; the shapes often still fit.
+- **Symmetric padding in forecasting.** A centred window reads future values. A model that predicts the next value must
+  pad only on the left; see <NoteLink to="wavenet-and-causal-convolution">causal convolution</NoteLink>.
+- **Sample rate.** A kernel of 25 taps spans 0.5 seconds at 50 Hz and 0.1 seconds at 250 Hz. A network trained at one
+  rate does not transfer to another without resampling.
+- **Receptive field shorter than the event.** A kernel shorter than a beat or a word sees only part of it. Count the
+  receptive field in samples and in seconds before training.
+- **Reading kernels.** A trained kernel is a discriminative filter, not a picture of the event. Its shape depends on
+  what it had to reject and on the weight decay, as the figure shows.

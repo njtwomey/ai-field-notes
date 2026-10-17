@@ -1,0 +1,198 @@
+---
+title: 'Hard constraints in physics-informed networks'
+kind: technique
+summary: 'A physics-informed network meets boundary and initial conditions exactly if its output is written $u=g+d\cdot N_\theta$, with $g$ satisfying the conditions and $d$ vanishing on the boundary. Soft penalty terms instead trade exactness for flexibility and add a loss weight.'
+tags: [scientific-machine-learning, differential-equations, worked-example]
+aliases: ['hard boundary constraints', 'distance-function ansatz', 'exact boundary conditions', 'trial solution']
+requires: [physics-informed-neural-networks]
+related: [loss-balancing-for-physics-informed-networks, failure-modes-of-physics-informed-networks, constrained-optimisation, penalty-and-barrier-methods, physics-informed-network-for-the-heat-equation, physics-informed-network-for-a-damped-oscillator]
+references: [lagaris1998, sukumar2022, wang2023expert, raissi2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { SoftAndHardConditions } from './SoftAndHardConditions'
+
+<Definition>
+A **hard constraint** builds the initial and boundary conditions of a differential equation into the
+<NoteLink to="physics-informed-neural-networks">physics-informed network</NoteLink> itself. The network's output is
+replaced by a **trial function**
+
+$$
+u_{\thetavec}(\xvec) = g(\xvec) + d(\xvec)\, N_{\thetavec}(\xvec),
+$$
+
+where $N_{\thetavec}$ is a neural network with parameters $\thetavec$, the **lift** $g$ is a fixed function that meets
+every condition, and the **distance function** $d$ is a fixed function that is zero where the conditions are imposed
+and positive elsewhere. The trial function meets the conditions for every $\thetavec$, so the loss keeps only the
+residual of the equation and any data terms <Cite id="lagaris1998" /> <Cite id="sukumar2022" />.
+</Definition>
+
+## Problem
+
+The standard physics-informed loss imposes the conditions softly. It adds the mean squared misfit to the initial values
+and to the boundary values, each multiplied by a weight $\lambda$, to the mean squared residual of the equation. The
+minimiser of that sum is a compromise. Lowering the residual and lowering the misfit pull the parameters in different
+directions, and the minimiser misses the conditions by an amount that shrinks only as $\lambda$ grows. The misfit is
+not merely a small inaccuracy at the edge of the domain. A linear equation with homogeneous conditions has a family of
+solutions, and the conditions choose the member. A network that misses the conditions solves the equation for a
+different member, so the error spreads through the whole domain.
+
+The weights are also new hyperparameters. Raising $\lambda$ makes the misfit smaller and the loss harder to optimise:
+the residual and condition terms then differ in scale, and the gradient of the larger term dominates the update. The
+<NoteLink to="loss-balancing-for-physics-informed-networks">loss-balancing</NoteLink> note treats that difficulty. A
+hard constraint removes the condition terms, and with them both the compromise and the weights.
+
+## Mechanism
+
+**The trial function.** At a point $\xvec$ where a condition $u = h$ is imposed, $d(\xvec) = 0$ and
+$g(\xvec) = h(\xvec)$, so $u_{\thetavec}(\xvec) = h(\xvec)$ whatever the network outputs. Inside the domain $d > 0$, and
+the network supplies the correction $d \, N_{\thetavec}$ that the residual asks for. The lift and the distance are
+chosen once, by hand, and are not trained.
+
+**An interval in space and time.** For an equation in $u(x, t)$ on $[a, b] \times [t_0, t_1]$ with initial profile
+$u(x, t_0) = u_0(x)$ and end values $u(a, t) = g_a(t)$, $u(b, t) = g_b(t)$, one choice is
+
+$$
+g(x, t) = u_0(x) + \frac{b - x}{b - a}\,\paren{g_a(t) - g_a(t_0)} + \frac{x - a}{b - a}\,\paren{g_b(t) - g_b(t_0)},
+\qquad d(x, t) = \frac{4\,(x - a)(b - x)\,(t - t_0)}{(b - a)^2\,(t_1 - t_0)}.
+$$
+
+At $t = t_0$ the two brackets vanish and $g = u_0$. At $x = a$ the second fraction vanishes and
+$g = u_0(a) + g_a(t) - g_a(t_0) = g_a(t)$, provided the data are compatible at the corner, $u_0(a) = g_a(t_0)$. The
+distance $d$ vanishes on the three sides where conditions hold and is open on the final time $t = t_1$, where nothing is
+imposed. The factor in front of $d$ scales it to a largest value of 1.
+
+**Other conditions.** A second-order equation in time with $u(t_0) = u_0$ and $u'(t_0) = v_0$ uses
+$g = u_0 + v_0 (t - t_0)$ and $d = (t - t_0)^2$: the squared factor makes $d$ and its derivative vanish at $t_0$, so
+both conditions hold. The physics-informed network note uses this trial function for the oscillator
+<Cite id="lagaris1998" />. A periodic condition with period $P$ is met exactly by feeding the network
+$\paren{\cos(2\pi x / P), \sin(2\pi x / P)}$ in place of $x$, since every function of those two features is periodic
+<Cite id="wang2023expert" />. On an irregular domain, $d$ is an approximate distance function built from the boundary's
+pieces, and inhomogeneous, Neumann and Robin conditions are handled by transfinite interpolation of the boundary data
+<Cite id="sukumar2022" />.
+
+**The residual.** The derivatives in the residual are taken of the whole trial function, by
+<NoteLink to="automatic-differentiation">automatic differentiation</NoteLink>, exactly as for an unconstrained network.
+For a second derivative in $x$ the product rule gives
+
+$$
+\partial_x^2 u_{\thetavec} = \partial_x^2 g + (\partial_x^2 d)\, N_{\thetavec} + 2\, (\partial_x d)\, \partial_x N_{\thetavec}
+  + d\, \partial_x^2 N_{\thetavec}.
+$$
+
+The network's own derivatives are damped by $d$ near the boundary. The loss is
+
+$$
+L(\thetavec) = \frac{1}{N_r} \sum_{i=1}^{N_r} \mathcal{N}[u_{\thetavec}](\xvec_i)^2
+  + \frac{\lambda_d}{N_d} \sum_{l=1}^{N_d} \paren{u_{\thetavec}(\xvec_l) - y_l}^2 ,
+$$
+
+the residual at $N_r$ collocation points $\xvec_i$ plus, when there are observations $(\xvec_l, y_l)$, the data term.
+Without observations only the residual remains.
+
+## Worked example
+
+Take $u'(x) = u(x)$ on $[0, 1]$ with $u(0) = 1$, whose solution is $e^x$. Use the residual $r = u' - u$ at the three
+points $x = 0, \tfrac12, 1$ and, to keep the arithmetic by hand, the smallest trial families: straight lines. The loss
+is a sum of squares rather than a mean, which only rescales it.
+
+**Hard.** The trial function $u = 1 + a x$ has lift $g = 1$ and distance $d = x$, and meets $u(0) = 1$ for every slope
+$a$. Its residual is $r(x) = a - (1 + a x) = a(1 - x) - 1$:
+
+| $x$ | $r(x)$ |
+| --- | --- |
+| 0 | $a - 1$ |
+| 1/2 | $a/2 - 1$ |
+| 1 | $-1$ |
+
+The loss is $L(a) = (a - 1)^2 + (a/2 - 1)^2 + 1$. Setting $L'(a) = 2(a - 1) + (a/2 - 1) = 2.5a - 3$ to zero gives
+$a = 1.2$. The fit is $u = 1 + 1.2x$: exact at $x = 0$, and $u(1) = 2.2$ against $e \approx 2.718$, the best a straight
+line through $(0, 1)$ does for this residual.
+
+**Soft.** The trial function $u = c_0 + c_1 x$ leaves both coefficients free, and the condition becomes the penalty
+$\lambda (c_0 - 1)^2$. The residual is $r(x) = c_1 (1 - x) - c_0$, so
+
+$$
+L(c_0, c_1) = (c_1 - c_0)^2 + (c_1/2 - c_0)^2 + c_0^2 + \lambda (c_0 - 1)^2 .
+$$
+
+Setting $\partial L / \partial c_1 = 2.5 c_1 - 3 c_0$ to zero gives $c_1 = 1.2 c_0$. Setting $\partial L / \partial c_0$
+to zero gives $3c_0 + \lambda c_0 - 1.5 c_1 = \lambda$, and substituting $c_1 = 1.2 c_0$ gives
+
+$$
+c_0 = \frac{\lambda}{1.2 + \lambda}.
+$$
+
+| $\lambda$ | $c_0 = u(0)$ | misfit $1 - c_0$ | $u(1)$ |
+| --- | --- | --- | --- |
+| 0 | 0 | 1 | 0 |
+| 1 | 0.455 | 0.545 | 1.00 |
+| 10 | 0.893 | 0.107 | 1.96 |
+| 100 | 0.988 | 0.012 | 2.17 |
+
+With $\lambda = 0$ the minimiser is $u = 0$, the trivial solution of the equation. With $\lambda = 1$ the line misses
+the condition by more than half its value. The soft fit approaches the hard one only as $\lambda \to \infty$, which is
+the behaviour of every quadratic <NoteLink to="penalty-and-barrier-methods">penalty method</NoteLink>. The hard trial
+function reaches the limit at every $\lambda$ because the constraint is no longer in the loss.
+
+## Simulation
+
+The figure solves the <NoteLink to="heat-equation">heat equation</NoteLink> $u_t = \kappa u_{xx}$ on
+$[-1, 1] \times [0, 1]$ from $u(x, 0) = \sin \pi x$ with $u(\pm 1, t) = 0$, whose solution is
+$e^{-\kappa \pi^2 t} \sin \pi x$. The soft network penalises the initial and boundary misfits with weight 1. The hard
+network is $u = \sin \pi x + t(1 - x^2) N_{\thetavec}(x, t)$: the lift $\sin \pi x$ meets the initial profile and both
+end values, and the distance $t(1 - x^2)$ vanishes on the initial line and at both ends and peaks at 1. Both networks
+have two <NoteLink to="multilayer-perceptron">hidden layers</NoteLink> of 12 hyperbolic tangent units and start from the
+same weights.
+
+<SoftAndHardConditions />
+
+With the defaults ($\kappa = 0.1$, 64 collocation points, 300 <NoteLink to="adam">Adam</NoteLink> steps at
+<Gloss name="learning-rate">learning rate</Gloss> 0.005, then 100 <Gloss name="l-bfgs" /> steps, about a second per
+network), the run ends as follows.
+
+| Network | Error after 100 steps | Error at the end | Largest condition misfit at the end |
+| --- | --- | --- | --- |
+| Soft conditions | 68% | 1.5% | $3.7 \times 10^{-2}$ |
+| Hard conditions | 6.0% | 0.20% | $1.2 \times 10^{-16}$ |
+
+The error is the relative $L_2$ error on a grid of $41 \times 21$ points. The soft network's error map is largest near
+$t = 0$ and the two ends, where it trades the conditions against the residual. The hard network's misfit stays at
+rounding level from the first step, and its error is about seven times smaller at the end. A longer run, with two
+hidden layers of 20 units, 128 points, 800 Adam and 200 L-BFGS steps, ends at 0.38% for the soft network and 0.067%
+for the hard one, with a soft misfit of $1.0 \times 10^{-2}$: the hard network stays about six times more accurate.
+
+## Cost
+
+A hard constraint makes each step slightly cheaper: the condition terms and their points disappear, and evaluating $g$
+and $d$ is negligible next to the network. The residual's derivatives include those of $g$ and $d$, which automatic
+differentiation supplies with no extra code. The real cost is human: $g$ and $d$ must be designed for each geometry and
+each kind of condition, and a poor design slows training.
+
+## Trade-offs
+
+- **Exactness against flexibility.** A hard constraint is exact and removes the condition weights. A soft penalty
+  works for any geometry and any condition without design work, and it is the right choice when the conditions are
+  themselves measured with noise and should be fitted rather than imposed.
+- **The scale of $d$.** The network has to supply $(u - g)/d$, which is large where $d$ is small. On Poisson's
+  equation $-u'' = (4\pi)^2 \sin 4\pi x$ on $[0, 1]$ with $u = \sin 4\pi x + x$, the same network trained with
+  $d = x(1 - x)$, which peaks at 0.25, ended with a 530% error, and with $d = 4x(1 - x)$, which peaks at 1, with 0.1%
+  (64 collocation points, 2000 Adam and 300 L-BFGS steps). Normalising $d$ to a largest value near 1 keeps the
+  network's target of order one.
+- **Simple domains only, in practice.** Intervals, rectangles, discs and periodic boxes have closed-form $g$ and $d$.
+  Irregular geometries need approximate distance functions <Cite id="sukumar2022" />, and many practitioners fall back
+  on soft penalties there. Current practice imposes periodic conditions exactly by the Fourier embedding and keeps the
+  remaining conditions soft with adaptive weights <Cite id="wang2023expert" />.
+
+## Pitfalls
+
+- **A distance with zero slope on the boundary.** With $d = (x - a)^2$ the derivative of $d \, N_{\thetavec}$ also
+  vanishes at $x = a$, so the trial function satisfies $u_x(a) = g_x(a)$ as well: a second condition that the problem
+  never asked for. A first-order zero, such as $x - a$, imposes the value only.
+- **Incompatible data at a corner.** The lift exists only if the initial profile and the end values agree where they
+  meet, $u_0(a) = g_a(t_0)$. Incompatible data need a smoothed corner or a soft penalty.
+- **Reading a zero misfit as a correct solution.** The conditions hold by construction, so their misfit carries no
+  information. Training progress shows in the residual, and accuracy shows only against a reference solution.
+- **Forgetting the derivatives of $g$ and $d$.** A hand-written residual that differentiates $N_{\thetavec}$ instead of
+  the whole trial function solves a different equation. Differentiating the trial function as a whole avoids it.

@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { choice, Figure, formatNumber, int, Plot, Raster, Readout, setting, useAxis, useFigureState } from 'aifn-render'
-import { stream, uniform } from 'aifn-compute/foundation/random'
+import { stream } from 'aifn-compute/foundation/random'
+import { toRows } from 'aifn-compute/foundation/tensor'
+import { type SparsePattern, sparseAttentionMask } from 'aifn-compute/nn/attention'
 
 export type Pattern = 'full' | 'sliding' | 'dilated' | 'strided' | 'longformer' | 'bigbird'
 
@@ -22,41 +24,14 @@ const GROWTH: Record<Pattern, string> = {
   bigbird: 'n·(w + g + r)',
 }
 
-type Options = { n: number; w: number; dilation: number; stride: number; g: number; r: number; causal: boolean }
-
-/** Binary mask: row i is query position i, column j is key position j, 1 where query i attends to key j. */
-function mask(pattern: Pattern, o: Options): number[][] {
-  const { n, w, dilation, stride, g, r, causal } = o
-  const m = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (_, j) => {
-      const d = Math.abs(i - j)
-      const local = d <= w
-      const global = i < g || j < g
-      switch (pattern) {
-        case 'full':
-          return 1
-        case 'sliding':
-          return local ? 1 : 0
-        case 'dilated':
-          return d <= w * dilation && d % dilation === 0 ? 1 : 0
-        case 'strided':
-          return d < stride || d % stride === 0 ? 1 : 0
-        case 'longformer':
-        case 'bigbird':
-          return local || global ? 1 : 0
-      }
-    }),
-  )
-  if (pattern === 'bigbird') {
-    // r random keys per query, drawn from the keys the query may see. Fixed seed, so the pattern is stable.
-    const u = stream(11)
-    for (let i = 0; i < n; i++) {
-      const hi = causal ? i + 1 : n
-      for (let k = 0; k < r; k++) m[i][Math.floor(uniform(u) * hi)] = 1
-    }
-  }
-  if (causal) for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) m[i][j] = 0
-  return m
+/** The engine's name for each pattern: the local window plus global tokens is its `global` pattern. */
+const ENGINE_PATTERN: Record<Pattern, SparsePattern> = {
+  full: 'full',
+  sliding: 'sliding',
+  dilated: 'dilated',
+  strided: 'strided',
+  longformer: 'global',
+  bigbird: 'bigbird',
 }
 
 /** Patterns with a local window of half-width w. */
@@ -81,8 +56,21 @@ export function AttentionPatterns({ initial = 'sliding' }: { initial?: Pattern }
   })
   const { pattern, n, w, dilation, stride, g, r, causal } = state
 
+  // Binary mask: row i is query position i, column j is key position j, 1 where query i attends to key j. BigBird's
+  // random keys come from a fixed seed, so the pattern is stable.
   const z = useMemo(
-    () => mask(pattern, { n, w, dilation, stride, g, r, causal }),
+    () =>
+      toRows(
+        sparseAttentionMask(n, ENGINE_PATTERN[pattern], {
+          window: w,
+          dilation,
+          stride,
+          globals: g,
+          random: r,
+          causal,
+          stream: stream(11),
+        }),
+      ),
     [pattern, n, w, dilation, stride, g, r, causal],
   )
   const pos = useMemo(() => Array.from({ length: n }, (_, i) => i), [n])

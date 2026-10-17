@@ -1,0 +1,175 @@
+---
+title: 'Generality ordering and refinement operators'
+kind: concept
+summary: 'One hypothesis is more general than another if it covers every example the other covers. Learners search this order top-down, adding conditions, or bottom-up, dropping them; a refinement operator lists the neighbours of a hypothesis in the order.'
+tags: [logic, rule-learning, worked-example]
+aliases: ['refinement operator', 'more-general-than relation', 'generalisation lattice', 'top-down search', 'bottom-up search', 'general-to-specific search', 'specialisation operator']
+requires: [concept-learning-and-version-spaces]
+related: [theta-subsumption, least-general-generalisation, sequential-covering, foil, inverse-entailment-and-progol, rule-quality-measures, certifiably-optimal-rule-lists]
+references: [mitchell1982, shapiro1983, nienhuyscheng1997, deraedt2008, flach2012]
+status: draft
+updated: 2026-10-17
+---
+
+import { HasseSearch } from './HasseSearch'
+
+<Definition>
+A hypothesis $g$ is **more general than or equal to** a hypothesis $h$, written $g \succeq h$, when every instance
+that $h$ covers is also covered by $g$. The relation orders the hypothesis space $\Hcal$ from the most general
+hypothesis $\top$, which covers everything, to the most specific, $\bot$, which covers nothing. A **downward refinement
+operator** $\rho : \Hcal \to 2^{\Hcal}$ maps a hypothesis to a set of hypotheses below it in the order, and an
+**upward refinement operator** maps it to a set above it <Cite id="shapiro1983" />. A **top-down** learner starts at
+$\top$ and applies a downward operator; a **bottom-up** learner starts from specific hypotheses, usually built from the
+examples, and applies an upward operator or generalises directly.
+</Definition>
+
+## Intuition
+
+The space of rules is enormous. Three binary attributes already allow 28 distinct conjunctions, and first-order clauses
+form an infinite space. A learner cannot test every rule, but it does not need to: the generality order tells it which
+rules are worth testing.
+
+Generality is monotone in coverage. If a rule covers a negative example, every more general rule covers it too. If a
+rule misses a positive example, every more specific rule misses it too. A learner that adds conditions to a rule can
+therefore only lose coverage, and a learner that drops conditions can only gain it. Each step in the order moves
+coverage in a known direction, which turns the search for a consistent rule into a walk with a sense of direction, and
+lets whole regions of the space be skipped without testing them.
+
+A refinement operator makes the walk concrete. It says, for the rule in hand, which rules are its immediate neighbours
+in the order: add one condition, bind one variable, replace one value by "any". Every practical rule learner is a search
+strategy (greedy, beam, best-first, branch and bound) over the graph that a refinement operator defines.
+
+## Details
+
+### Semantic and syntactic generality
+
+The definition above is **semantic**: it compares the sets of instances two hypotheses cover. Testing it directly means
+enumerating instances, which is impossible for infinite instance spaces. Learners use a **syntactic** order that
+implies the semantic one and can be checked on the hypotheses alone.
+
+- **Conjunctions of attribute tests.** $g \succeq h$ when every test of $g$ is a test of $h$. Dropping a condition
+  generalises and adding one specialises <Cite id="flach2012" />.
+- **First-order clauses.** $C \succeq D$ under **$\theta$-subsumption** when some substitution $\theta$ maps every
+  literal of $C$ onto a literal of $D$. $\theta$-subsumption implies entailment ($C \models D$) but not conversely,
+  and it is the order that most <Gloss name="ilp">inductive logic programming</Gloss> systems search
+  (<NoteLink to="theta-subsumption">theta-subsumption</NoteLink>).
+- **Entailment relative to background knowledge.** $C \succeq D$ when $B \cup \set{C} \models D$. It is the most
+  faithful order and is undecidable in general, so systems approximate it.
+
+The syntactic orders are **quasi-orders**: reflexive and transitive, but two different hypotheses can be equivalent,
+each above the other. $p(X) \leftarrow q(X, Y)$ and $p(X) \leftarrow q(X, Y) \land q(X, Z)$ $\theta$-subsume each
+other. Working with one representative of each equivalence class, a **reduced** clause, turns the quasi-order into a
+partial order.
+
+### The lattice of conjunctions
+
+For conjunctions the order is a **lattice**: any two hypotheses have a least upper bound and a greatest lower bound.
+The least upper bound of two conjunctions keeps the tests they share; it is their
+<NoteLink to="least-general-generalisation">least general generalisation</NoteLink>. The greatest lower bound keeps
+the tests of both, and is $\bot$ when they require different values of one attribute. With $n$ attributes, attribute
+$j$ taking $k_j$ values, the lattice has $\prod_j (k_j + 1)$ conjunctions plus $\bot$, arranged in levels by the number
+of tests. Its **Hasse diagram** draws an edge from each hypothesis to each hypothesis exactly one step below it.
+
+### Refinement operators
+
+For a downward operator $\rho$, write $\rho^*(h)$ for every hypothesis reachable from $h$ by repeated refinement.
+Three properties decide whether a search with $\rho$ is sound and complete <Cite id="nienhuyscheng1997" />.
+
+- **Locally finite:** $\rho(h)$ is finite and computable for every $h$, so each step can enumerate the neighbours.
+- **Proper:** every member of $\rho(h)$ is strictly below $h$, so the search never revisits an equivalent hypothesis.
+- **Complete:** every hypothesis strictly below $h$ is equivalent to some member of $\rho^*(h)$, so no hypothesis is
+  out of reach.
+
+An operator with all three properties is **ideal**. For conjunctions the operator "replace one '?' by a value" is
+ideal. For clauses under $\theta$-subsumption no ideal operator exists, because some clauses have no finite set of
+refinements from which every more specific clause can be reached, so practical operators give up properness or
+completeness
+<Cite id="nienhuyscheng1997" />. A further property, **optimality**, requires every hypothesis to be reached along
+exactly one path from $\top$. An optimal operator turns the refinement graph into a tree, so a search never generates
+the same rule twice. Fixing an order on attributes, and adding only tests on attributes later than the last one added,
+makes the conjunction operator optimal.
+
+### Monotonicity and pruning
+
+Let $p(h)$ and $n(h)$ be the numbers of positive and negative examples $h$ covers. For $g \succeq h$, coverage gives
+$p(g) \geq p(h)$ and $n(g) \geq n(h)$. Two pruning rules follow <Cite id="mitchell1982" />.
+
+- A top-down search can discard $h$ when $p(h)$ is too small to be useful, since no refinement of $h$ covers more
+  positives. Branch-and-bound rule learners use $p(h)$ as an optimistic bound on any score that grows with positives
+  covered (<NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule lists</NoteLink>).
+- A bottom-up search can discard $h$ as soon as $n(h)$ exceeds the number of negatives it is allowed to cover, since no
+  generalisation of $h$ covers fewer.
+
+### Top-down and bottom-up search
+
+**Top-down (general to specific).** Start at $\top$. While the current hypothesis covers negatives, choose a refinement
+from $\rho(h)$ by a heuristic such as $p - n$, precision, or <NoteLink to="foil">FOIL</NoteLink>'s information gain
+(<NoteLink to="rule-quality-measures">rule quality measures</NoteLink>). The rule growers of
+<NoteLink to="sequential-covering">sequential covering</NoteLink> (CN2, <Gloss name="ripper" />) and FOIL work this way.
+Top-down search tolerates noise well, because a heuristic can stop at a rule that covers a few negatives, and it returns
+general rules.
+
+**Bottom-up (specific to general).** Start from a most specific hypothesis built from an example: the example itself for
+conjunctions, a bottom clause for first-order learning. Generalise just enough to cover further positives, by least
+general generalisation or an upward operator. Find-S and Golem work this way. Bottom-up search is driven by the data, so
+it never considers conditions the examples do not support, and it returns specific rules.
+
+**Both ends.** <NoteLink to="concept-learning-and-version-spaces">Candidate elimination</NoteLink> moves the specific
+boundary up and the general boundary down at once. <NoteLink to="inverse-entailment-and-progol">Progol</NoteLink>
+searches top-down but only among clauses that $\theta$-subsume a bottom clause, which bounds the space from below
+<Cite id="deraedt2008" />.
+
+## Worked example
+
+Take three binary attributes $a$, $b$ and $c$, and write a conjunction by its literals: $a\bar c$ means
+$a = 1 \land c = 0$. The lattice has $3^3 = 27$ conjunctions plus $\bot$, in five levels: $\top$, 6 single literals, 12
+pairs, 8 full assignments and $\bot$. The downward operator gives $\top$ six refinements, each single literal four (two
+values for each of the two untested attributes), and each pair two. Each full assignment has one refinement, $\bot$.
+That is $6 + 24 + 24 + 8 = 62$ edges in the Hasse diagram.
+
+The examples are two positives, $(a, b, c) = (1, 0, 0)$ and $(1, 1, 0)$, and one negative, $(0, 1, 0)$.
+
+1. **Top-down, step 0.** $\top$ covers both positives and the negative. Score its six refinements by $p - n$:
+   $a$ covers 2 positives and 0 negatives (score 2); $\bar a$ covers no positive and is dropped; $\bar b$ covers 1 and 0
+   (score 1); $b$ covers 1 and 1 (score 0); $\bar c$ covers 2 and 1 (score 1); $c$ covers no positive.
+2. **Top-down, step 1.** Move to $a$. It covers no negative, so the search stops and returns $a$.
+3. **Bottom-up, step 0.** Start at $\bot$.
+4. **Bottom-up, step 1.** Generalise to cover $(1, 0, 0)$: the full assignment $a \bar b \bar c$.
+5. **Bottom-up, step 2.** Generalise to cover $(1, 1, 0)$. The positives disagree on $b$, so $\bar b$ is dropped:
+   $a \bar c$. Every positive is covered and the negative is not, so the search returns $a \bar c$.
+6. **The consistent hypotheses** are those above $a\bar c$ that exclude $(0, 1, 0)$: $a\bar c$ and $a$. Top-down search
+   returned the most general one and bottom-up search the most specific one.
+7. **Adding the negative $(1, 1, 1)$.** Now $a$ covers a negative (score $2 - 1 = 1$, tied with $\bar c$ and $\bar b$).
+   Ties go to the refinement with more positives, then to the first in order, so the top-down search takes $a$
+   and then refines it: $a\bar c$ covers 2 positives and 0 negatives (score 2) and beats
+   $a\bar b$ (score 1). Both searches now return $a\bar c$, the only consistent hypothesis left.
+
+The figure lets you relabel all eight instances and watch both searches move through the diagram.
+
+<HasseSearch />
+
+## Assumptions
+
+- **Coverage is monotone in the order.** The pruning rules and the direction of search rely on it. Hypothesis languages
+  with negation in rule bodies, or <NoteLink to="decision-lists-and-rule-sets">rule lists</NoteLink> in which a later
+  rule's coverage depends on the earlier ones, break it.
+- **A refinement operator that matches the language.** The operator must reach every hypothesis the learner may need.
+  Bias in the operator, such as a bound on rule length or on the number of new variables, is part of the learner's
+  <NoteLink to="inductive-bias">inductive bias</NoteLink>.
+- **Cheap coverage tests.** Every step evaluates the coverage of every candidate. For conjunctions this is a scan of
+  the data; for first-order clauses each test is a theorem-proving problem.
+
+## Pitfalls
+
+- **Greedy myopia.** A greedy top-down search commits to one refinement per step and never revisits it. When the
+  conditions of a good rule are informative only together, every single refinement scores alike. On the four instances
+  of $a$ and $b$ labelled by $a \ne b$, each of $a$, $\bar a$, $b$ and $\bar b$ covers one positive and one negative,
+  so $p - n$ gives no direction. Beam search, lookahead and bottom-up seeding reduce the problem.
+- **Generating the same rule many times.** A non-optimal operator reaches $a b$ from $a$ and from $b$. Without
+  duplicate detection or an optimal operator, the search evaluates each rule once per path.
+- **Syntactic and semantic order differ.** Two syntactically different hypotheses can cover exactly the same examples,
+  and $\theta$-subsumption misses generality relations that entailment captures, such as between recursive clauses.
+  A search guided by the syntactic order can then miss a hypothesis or test equivalent ones repeatedly.
+- **Unbounded first-order refinement.** Adding literals with new variables never ends: $p(X) \leftarrow q(X, Y_1)
+  \land \dots \land q(X, Y_k)$ exists for every $k$. Systems bound clause length, variable depth and the number of new
+  variables per literal.

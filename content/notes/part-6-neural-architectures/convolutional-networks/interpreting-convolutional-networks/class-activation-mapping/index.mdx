@@ -1,0 +1,186 @@
+---
+title: 'Class activation mapping'
+kind: technique
+summary: 'A class activation map weights the last convolutional feature maps by the classifier''s weights for one class, giving a heat map of where the class was found. Grad-CAM replaces those weights by spatially pooled gradients, so it works for any architecture.'
+tags: [convolutional-networks, computer-vision, deep-learning, interpretability, worked-example]
+aliases: ['CAM', 'Grad-CAM', 'gradient-weighted class activation mapping', 'Grad-CAM++']
+requires: [feature-visualisation, pooling-and-strides]
+related: [feature-attribution-methods, evaluating-explanations, millet, multiple-instance-learning, semantic-segmentation, object-detection, shape-and-texture-bias]
+references: [zhou2016, selvaraju2017, chattopadhyay2018, wang2020scorecam, draelos2020, adebayo2018, simonyan2014, lin2014nin, springenberg2015]
+status: draft
+updated: 2026-10-17
+---
+
+import { ClassActivationExplorer } from './ClassActivationExplorer'
+
+<Definition>
+A class activation map (<Gloss name="cam" />) is a heat map over an input image that shows where a convolutional network
+found evidence for one class. For a network that ends with global average pooling and a linear classifier, the map of
+class $c$ is the sum of the last <NoteLink to="convolutional-layer">convolutional layer</NoteLink>'s feature maps, each
+weighted by the classifier's weight from that map to class $c$. <Gloss name="grad-cam" /> generalises it to any
+differentiable network: the weight of each map is the spatial mean of the gradient of the class score with respect to
+that map.
+</Definition>
+
+## Problem
+
+An image classifier outputs a label, not a location. A reader who wants to know whether a "cow" prediction rests on the
+cow or on the grass beneath it needs the regions that drove the score. Pixel attributions, such as the
+<NoteLink to="feature-attribution-methods">input gradient</NoteLink> $\partial y_c / \partial x$, answer at the
+resolution of pixels, but they are noisy and often look like edge maps of the input <Cite id="simonyan2014" />.
+<NoteLink to="feature-visualisation">Feature visualisation</NoteLink> describes units, not one input.
+
+The last convolutional layer of a classifier is a better place to look. Its feature maps keep a coarse spatial layout,
+and its channels detect high-level patterns, such as object parts. Class activation mapping combines the channels
+that matter for a class at every position. The result is a localisation obtained without boxes or masks in training:
+CAM was proposed for weakly supervised object localisation, trained from image labels alone <Cite id="zhou2016" />.
+
+## Mechanism
+
+### CAM
+
+Let the last convolutional layer output $K$ feature maps $A^k \in \reals^{h \times w}$, $k = 1, \dots, K$, after its
+<Gloss name="relu" />. Global average pooling (see <NoteLink to="pooling-and-strides">pooling and strides</NoteLink>)
+reduces each map to its mean, and a linear layer with weights $w_{kc}$ and bias $b_c$ gives the score of class $c$
+before the softmax:
+
+$$
+y_c = b_c + \sum_{k=1}^{K} w_{kc} \, \frac{1}{hw} \sum_{i,j} A^k_{ij}.
+$$
+
+The two sums are finite, so they can be exchanged:
+
+$$
+y_c = b_c + \frac{1}{hw} \sum_{i,j} \underbrace{\sum_{k=1}^{K} w_{kc} A^k_{ij}}_{M^c_{ij}}.
+$$
+
+The inner sum is the class activation map $M^c \in \reals^{h \times w}$ <Cite id="zhou2016" />. The class score is the
+bias plus the mean of $M^c$ over positions, so $M^c_{ij}$ is the contribution of position $(i, j)$ to the score, and the
+decomposition is exact. A network built this way, with no dense layers after the pooling, is the design of
+<NoteLink to="one-by-one-convolution">Network in Network</NoteLink> <Cite id="lin2014nin" /> and of most modern
+classifiers. The map has the resolution of the last feature map, for example $7 \times 7$ for a $224 \times 224$ input
+to a <Gloss name="resnet" />, and is resampled bilinearly to the input size for display. Plots usually show
+$\max(0, M^c)$, scaled to a largest value of 1.
+
+### Grad-CAM
+
+CAM needs the classifier to be linear in the pooled features. Grad-CAM drops that requirement
+<Cite id="selvaraju2017" />. For any layer with maps $A^k$ and any differentiable score $y_c$, define the channel
+weight as the spatial mean of the gradient,
+
+$$
+\alpha_{kc} = \frac{1}{hw} \sum_{i,j} \frac{\partial y_c}{\partial A^k_{ij}},
+$$
+
+and the map as
+
+$$
+L^c = \operatorname{ReLU}\Bigl( \sum_{k=1}^{K} \alpha_{kc} A^k \Bigr).
+$$
+
+The ReLU keeps the positions whose features raise the class score. One <NoteLink to="multilayer-perceptron">forward
+pass</NoteLink> and one backward pass from $y_c$ to the chosen layer give every $\alpha_{kc}$.
+
+**Grad-CAM reduces to CAM.** In the architecture of CAM, $y_c$ depends on $A^k_{ij}$ only through the mean, so
+$\partial y_c / \partial A^k_{ij} = w_{kc} / (hw)$ at every position. Then $\alpha_{kc} = w_{kc} / (hw)$, and
+$L^c = \operatorname{ReLU}(M^c) / (hw)$: the same map up to a positive constant, which the display scaling removes.
+Grad-CAM is CAM with the classifier's weights replaced by a linearisation of whatever head follows the chosen layer.
+The linearisation is local: for a nonlinear head the weights change with the input.
+
+### Variants
+
+- **Grad-CAM++** weights the positive gradients position by position, which gives fuller maps when a class appears
+  more than once. Under the assumption that the output is the exponential of a piecewise-linear score, its weights need
+  only first derivatives:
+  $w_{kc} = \sum_{i,j} a^{kc}_{ij} \operatorname{ReLU}(g_{ij})$ with
+  $a^{kc}_{ij} = g_{ij}^2 / (2 g_{ij}^2 + g_{ij}^3 \sum_{a,b} A^k_{ab})$ and $g = \partial y_c / \partial A^k$
+  <Cite id="chattopadhyay2018" />.
+- **Score-CAM** uses no gradients. It masks the input with each upsampled map in turn and weights the map by the
+  class score of the masked input <Cite id="wang2020scorecam" />. It costs $K$ forward passes.
+- **HiResCAM** multiplies the gradient and the maps elementwise before summing over channels, instead of averaging the
+  gradient first. Grad-CAM's averaging can mark positions that the model did not use; HiResCAM marks only positions
+  that the layer's contribution to the score depends on <Cite id="draelos2020" />.
+- **Guided Grad-CAM** multiplies the upsampled map by guided backpropagation <Cite id="springenberg2015" /> to add
+  pixel detail. The guided part ignores the weights of higher layers (see Pitfalls).
+
+## Worked example
+
+Take $K = 4$ feature maps of $3 \times 3$ after the ReLU, two classes and zero biases. Maps 1 and 2 respond to an object
+in the top left, maps 3 and 4 to one in the bottom right:
+
+$$
+A^1 = \begin{bmatrix} 2 & 1 & 0 \\ 1 & 0 & 0 \\ 0 & 0 & 0 \end{bmatrix}, \;
+A^2 = \begin{bmatrix} 1 & 1 & 0 \\ 0 & 0 & 0 \\ 0 & 0 & 0 \end{bmatrix}, \;
+A^3 = \begin{bmatrix} 0 & 0 & 0 \\ 0 & 0 & 1 \\ 0 & 1 & 2 \end{bmatrix}, \;
+A^4 = \begin{bmatrix} 0 & 0 & 0 \\ 0 & 1 & 0 \\ 0 & 0 & 1 \end{bmatrix}.
+$$
+
+The classifier weights are $w_{\cdot,\text{disc}} = (1, 0.5, -1, 0)$ and $w_{\cdot,\text{cross}} = (-0.5, 0, 1, 1)$.
+
+**Step 1: pool.** The map sums are 4, 2, 4 and 2, so the pooled features are
+$(4, 2, 4, 2)/9 \approx (0.444, 0.222, 0.444, 0.222)$.
+
+**Step 2: score.** $y_\text{disc} = (1 \cdot 4 + 0.5 \cdot 2 - 1 \cdot 4)/9 = 1/9 \approx 0.111$ and
+$y_\text{cross} = (-0.5 \cdot 4 + 4 + 2)/9 = 4/9 \approx 0.444$. The network prefers the cross.
+
+**Step 3: map.** Weight and add the maps:
+
+$$
+M^\text{disc} = A^1 + 0.5 A^2 - A^3 = \begin{bmatrix} 2.5 & 1.5 & 0 \\ 1 & 0 & -1 \\ 0 & -1 & -2 \end{bmatrix}, \qquad
+M^\text{cross} = -0.5 A^1 + A^3 + A^4 = \begin{bmatrix} -1 & -0.5 & 0 \\ -0.5 & 1 & 1 \\ 0 & 1 & 3 \end{bmatrix}.
+$$
+
+The disc map is positive in the top left and negative in the bottom right; the cross map is the reverse.
+
+**Step 4: check.** $M^\text{disc}$ sums to $2.5 + 1.5 + 1 - 1 - 1 - 2 = 1$, and $1/9 = y_\text{disc}$. $M^\text{cross}$
+sums to $-1 - 0.5 - 0.5 + 1 + 1 + 1 + 3 = 4$, and $4/9 = y_\text{cross}$. The mean of each map is its class score.
+
+**Step 5: Grad-CAM.** Every entry of $\partial y_c / \partial A^k$ is $w_{kc}/9$, so
+$\alpha_{\cdot,\text{cross}} = (-0.5, 0, 1, 1)/9$ and
+$L^\text{cross} = \operatorname{ReLU}(M^\text{cross})/9$, which keeps the entries 1, 1, 1 and 3 of the bottom right,
+divided by 9. Scaled to a largest value of 1, it is the CAM.
+
+<ClassActivationExplorer />
+
+**A trained network.** The figure trains the same small network as the
+<NoteLink to="feature-visualisation">feature visualisation</NoteLink> note, on single discs, squares and crosses, and
+shows it an image with two objects. The CAM of each class is brightest on the object of that class. Grad-CAM at conv2
+gives the same map, as derived above, and the readout confirms that the mean of the CAM plus the bias equals the logit.
+Grad-CAM at conv1 is sharper, since conv1 has the full $16 \times 16$ resolution, but its channels are edge detectors
+and its maps mark edges of both objects. Re-initialising the linear layer, then conv2, then conv1 changes the CAM
+completely: for the cross in the default scene, its rank correlation with the trained map falls from 1 to $-0.60$,
+$0.30$ and $0.00$ as one, two and three layers are redrawn.
+
+## Cost
+
+CAM needs one forward pass with the last feature maps kept; the maps for every class cost one $K \times C$ matrix
+product over the $hw$ positions. Grad-CAM needs a forward pass and a backward pass to the chosen layer per class, about
+the cost of one training step without the weight update. Score-CAM needs $K$ extra forward passes, a few hundred to a
+few thousand for common networks. All of them are cheap next to perturbation methods such as occlusion, which need one
+forward pass per occluded patch.
+
+## Trade-offs
+
+- **Resolution against meaning.** Late layers have channels that encode object parts but only $7 \times 7$ positions.
+  Early layers have fine resolution but channels that encode edges. The last convolutional layer is the usual choice.
+- **CAM against Grad-CAM.** CAM is exact and gradient-free but needs pooling followed by one linear layer. Grad-CAM
+  works anywhere, including <Gloss name="vit">vision transformers</Gloss> reshaped to a grid, at the price of a local
+  linearisation.
+- **Averaged against elementwise gradients.** Grad-CAM's averaging smooths the map and can spread it beyond the
+  regions the model used; HiResCAM is faithful to the layer but noisier <Cite id="draelos2020" />.
+
+## Pitfalls
+
+- **Coarse maps.** A $7 \times 7$ map resampled to $224 \times 224$ cannot separate two small objects that fall in one
+  cell, and its blur is the resampling, not the model.
+- **The ReLU hides negative evidence.** Positions that argue against the class are clipped to zero. The figure shows
+  them only through the classes they favour.
+- **A plausible map is not a faithful one.** Run the model-randomisation test: re-initialise the layers from the top
+  and check that the map changes <Cite id="adebayo2018" />. Grad-CAM changes substantially and passes. Guided
+  backpropagation and guided Grad-CAM barely change, so their pixel detail describes the input, not the model; see
+  <NoteLink to="evaluating-explanations">evaluating explanations</NoteLink>.
+- **Where is not what.** A map on the right object does not show which feature of the object was used. A
+  texture-biased network marks the object for its texture; see <NoteLink to="shape-and-texture-bias">shape and texture
+  bias</NoteLink>.
+- **Logit, not probability.** Differentiate the score before the softmax. The probability's gradient also contains the
+  other classes' scores.

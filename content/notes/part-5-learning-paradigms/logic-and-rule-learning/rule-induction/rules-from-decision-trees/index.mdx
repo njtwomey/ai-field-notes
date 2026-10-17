@@ -1,0 +1,170 @@
+---
+title: 'Rules from decision trees'
+kind: technique
+summary: 'Each root-to-leaf path of a decision tree is a conjunctive rule. C4.5rules drops conditions whose removal does not raise a pessimistic error estimate, deletes redundant rules and orders the rest by class, often giving a smaller and more accurate rule set than the tree.'
+tags: [logic, rule-learning, trees, worked-example]
+aliases: [C4.5rules, tree to rules conversion, pessimistic error estimate]
+requires: [decision-tree, decision-lists-and-rule-sets]
+related: [tree-pruning, ripper, sequential-covering, rule-extraction-from-tree-ensembles, rule-ensembles-and-rulefit, minimum-description-length, binomial-distribution]
+references: [quinlan1987, quinlan1993, cohen1995, furnkranz2012]
+status: draft
+updated: 2026-10-17
+---
+
+import { TreeToRules } from './TreeToRules'
+
+<Definition>
+**Rules from decision trees** turns a fitted <NoteLink to="decision-tree">decision tree</NoteLink> into a
+<NoteLink to="decision-lists-and-rule-sets">rule set</NoteLink>: each root-to-leaf path becomes a rule whose antecedent
+is the conjunction of the tests on the path and whose consequent is the leaf's majority class. **C4.5rules** then
+simplifies the rules one at a time, deleting any condition whose removal does not raise the rule's pessimistic error
+estimate, keeps for each class the subset of its rules with the shortest description length, and orders the classes into
+a decision list with a default class <Cite id="quinlan1987" /> <Cite id="quinlan1993" />.
+</Definition>
+
+## Problem
+
+A tree is a readable model only while it is small. A tree fitted to real data repeats the same test in several
+subtrees and buries the conditions that matter for a leaf under tests that only mattered for its siblings. Its leaves
+are disjoint, so a concept made of two overlapping regions must be split into many pieces. Pruning a tree (see
+<NoteLink to="tree-pruning">tree pruning</NoteLink>) removes whole subtrees, never a single test near the root that
+is irrelevant for one leaf and essential for another.
+
+Read as rules, the leaves can be simplified independently. A rule can lose a condition near the root without
+affecting any other rule, and two rules that become identical can merge. The rule set is no longer a partition: rules
+may overlap or leave gaps, which a decision list and a default class resolve. The method borrows the tree's search,
+which is fast and well understood, and replaces its structure, which is rigid.
+
+## Mechanism
+
+### Extract the paths
+
+A tree with $M$ leaves gives $M$ rules. The rule of a leaf is the conjunction of the tests on its path, with repeated
+tests on one feature merged into one interval, and it predicts the leaf's majority class. The rules are disjoint and
+cover every input, so as an unordered set they reproduce the tree exactly.
+
+### Generalise each rule
+
+Let a rule $a \to c$ cover $N$ training rows of which $E$ are not of class $c$. Its training error rate $E/N$ is
+optimistic, the more so for small $N$, because the tree chose the rule to fit those rows. C4.5 replaces it by the
+**pessimistic error** $U_{CF}(E, N)$: the upper limit of a one-sided confidence interval for the error probability
+$q$ of a <NoteLink to="binomial-distribution">binomial</NoteLink> sample with $E$ errors in $N$ trials, at confidence
+level $CF$ (25% by default) <Cite id="quinlan1993" />. It is the $q$ that solves
+
+$$
+\sum_{k=0}^{E} \binom{N}{k} q^k (1 - q)^{N - k} = CF.
+$$
+
+For $E = 0$ the sum is $(1 - q)^N$, so $U_{CF}(0, N) = 1 - CF^{1/N}$. A rule that is right on all of 6 rows has
+$U_{25\%}(0, 6) = 1 - 0.25^{1/6} = 0.206$; on 30 rows the bound falls to $0.045$. The estimate rewards coverage: a
+rule loses nothing by covering more rows at the same error rate, and gains as its sample grows.
+
+Generalisation is greedy. For each condition of the rule, compute $U_{CF}$ of the rule without it. Delete the
+condition with the smallest result if that result is no larger than the rule's current $U_{CF}$, and repeat until no
+deletion qualifies. Deleting a condition enlarges the rule's coverage, which raises $N$ and usually $E$. The deletion
+is kept when the larger sample outweighs the extra errors. Quinlan's first version decided each deletion by Fisher's
+exact test on the 2×2 table of the condition against the class instead <Cite id="quinlan1987" />.
+
+### Select rules per class
+
+Generalised rules overlap, some become duplicates, and some become redundant. For each class $c$, C4.5rules keeps the
+subset $S$ of its rules that minimises a <NoteLink to="minimum-description-length">description length</NoteLink>: bits
+to encode the rules of $S$ plus bits to identify their exceptions, the rows of other classes that $S$ covers
+(<Gloss name="fp">false positives</Gloss>) and the rows of class $c$ it leaves uncovered (<Gloss name="fn">false
+negatives</Gloss>) <Cite id="quinlan1993" />. A rule whose rows are already covered by the others adds bits and removes
+no exception, so it goes.
+
+### Order the classes
+
+The selected subsets are ordered by class, the class whose rules make the fewest false positives first, so the most
+reliable rules are tried first. Within a class, the order does not matter, since all its rules predict the same class.
+The default class is the most frequent class among the training rows that no rule covers. The result is a decision
+list of rule sets, the same form <NoteLink to="ripper">RIPPER</NoteLink> produces.
+
+<Derivation title="The closed form for an error-free rule">
+With $E = 0$ errors in $N$ rows, the confidence condition is $P(X \le 0) = (1 - q)^N = CF$ for $X \sim
+\Binom(N, q)$. Taking logarithms, $N \ln(1 - q) = \ln CF$, so $q = 1 - \exp(\ln CF / N) = 1 - CF^{1/N}$. For large
+$N$, $1 - CF^{1/N} \approx -\ln CF / N = 1.386/N$ at $CF = 0.25$: the pessimistic error of a pure rule falls as one
+over its coverage. For $E > 0$ there is no closed form; C4.5 uses a normal approximation, which is why its printed
+values differ slightly from the exact quantile, $U_{25\%}(1, 16) = 0.157$ in Quinlan's book against $0.160$ exactly.
+</Derivation>
+
+## Worked example
+
+Fit an entropy tree of depth 3 to the Titanic data: 2201 people, 711 survivors, described by class, sex and age. It
+has eight leaves, read as rules with their coverage $N$ and errors $E$:
+
+| leaf rule | predicts | $N$ | $E$ | $U_{25\%}$ |
+| --- | --- | --- | --- | --- |
+| 1. class ∈ \{1st, 2nd\} ∧ male ∧ child | survived | 16 | 0 | 0.083 |
+| 2. class ∈ \{3rd, crew\} ∧ male ∧ child | died | 48 | 13 | 0.328 |
+| 3. class = 1st ∧ male ∧ adult | died | 175 | 57 | 0.353 |
+| 4. class ∈ \{2nd, 3rd, crew\} ∧ male ∧ adult | died | 1492 | 281 | 0.196 |
+| 5. class = 1st ∧ female | survived | 145 | 4 | 0.043 |
+| 6. class = 2nd ∧ female | survived | 106 | 13 | 0.151 |
+| 7. class = 3rd ∧ female | died | 196 | 90 | 0.486 |
+| 8. class = crew ∧ female | survived | 23 | 3 | 0.212 |
+
+The tree is right for $2201 - 461 = 1740$ people (0.791).
+
+**Generalise.** Four rules lose a condition.
+
+- Rule 1 without "male" covers all 30 first- and second-class children, who all survived: $U$ falls from
+  $1 - 0.25^{1/16} = 0.083$ to $1 - 0.25^{1/30} = 0.045$. It becomes "class ∈ \{1st, 2nd\} ∧ child → survived".
+- Rule 2 without "child" covers all 1372 men and boys of 3rd class and the crew, 280 of whom survived: $U$ falls from
+  0.328 to 0.212. It becomes "class ∈ \{3rd, crew\} ∧ male → died".
+- Rule 3 without "class = 1st" covers all 1667 adult men, 338 of whom survived: $U$ falls from 0.353 to 0.210. A
+  rule that the tree made specific to first class turns out to hold for all men.
+- Rule 7 without "female" covers all 706 third-class passengers, 178 of whom survived: $U$ falls from 0.486 to 0.264.
+  It becomes "class = 3rd → died".
+
+**Select.** For "died", the generalised rules 3 ("male ∧ adult") and 7 ("class = 3rd") together cover every row that
+rules 2 and 4 cover: the adult men through rule 3 and the third-class boys through rule 7 (the crew has no children).
+Rules 2 and 4 add bits and remove no exceptions, so the description length keeps only rules 3 and 7. For "survived",
+all four rules stay.
+
+**Order.** The "survived" rules make 20 false positives (the 4, 13 and 3 deaths among first-class, second-class and
+crew women); the "died" rules make 441. The list is therefore:
+
+1. if class ∈ \{1st, 2nd\} ∧ child then survived,
+2. else if class = 1st ∧ female then survived,
+3. else if class = 2nd ∧ female then survived,
+4. else if class = crew ∧ female then survived,
+5. else if male ∧ adult then died,
+6. else if class = 3rd then died,
+7. else died.
+
+Six rules with 11 conditions replace eight leaves with 20 tests, and accuracy stays at 0.791. The last three lines say,
+in the order "adult men died, third class died", what the tree spread over four leaves.
+
+<TreeToRules />
+
+## Cost
+
+Extracting the rules costs one traversal of the tree. Generalising a rule of $k$ conditions tries at most $k$
+deletions per round and $k$ rounds, each scored by one pass over the $n$ training rows, so $O(k^2 n)$ per rule and
+$O(M k^2 n)$ for $M$ leaves. Selection is the expensive part: an exhaustive search over the subsets of a class's $r$
+rules evaluates $2^r$ subsets, so C4.5 searches heuristically when a class has many rules. On large noisy data the
+trees, and with them the rule sets to simplify, grow with $n$, and C4.5rules becomes much slower than covering
+learners such as <NoteLink to="ripper">RIPPER</NoteLink> <Cite id="cohen1995" />.
+
+## Trade-offs
+
+- **Against the tree.** The rule set is usually smaller, often as accurate or more accurate on new data, and each
+  rule can be read alone. It is no longer a partition, so prediction needs the class order and a default.
+- **Against covering learners.** The tree's search sees all rows at every level and copes with interactions that
+  greedy rule growth misses at the first step. The conversion inherits the tree's biases, such as fragmenting
+  regions that one rule would cover.
+- **Against tree ensembles.** One tree's rules are few and readable. Rules extracted from a forest or boosted
+  ensemble are many and are used as features rather than read; see
+  <NoteLink to="rule-ensembles-and-rulefit">rule ensembles and RuleFit</NoteLink> and
+  <NoteLink to="rule-extraction-from-tree-ensembles">rule extraction from tree ensembles</NoteLink>.
+
+## Pitfalls
+
+- **The pessimistic estimate is a heuristic.** $U_{CF}$ is computed on the training rows that chose the rule, so it is
+  not a valid confidence bound. $CF$ is a knob: smaller values delete more conditions.
+- **Order changes meaning.** After generalisation the rules overlap, and the list resolves overlaps by position. As in
+  any decision list, a rule means its own conditions and the failure of every rule above it.
+- **Numeric thresholds.** Tests on numeric features carry the tree's split points, chosen for the node they were in,
+  into rules that now apply to wider regions.

@@ -1,0 +1,145 @@
+---
+title: 'Squeeze-and-excitation'
+kind: technique
+summary: 'A squeeze-and-excitation block average-pools each channel to one number, passes the $C$-vector through a bottleneck MLP with reduction $r$, and rescales each channel by a sigmoid gate. It adds about $2C^2/r$ weights per block.'
+tags: [convolutional-networks, deep-learning, attention, worked-example]
+aliases: ['SE block', 'SENet', 'channel attention', 'squeeze and excitation']
+requires: [convolutional-layer, pooling-and-strides]
+related:
+  [
+    efficient-convolutional-networks,
+    gated-feed-forward-layers,
+    residual-network,
+    modern-convolutional-networks,
+    multilayer-perceptron,
+  ]
+references: [hu2018senet, howard2019mobilenetv3, tan2019, radosavovic2020regnet, woo2023convnextv2]
+status: draft
+updated: 2026-10-17
+---
+
+import { ChannelGate } from './ChannelGate'
+
+<Definition>
+A squeeze-and-excitation (SE) block takes a <NoteLink to="convolutional-layer">feature map</NoteLink> $\Umat$ with $C$
+channels $u_1, \dots, u_C$ on an $H \times W$ grid and returns $\tilde u_c = s_c u_c$ for each channel. The squeeze step
+averages each channel over the grid, $z_c = \frac{1}{HW} \sum_{i, j} u_c(i, j)$. The excitation step maps
+$\zvec \in \reals^C$ to gates $\svec = \sigma(\Wmat_2\, \mathrm{ReLU}(\Wmat_1 \zvec)) \in (0, 1)^C$, with
+$\Wmat_1 \in \reals^{(C/r) \times C}$, $\Wmat_2 \in \reals^{C \times (C/r)}$ and reduction ratio $r$
+<Cite id="hu2018senet" />.
+</Definition>
+
+## Problem
+
+A convolution mixes channels with fixed weights inside a small window. Output channel $c'$ at a pixel is a weighted sum
+of the input channels near that pixel, and the weights are the same for every image. The layer cannot decide, for one
+particular image, that the "fur" channels matter more than the "sky" channels. It also cannot see beyond its window:
+even deep in a network, a $3 \times 3$ convolution combines channels using only local evidence, so a global fact about
+the image, such as "this is an indoor scene", reaches a channel only after many layers.
+
+Squeeze-and-excitation gives every block a cheap global, input-dependent reweighting of its channels. It summarises
+the whole feature map in one number per channel, decides from all $C$ numbers together how much each channel should
+count, and scales the channels accordingly. Hu et al. describe this as modelling the interdependencies between
+channels <Cite id="hu2018senet" />. The block keeps the convolutional backbone unchanged and adds a side branch, so it
+fits into ResNet, Inception and MobileNet blocks alike.
+
+## Mechanism
+
+**Squeeze.** <NoteLink to="pooling-and-strides">Global average pooling</NoteLink> turns each $H \times W$ channel into
+its mean $z_c$. The vector $\zvec$ is a descriptor of the whole image as this block sees it. Max pooling works nearly as
+well; average pooling was slightly better in the ablations <Cite id="hu2018senet" />.
+
+**Excitation.** A two-layer <NoteLink to="multilayer-perceptron">perceptron</NoteLink> maps $\zvec$ to the gates. The
+first layer reduces $C$ to $C/r$ dimensions and applies a <Gloss name="relu" />; the second restores $C$ dimensions and
+applies a sigmoid,
+
+$$
+\svec = \sigma\paren{\Wmat_2 \max(0, \Wmat_1 \zvec)}.
+$$
+
+The bottleneck limits the parameters and forces the gates through a low-dimensional summary, so channels are
+reweighted jointly rather than one by one. The sigmoid keeps each gate in $(0, 1)$ and lets several channels be
+emphasised at once, unlike a softmax, which would make the channels compete for one unit of weight. Replacing the
+sigmoid with a ReLU or tanh made SE-ResNet-50 worse <Cite id="hu2018senet" />.
+
+**Scale.** Each channel is multiplied by its gate, $\tilde u_c(i, j) = s_c\, u_c(i, j)$. The gate is constant over
+the grid, so the block changes how much a channel counts, not where it fires.
+
+**Placement.** In a <NoteLink to="residual-network">residual network</NoteLink> the SE branch acts on the output of
+the residual branch $F(\xvec)$, before the addition to the shortcut: $\yvec = \xvec + \svec \odot F(\xvec)$, where
+$\odot$ scales channel $c$ of $F(\xvec)$ by $s_c$. The identity path stays unscaled. Hu et al. found that gating after
+the addition gave higher error than gating the branch <Cite id="hu2018senet" />.
+
+<ChannelGate />
+
+## Worked example
+
+**A gate by hand.** Take $C = 4$ channels and $r = 2$, as in the figure. The four $12 \times 12$ channels have means
+$\zvec = (1, 4, 0.5, 0)$. Use no biases and the weights
+
+$$
+\Wmat_1 = \begin{bmatrix} 1 & 0.5 & -1 & 0 \\ -1 & 0 & 2 & 1 \end{bmatrix}, \qquad
+\Wmat_2 = \begin{bmatrix} 0.8 & 0 \\ -0.4 & 1 \\ 0.6 & -1 \\ 0 & 0.5 \end{bmatrix}.
+$$
+
+1. **Reduce.** $\Wmat_1 \zvec = (1 + 2 - 0.5 + 0,\; -1 + 0 + 1 + 0) = (2.5, 0)$. The ReLU leaves $(2.5, 0)$.
+2. **Expand.** $\Wmat_2 (2.5, 0)^\top = (2.0, -1.0, 1.5, 0)$.
+3. **Gate.** $\sigma$ of these values gives $\svec = (0.881, 0.269, 0.818, 0.500)$.
+4. **Scale.** Channel 1 keeps 88% of its values, channel 2 keeps 27%, channel 3 keeps 82% and channel 4 keeps half.
+
+Channel 2 has the largest mean and the smallest gate. Its gate is set by the hidden unit, which is a function of all
+four means, not of $z_2$ alone. Raising the strength of channel 3 to 2 makes $z_3 = 1$, the hidden vector $(2, 1)$ and
+the gates $(0.832, 0.550, 0.550, 0.622)$: channel 2 recovers and channel 4 changes though its own input did not.
+
+**Parameters at realistic widths.** At $C = 64$ and $r = 16$ the bottleneck has $64/16 = 4$ units. $\Wmat_1$ and
+$\Wmat_2$ have $2 \cdot 64 \cdot 4 = 512$ weights, plus $4 + 64 = 68$ biases. A $3 \times 3$ convolution at 64 channels
+has $9 \cdot 64^2 = 36{,}864$ weights, so the SE block adds 1.6% of one such layer.
+
+## Cost
+
+An SE block with $C$ channels adds $2C^2/r$ weights (and $C/r + C$ biases) and $2C^2/r$ multiply-adds per image for the
+two dense layers, plus $HWC$ additions for the pooling and $HWC$ multiplications for the scaling. The dense layers act
+on one vector per image, so their cost does not grow with the image size.
+
+In SE-ResNet-50 with $r = 16$, stage $s$ has $N_s$ blocks with $C_s$ output channels, $(N_s, C_s) = (3, 256)$,
+$(4, 512)$, $(6, 1024)$ and $(3, 2048)$. The blocks add
+
+$$
+\frac{2}{r} \sum_s N_s C_s^2 = \frac{2}{16} \paren{3 \cdot 256^2 + 4 \cdot 512^2 + 6 \cdot 1024^2 + 3 \cdot 2048^2}
+= 2{,}514{,}944
+$$
+
+weights, about 10% of <NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink>'s 25.6 million.
+The last stage alone contributes $1{,}572{,}864$, because the cost grows with $C^2$. Hu et al. report 3.87 against 3.86
+billion multiply-adds per $224 \times 224$ image, a 0.26% increase, and that removing the SE blocks of the last stage
+cuts the parameter increase to about 4% at a loss of less than 0.1 percentage points of top-5 accuracy
+<Cite id="hu2018senet" />.
+
+## Trade-offs
+
+- **Accuracy for almost no arithmetic.** SE-ResNet-50 reached 6.62% single-crop top-5 error on the
+  <Gloss name="imagenet" /> validation set against 7.48% for ResNet-50, close to ResNet-101's 6.52% at half the
+  multiply-adds <Cite id="hu2018senet" />.
+- **Parameters against $r$.** The added parameters grow as $1/r$. Accuracy did not improve steadily as $r$ fell, and
+  the paper chose $r = 16$ as a balance between accuracy and size <Cite id="hu2018senet" />.
+- **Latency.** The pooling is a reduction over the whole feature map that must finish before the scaling can start, so
+  an SE block adds a synchronisation point. On mobile hardware the sigmoid itself costs time; MobileNetV3 replaces it by
+  a piecewise-linear hard sigmoid <Cite id="howard2019mobilenetv3" />.
+- **Where it went.** SE blocks are part of MobileNetV3 <Cite id="howard2019mobilenetv3" />, of the inverted residual
+  blocks of <NoteLink to="efficient-convolutional-networks">EfficientNet</NoteLink> <Cite id="tan2019" /> and of the
+  RegNetY design space, where Y means X plus SE <Cite id="radosavovic2020regnet" />.
+  <NoteLink to="modern-convolutional-networks">ConvNeXt V2</NoteLink> uses a parameter-free global response
+  normalisation of per-channel norms in a similar role <Cite id="woo2023convnextv2" />.
+
+## Pitfalls
+
+- **Gating the shortcut.** Placing the gate after the residual addition scales the identity path too, so the gradient
+  through the shortcut is scaled by $s_c$ at every block; put the gate on the residual branch.
+- **Too few hidden units.** With $C$ small, $C/r$ can fall to 1 or 2 units, which forces all gates through one or two
+  numbers. Choose $r$ per stage, or set a minimum width, as EfficientNet does by tying the hidden width to the block's
+  input channels.
+- **Global averages hide small objects.** The squeeze averages over the whole image, so a small object barely moves
+  $z_c$. The gate responds to what dominates the image, which suits classification and can mislead dense prediction,
+  where a local cue matters.
+- **Saturated gates.** Large pre-sigmoid values push gates towards 0 or 1, where the sigmoid's derivative
+  $s_c(1 - s_c)$ is close to 0 and the excitation weights learn slowly.

@@ -1,0 +1,182 @@
+---
+title: 'Sequential covering'
+kind: technique
+summary: 'Sequential covering learns rules one at a time: grow a rule by adding the condition that most improves a quality measure, remove the examples it covers, repeat. AQ grows rules from a seed example; CN2 runs a beam search and yields an ordered list or an unordered set.'
+tags: [logic, rule-learning, worked-example]
+aliases: ['separate and conquer', 'separate-and-conquer', 'CN2', 'AQ algorithm', 'covering algorithm']
+requires: [decision-lists-and-rule-sets, rule-quality-measures]
+related: [ripper, foil, rules-from-decision-trees, generality-ordering-and-refinement, decision-tree, subgroup-discovery]
+references: [furnkranz1999, clark1989, clark1991, furnkranz2012, rivest1987, quinlan1990, cohen1995]
+status: draft
+updated: 2026-10-17
+---
+
+import { CoveringStepper } from './CoveringStepper'
+
+<Definition>
+**Sequential covering**, or **separate and conquer**, learns a rule set or a decision list one rule at a time. An inner
+search finds one rule that covers many rows of one class and few of the others (conquer). The rows the rule covers are
+removed from the training set (separate), and the search runs again on the rest. The loop stops when no rows of interest
+are left or no acceptable rule can be found. **<NoteLink to="additive-and-residual-quantisation">AQ</NoteLink>** grows
+each rule around a seed example; <Gloss name="cn2" /> grows it by beam search from the empty rule and filters it by a
+significance test <Cite id="furnkranz1999" /> <Cite id="clark1989" />.
+</Definition>
+
+## Problem
+
+A rule model is only useful if it is short, and finding the shortest rule set consistent with the data is NP-hard, as
+it is for trees. A learner needs a greedy decomposition. A <NoteLink to="decision-tree">decision tree</NoteLink> uses
+divide and conquer: each test splits all the rows in its node, both branches are grown, and every row ends in exactly
+one leaf. Each split halves, on average, the data the tests below it can use, and a concept that needs a few
+overlapping rules can need a large tree.
+
+Sequential covering decomposes the problem differently. It looks for one region where a class dominates, describes
+it by a conjunction, and sets the region aside. Each new rule is learned from every row not yet explained, not from a
+branch's share. Rules may overlap, and a region that is easy to describe never forces a split elsewhere. The price is
+that rules interact through the order in which they are learned. The family includes AQ, CN2,
+<NoteLink to="ripper">RIPPER</NoteLink> and, for first-order clauses, <NoteLink to="foil">FOIL</NoteLink>; it is also
+the greedy algorithm behind Rivest's learnability result for decision lists (see
+<NoteLink to="decision-lists-and-rule-sets">decision lists and rule sets</NoteLink>).
+
+## Mechanism
+
+### The covering loop
+
+Let $E$ be the training rows, $\mathcal{C}$ a set of candidate conditions (equalities $x_j = v$ for nominal
+attributes, thresholds $x_j \le q$ and $x_j > q$ for numeric ones) and $h$ a
+<NoteLink to="rule-quality-measures">rule quality measure</NoteLink>.
+
+1. Start with an empty model and $E' = E$.
+2. Learn one rule $a \to c$ on $E'$ (next section).
+3. If the rule is not acceptable (it does not beat the empty rule under $h$, fails the significance test, or covers
+   too few rows), stop.
+4. Append the rule to the model, remove from $E'$ the rows it covers, and go to step 2.
+5. Finish with a default class: the majority class of the rows left.
+
+Two choices in step 4 give the two output forms. A **decision list** removes every row the rule covers, whatever
+its class, and each rule predicts the majority class of the rows it covers. A **rule set for one class** removes only
+the covered positives, so later rules are still judged against every negative row, and each rule must be precise on
+its own. Learning one such set per class, and combining them by a vote, is CN2's unordered mode
+<Cite id="clark1991" />.
+
+### Learning one rule
+
+The inner search moves through the space of conjunctions ordered by generality (see
+<NoteLink to="generality-ordering-and-refinement">generality ordering and refinement</NoteLink>). **Top-down**
+learners start from the empty rule, which covers everything, and specialise it by adding one condition at a time.
+**Bottom-up** learners start from a single example, described by all its attribute values, and generalise it by
+dropping conditions.
+
+CN2 searches top-down with a beam of width $w$ <Cite id="clark1989" />:
+
+1. The beam holds the empty rule.
+2. Extend every rule in the beam by every condition of $\mathcal{C}$ that changes its coverage. Score each extension
+   on $E'$ by $h$, with its class set to the majority class of the rows it covers.
+3. Keep the best $w$ extensions as the new beam. Record the best rule seen so far that passes the significance test.
+4. Repeat from step 2 until the beam is empty, a length limit is reached or no extension improves on the best rule.
+5. Return the best rule recorded.
+
+The original CN2 scored rules by the entropy of the covered class distribution; the 1991 version replaced it by the
+Laplace estimate $(p + 1)/(p + n + K)$, which favours larger rules among equally pure ones <Cite id="clark1991" />.
+The significance test compares the covered class counts with those expected from the class mix of $E'$ by the
+likelihood ratio statistic, kept only when it exceeds a $\chi^2$ quantile. A beam of width 1 is hill climbing.
+
+**AQ** works bottom-up from data <Cite id="furnkranz1999" />. It picks an uncovered positive example as the seed and
+computes a **star**: the maximally general conjunctions that cover the seed and no negative example, built by
+excluding the negatives one at a time. The best member of the star by a quality measure becomes the rule. Because every
+rule is anchored to a seed, AQ never searches regions with no positive examples.
+
+The beam search returns the best rule over all depths, not the deepest. A rule that is pure at depth 2 is not
+lengthened further unless a longer rule scores higher, which the Laplace estimate allows only if the longer rule is
+both pure and not much smaller.
+
+## Worked example
+
+The Titanic data list 2201 people by class, sex and age, and whether they survived (711) or died (1490). The candidate
+conditions are the eight equalities: class = 1st, 2nd, 3rd or crew, sex = male or female, age = child or adult. Run
+CN2 in ordered mode with the Laplace estimate and a beam of width $w = 3$.
+
+**Rule 1, depth 1.** Each condition predicts the majority class of the rows it covers. Their Laplace estimates
+$(p + 1)/(p + n + 2)$, with $p$ the majority count, are:
+
+| condition | died : survived | predicts | Laplace |
+| --- | --- | --- | --- |
+| sex = male | 1364 : 367 | died | $1365/1733 = 0.788$ |
+| class = crew | 673 : 212 | died | $674/887 = 0.760$ |
+| class = 3rd | 528 : 178 | died | $529/708 = 0.747$ |
+| sex = female | 126 : 344 | survived | $345/472 = 0.731$ |
+| age = adult | 1438 : 654 | died | $1439/2094 = 0.687$ |
+| class = 1st | 122 : 203 | survived | $204/327 = 0.624$ |
+| class = 2nd | 167 : 118 | died | $168/287 = 0.585$ |
+| age = child | 52 : 57 | survived | $58/111 = 0.523$ |
+
+The beam keeps male, crew and 3rd.
+
+**Depth 2.** Extending those three by every other condition, the best are "class = 2nd ∧ sex = male → died" with
+154 : 25 and Laplace $155/181 = 0.856$, "class = crew ∧ sex = female → survived" with 3 : 20 and $21/25 = 0.840$, and
+"class = 3rd ∧ sex = male → died" with 422 : 88 and $423/512 = 0.826$.
+
+**Depth 3.** Adding age to the first gives "class = 2nd ∧ sex = male ∧ age = child → survived": all 11 second-class
+boys survived, so the Laplace estimate is $12/13 = 0.923$, the best of the search. CN2 accepts it and removes the 11
+boys.
+
+**Rule 2** is learned on the remaining 2190 rows: "class = 2nd ∧ sex = male → died", now 154 : 14, Laplace
+$155/170 = 0.912$. With a limit of 10 rules, the loop stops at the limit with a list of mostly pure rules, and the
+list reaches training accuracy $1740/2201 = 0.791$, the most any classifier of these three attributes can reach.
+
+**The beam matters.** The best two-condition rule of all, "class = 1st ∧ sex = female → survived" with 4 : 141 and
+Laplace $142/147 = 0.966$, extends "sex = female", which ranked fourth at depth 1 and left the beam. With $w = 8$ the
+search keeps every condition, finds it, and makes it the first rule.
+
+**The measure matters more.** With weighted relative accuracy in place of the Laplace estimate and the same beam, CN2
+learns five rules: adult men died (1329 : 338), then 3rd class died (141 : 103), then 1st class survived (4 : 146),
+then children survived (0 : 24), then crew survived (3 : 20), else survived. The list is as accurate as the ten-rule
+Laplace list. Its last two rules predict the default class and change nothing; without them it is the list of the
+<NoteLink to="decision-lists-and-rule-sets">decision lists</NoteLink> worked example. The
+Laplace estimate rewards purity first, so it spends rules on small pure groups; weighted relative accuracy rewards
+coverage, so it starts with the 1667 adult men.
+
+The figure runs the same algorithm on two moons with threshold conditions.
+
+<CoveringStepper />
+
+## Cost
+
+Let $n$ be the number of training rows, $\abs{\mathcal{C}}$ the number of candidate conditions, $w$ the beam width
+and $L$ the maximum rule length. One depth of the beam search scores $w \abs{\mathcal{C}}$ extensions, each by
+counting covered rows in $O(n)$, so learning one rule costs $O(L\,w\,\abs{\mathcal{C}}\,n)$. A model of $R$ rules
+costs $O(R\,L\,w\,\abs{\mathcal{C}}\,n)$, and the rows removed after each rule make later searches cheaper. With $d$
+numeric attributes cut at $b$ quantiles, $\abs{\mathcal{C}} = 2d(b - 1)$. Prediction with a list costs at most $R$
+rule tests.
+
+## Trade-offs
+
+- **Against trees.** A tree partitions the data at every split and grows both branches; covering explains one
+  region at a time with all remaining data. Covering gives fewer, overlapping rules for concepts made of a few
+  disjoint regions. Trees are faster and their leaves never conflict.
+- **Ordered against unordered.** A list is compact and needs no vote, but each rule must be read after the ones
+  above it. An unordered set reads rule by rule, needs more and longer rules, and needs a conflict resolution scheme
+  <Cite id="clark1991" />.
+- **Beam width.** Wider beams find better single rules at proportional cost. A better first rule does not guarantee a
+  better list, because each rule changes the data the next one sees.
+- **Measure.** The quality measure fixes the trade between purity and coverage (see
+  <NoteLink to="rule-quality-measures">rule quality measures</NoteLink>). Purity-first measures give many small rules,
+  coverage-first measures few broad ones.
+- **Pruning.** Rules grown on all the data and stopped by a significance test still overfit noisy data.
+  <NoteLink to="ripper">RIPPER</NoteLink> grows each rule on part of the data and prunes it on the rest
+  <Cite id="cohen1995" />.
+
+## Pitfalls
+
+- **Greedy conditions.** Top-down search adds one condition at a time and cannot see a pair of conditions that is
+  useless alone and decisive together, such as the two halves of an exclusive or. A wider beam reduces the risk;
+  only exhaustive or optimal methods remove it (see
+  <NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule lists</NoteLink>).
+- **Small disjuncts.** The last rules of a list are learned on few rows and are often pure by chance. A minimum
+  coverage, a significance test or a description-length stop is needed.
+- **Significance after search.** The <NoteLink to="neyman-pearson-lemma">likelihood ratio test</NoteLink> is applied to
+  the best of thousands of candidates. It filters obvious noise and does not control the error rate of the accepted
+  rules.
+- **<NoteLink to="class-imbalance">Class imbalance</NoteLink>.** In ordered mode the rules chase whichever class gives
+  the purest region, and the minority class may end up only in the default. Learning one rule set per class, smallest
+  class first, as RIPPER does, avoids it.

@@ -1,0 +1,123 @@
+---
+title: 'Physics-informed neural operator'
+kind: concept
+summary: 'A physics-informed neural operator adds the PDE residual of its predicted solutions to the operator''s data loss. It needs fewer solved training pairs and can be fine-tuned on a single new instance by the residual alone.'
+tags: [scientific-machine-learning, deep-learning, worked-example]
+aliases: ['PINO', 'physics-informed operator learning', 'instance-wise fine-tuning', 'virtual instances']
+requires: [fourier-neural-operator, physics-informed-neural-networks]
+related: [deeponet, operator-learning, heat-equation, loss-balancing-for-physics-informed-networks, failure-modes-of-physics-informed-networks]
+references: [li2024pino, wang2021pideeponet, li2021fno, raissi2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { PinoSpectrum } from './PinoSpectrum'
+
+<Definition>
+A **physics-informed neural operator** (<Gloss name="pino" />) is a <NoteLink to="operator-learning">neural
+operator</NoteLink> $\Gcal_{\thetavec}$, usually a <NoteLink to="fourier-neural-operator">Fourier neural
+operator</NoteLink>, trained on the loss
+
+$$
+L(\thetavec) = \frac{1}{N}\sum_{i=1}^{N} \norm{\Gcal_{\thetavec}(a_i) - u_i}^2
++ \frac{\lambda}{V}\sum_{j=1}^{V} \norm{\Ncal\brack{\Gcal_{\thetavec}(a'_j)}}^2 ,
+$$
+
+where $(a_i, u_i)$ are $N$ solved input–output pairs, $a'_j$ are $V$ inputs with no solution, $\Ncal[u] = 0$ is the
+<Gloss name="pde" /> with its initial and boundary conditions, and $\lambda \ge 0$ weights the residual. After this
+**operator learning** phase, the operator can be **fine-tuned on one instance**: for a new input $a$, the weights are
+updated on the residual $\norm{\Ncal[\Gcal_{\thetavec}(a)]}^2$ alone, starting from the trained weights
+<Cite id="li2024pino" />.
+</Definition>
+
+## Intuition
+
+A data-trained operator learns only what its solved pairs show. Every pair costs a run of a numerical solver, and the
+pairs cover only the inputs that someone chose to solve. A
+<NoteLink to="physics-informed-neural-networks">physics-informed neural network</NoteLink> needs no solved pairs, but
+it learns one solution at a time and is slow and fragile to train. The physics-informed neural operator combines the
+two. The data term teaches the operator from the pairs that exist. The residual term checks the operator's predictions
+against the equation, and it can do so on any input: an input needs no solution for its residual to be computed. Li et
+al. call these extra inputs **virtual instances** and note that they can be drawn afresh at every step, which turns the
+supervised problem into a semi-supervised one <Cite id="li2024pino" />.
+
+The residual also allows the two terms to work at different resolutions. Solved pairs on a coarse grid are cheap; the
+residual can be evaluated on a finer grid, where it constrains detail the data does not contain.
+
+## Details
+
+**Computing the residual.** A Fourier neural operator outputs the solution on a grid, not as a differentiable function
+of the coordinates. The derivatives in $\Ncal$ are computed by Fourier differentiation (multiplying the $k$-th Fourier
+coefficient by $i2\pi k$), by <Gloss name="finite-difference">finite differences</Gloss> on the grid, or by
+<NoteLink to="automatic-differentiation">automatic differentiation</NoteLink> through a query function that evaluates
+the last layer at arbitrary points <Cite id="li2024pino" />. Fourier differentiation is exact for smooth periodic fields
+and fails at discontinuities and non-periodic boundaries; finite differences need a fine uniform grid. For
+time-dependent problems the operator maps the initial condition to the whole space-time solution, so the time derivative
+is available on the space-time grid.
+
+**Balancing the terms.** The weight $\lambda$ plays the part it plays in a physics-informed network: a residual that
+dominates the loss drives the operator towards a solution of the equation that ignores the data, and a residual in
+physical units can be orders of magnitude larger than the data term. The remedies are the same
+(<NoteLink to="loss-balancing-for-physics-informed-networks">loss balancing</NoteLink>). A discretised residual also
+carries the discretisation error of its finite differences: an operator that drives it to zero matches the
+discretised equation, not the exact one.
+
+**Instance-wise fine-tuning.** For one input $a$, fine-tuning minimises
+$\norm{\Ncal[\Gcal_{\thetavec}(a)]}^2 + \alpha\norm{\Gcal_{\thetavec}(a) - \Gcal_{\thetavec_0}(a)}^2$, where
+$\thetavec_0$ are the trained weights and the second term, the anchor loss, keeps the solution near the operator's
+prediction. This is a physics-informed network whose family of candidate solutions is the operator's outputs, and whose
+starting point is already close to the answer. On a transient two-dimensional flow, Li et al. report 3.04% error for a
+data-trained Fourier neural operator, 2.87% for the operator trained with the residual as well, and 1.84% after
+fine-tuning on each test instance with the anchor loss <Cite id="li2024pino" />.
+
+**Physics-informed DeepONet.** The same loss applies to <NoteLink to="deeponet">DeepONet</NoteLink>, whose trunk network
+is a coordinate network, so the residual is computed by automatic differentiation in the query point
+<Cite id="wang2021pideeponet" />.
+
+<PinoSpectrum />
+
+The figure uses a linear one-layer operator for the <NoteLink to="heat-equation">heat equation</NoteLink>, simple enough
+to fit in closed form, to isolate what each term contributes. The solved pairs have smooth inputs with energy only up to
+frequency 4; the test inputs are rough. Fitted on 8 noisy pairs, the data-only operator leaves the multipliers above
+frequency 4 at zero and has 8.8% test error. The residual on 20 unsolved rough inputs identifies every multiplier, and
+the error falls to 0.86% with 10 time levels, 0.17% with 50 and 0.04% with 200: what remains is the error of the time
+discretisation inside the residual. With smooth inputs up to frequency 16, the data-only error falls to 1.0%.
+
+## Worked example
+
+The heat equation $u_t = D u_{xx}$ on a periodic interval with $D = 0.1$, from an initial profile to the solution at
+$T = 0.01$, and the Fourier mode $k = 4$, $\sin 8\pi x$. A linear operator multiplies this mode by $m_4(t)$ at each
+time.
+
+1. **Exact multiplier.** $D(2\pi k)^2 = 0.1 \times (8\pi)^2 = 63.17$, so $m_4(T) = e^{-63.17 \times 0.01} = e^{-0.632}
+   = 0.532$.
+2. **Data alone.** Suppose every solved pair has a smooth input with no $\sin 8\pi x$ component. The data term then does
+   not depend on $m_4$ at all, and a fit with a small ridge penalty sets $m_4(T) = 0$. For a test input with coefficient
+   0.3 on $\sin 8\pi x$, the true output coefficient is $0.3 \times 0.532 = 0.160$ and the data-only operator predicts 0.
+3. **The residual.** On $J$ time levels $t_j = jT/J$ with $\Delta t = T/J$, the backward-difference residual of mode 4
+   is $\paren{m_4(t_j) - m_4(t_{j-1})}/\Delta t + 63.17\, m_4(t_j)$, with $m_4(0) = 1$. Setting each residual to zero
+   gives $m_4(t_j) = m_4(t_{j-1})/(1 + 63.17\,\Delta t)$. Any unsolved input with a nonzero $\sin 8\pi x$ component
+   makes this term depend on $m_4$.
+4. **Ten levels.** $\Delta t = 0.001$, so each step divides by $1.0632$, and $m_4(T) = 1.0632^{-10} = 0.542$. The
+   predicted coefficient is $0.3 \times 0.542 = 0.163$, against the true 0.160.
+5. **One level.** $\Delta t = 0.01$ gives $m_4(T) = 1/1.632 = 0.613$, a 15% error in the multiplier. A coarse
+   residual identifies the mode but with the bias of its discretisation; solved pairs that excite the mode correct it.
+
+## Assumptions
+
+- The equation, its coefficients and its boundary conditions are known for the inputs on which the residual is used.
+- The residual can be computed accurately on the operator's output grid, which needs smooth fields for Fourier
+  differentiation or fine grids for finite differences.
+- Virtual inputs come from the distribution on which the operator will be used.
+
+## Pitfalls
+
+- **Residual without data on long horizons.** Li et al. found that neither a physics-informed network nor a
+  physics-informed operator trained from scratch could propagate the initial condition over a long time interval of a
+  turbulent flow; solved pairs and the anchor loss were needed <Cite id="li2024pino" />.
+- **Residual bias.** A residual on a coarse grid has a minimum at the solution of the discretised equation; weighting it
+  too strongly pulls the operator away from accurate data.
+- **Non-periodic fields with Fourier derivatives.** Spectral differentiation of a field with a jump at the domain's ends
+  produces large spurious residuals near the ends.
+- **Fine-tuning cost.** Instance-wise fine-tuning is an optimisation per instance and gives up the single
+  <NoteLink to="multilayer-perceptron">forward pass</NoteLink> that made the operator fast.

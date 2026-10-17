@@ -1,0 +1,180 @@
+---
+title: 'Meta-interpretive learning'
+kind: technique
+summary: 'Meta-interpretive learning proves the examples with a meta-interpreter that may instantiate second-order templates (metarules) such as $P(x,y) \leftarrow Q(x,z), R(z,y)$; the instantiations form the learnt program. Metagol learns recursive programs this way.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['Metagol', 'metarules', 'metarule', 'metasubstitution']
+requires: [inductive-logic-programming, unification-and-resolution]
+related: [predicate-invention, learning-from-failures, inverse-entailment-and-progol, foil, program-synthesis-from-examples]
+references: [muggleton2015mil, muggleton2014mil, cropper2020metarules, cropper2022ilp30, cropper2021popper]
+status: draft
+updated: 2026-10-17
+---
+
+import { MetagolTrace } from './MetagolTrace'
+
+<Definition>
+A **metarule** is a second-order <NoteLink to="horn-clauses-and-logic-programs">Horn clause</NoteLink> whose predicate
+symbols are variables, such as the **chain** metarule $P(A, B) \leftarrow Q(A, C) \land R(C, B)$, with predicate
+variables $P, Q, R$ and first-order variables $A, B, C$. **Meta-interpretive learning** proves the positive examples
+with a **meta-interpreter**, a Prolog program that executes other programs. When a goal cannot be proved from the
+background knowledge or the program built so far, the meta-interpreter may instantiate a metarule, binding its predicate
+variables to predicate symbols. Each instantiation, a **metasubstitution**, is a clause of the learnt program. A program
+that proves every positive example and no negative one is a solution <Cite id="muggleton2014mil" />
+<Cite id="muggleton2015mil" />. **Metagol** is the standard implementation.
+</Definition>
+
+## Problem
+
+Clause-by-clause learners such as <NoteLink to="foil">FOIL</NoteLink> and
+<NoteLink to="inverse-entailment-and-progol">Progol</NoteLink> score each clause on its own. A recursive definition of
+ancestor needs two clauses that only work together: the recursive clause covers no example until the base case exists,
+and the base case alone covers only the parent pairs. A definition of great-grandparent in clauses of two body literals
+needs a helper predicate, grandparent, that the background does not provide. Neither the helper nor its use scores
+well alone, so a greedy clause search does not find them.
+
+Meta-interpretive learning searches for whole programs. It treats learning as proving: a program is a solution when the
+examples follow from it, so the learner runs a proof of the examples and lets the proof build the program it needs. The
+metarules fix the shapes clauses may take, which is a strong and explicit language bias. Within that bias, recursion
+and new predicates come for free: a metarule's body may call the target itself, or a predicate that does not exist yet
+and is defined by another metarule instance.
+
+## Mechanism
+
+### Metarules
+
+Most work uses a small set of dyadic metarules, over predicates with two arguments <Cite id="cropper2020metarules" />.
+
+| Name | Metarule |
+| --- | --- |
+| ident | $P(A, B) \leftarrow Q(A, B)$ |
+| inverse | $P(A, B) \leftarrow Q(B, A)$ |
+| precon | $P(A, B) \leftarrow Q(A) \land R(A, B)$ |
+| postcon | $P(A, B) \leftarrow Q(A, B) \land R(B)$ |
+| chain | $P(A, B) \leftarrow Q(A, C) \land R(C, B)$ |
+| tailrec | $P(A, B) \leftarrow Q(A, C) \land P(C, B)$ |
+
+Chain with $R = P$ is tailrec, so ident and chain together can express the recursive ancestor definition. The choice
+of metarules is the choice of hypothesis language. Cropper and Tourret show that some sets can be reduced to smaller
+ones that derive the same clauses <Cite id="cropper2020metarules" />.
+
+### The meta-interpreter
+
+The learner proves a list of goals while threading a program $\Pi$, a list of metasubstitutions:
+
+1. **No goals left.** Succeed with $\Pi$.
+2. **Background goal.** If the first goal's predicate is in the background knowledge, prove it from $B$ and continue
+   with the rest.
+3. **Reuse a clause.** Otherwise, take a metasubstitution of $\Pi$ whose head predicate is the goal's predicate, unify
+   the goal with the head of its metarule, and prove the metarule's body followed by the rest.
+4. **New clause.** If $\Pi$ has fewer than $n$ clauses, take a metarule, bind $P$ to the goal's predicate, add the new
+   metasubstitution to $\Pi$, and prove its body followed by the rest. The body's predicate variables are bound while
+   the body is proved: to a background predicate, to the target, or to a new **invented** predicate whose definition is
+   itself a new clause.
+
+The positives are proved together, so a clause added for one example is reused for the next. Backtracking enumerates
+alternative programs. When every positive is proved, the program is checked against the negatives with no new clauses
+allowed; a program that proves a negative is rejected and the search backtracks. The whole search runs under
+**iterative deepening** on $n$: programs of 1 clause first, then 2, and so on. The first solution found is therefore a
+program with the fewest clauses <Cite id="muggleton2015mil" />.
+
+### Termination
+
+A metarule such as tailrec can recurse forever when the proof chooses badly. Metagol imposes an order on predicate
+symbols and allows a clause to call only predicates lower in the order, except through a recursive metarule whose
+recursion must decrease its first argument in an order on constants <Cite id="muggleton2015mil" />. Implementations also
+bound the proof depth. The figure uses a depth bound and forbids left recursion, a clause whose first body literal calls
+its own head.
+
+### Size of the hypothesis space
+
+A metarule with $j$ body literals has $j + 1$ predicate variables. With $p$ predicate symbols available and $m$
+metarules, there are at most $m \cdot p^{j + 1}$ distinct clauses, and so at most $\paren{m p^{j + 1}}^n$ programs of
+$n$ clauses. The space is exponential in the program size $n$, which is why iterative deepening, starting from small
+programs, matters, and why every extra metarule or predicate symbol has a cost <Cite id="cropper2020metarules" />.
+
+## Worked example
+
+The background holds the six parent facts of the family: Ann is the parent of Bob and Cid, Bob of Dee and Eve, Cid of
+Fay, Eve of Gus. The metarules are ident and chain. The target is ancestor, with positives (ann, bob), (ann, dee),
+(ann, gus) and (cid, fay), and negatives (bob, ann), (dee, bob) and (cid, gus).
+
+1. **One clause, ident.** Proving $\text{ancestor}(\text{ann}, \text{bob})$ adds $\text{ancestor}(A, B) \leftarrow
+   Q(A, B)$ and binds $Q$ to parent, because $\text{parent}(\text{ann}, \text{bob})$ is a fact. Reusing the clause for
+   $\text{ancestor}(\text{ann}, \text{dee})$ fails: Dee is not Ann's child. No other clause may be added.
+2. **One clause, chain.** $\text{ancestor}(A, B) \leftarrow Q(A, C) \land R(C, B)$ binds $Q$ to parent with
+   $C = \text{bob}$, and then needs $R(\text{bob}, \text{bob})$. Parent fails. Binding $R$ to ancestor makes the clause
+   recursive, but with a single clause there is no base case, and every branch ends at a person with no child. The
+   one-clause search takes 29 events and finds no program.
+3. **Two clauses.** The ident clause with parent again proves $\text{ancestor}(\text{ann}, \text{bob})$. For
+   $\text{ancestor}(\text{ann}, \text{dee})$ the learner first adds a second ident clause. Its only possible binding,
+   parent, would duplicate the first clause, so it is dropped, and a chain clause is tried.
+4. **Chain with parent and parent.** $\text{parent}(\text{ann}, \text{bob})$ and $\text{parent}(\text{bob},
+   \text{dee})$ prove $\text{ancestor}(\text{ann}, \text{dee})$. Reusing the clauses for
+   $\text{ancestor}(\text{ann}, \text{gus})$ fails: Gus is three generations below Ann.
+5. **Chain with parent and ancestor.** Backtracking rebinds $R$ to ancestor:
+   $\text{ancestor}(A, B) \leftarrow \text{parent}(A, C) \land \text{ancestor}(C, B)$. Now
+   $\text{ancestor}(\text{ann}, \text{dee})$ follows from $\text{parent}(\text{ann}, \text{bob})$ and the base clause
+   for (bob, dee), $\text{ancestor}(\text{ann}, \text{gus})$ from the chain Ann, Bob, Eve, Gus, and
+   $\text{ancestor}(\text{cid}, \text{fay})$ from the base clause.
+6. **Negatives.** Neither (bob, ann), (dee, bob) nor (cid, gus) follows from the two clauses, so the program is
+   accepted at event 68:
+
+```prolog
+ancestor(A, B) :- parent(A, B).
+ancestor(A, B) :- parent(A, C), ancestor(C, B).
+```
+
+The great-grandparent task shows invention. The only positive is (ann, gus), and the negatives are (ann, eve), (bob,
+gus) and (ann, dee). No single clause with two body literals over parent works. With two clauses, the learner first
+tries the recursive program $\text{greatgrandparent}(A, B) \leftarrow \text{parent}(A, C) \land
+\text{greatgrandparent}(C, B)$ with the base case $\text{greatgrandparent}(A, B) \leftarrow \text{parent}(A, B)$. It
+proves the positive, and it also proves the negative (ann, eve), so it is rejected. So is the variant with a
+grandparent-shaped base case, which proves (ann, eve) through the base case alone. The accepted program invents a
+predicate:
+
+```prolog
+greatgrandparent(A, B) :- parent(A, C), inv1(C, B).
+inv1(A, B) :- parent(A, C), parent(C, B).
+```
+
+$\text{inv1}$ is grandparent, a predicate the learner was never given (<NoteLink to="predicate-invention">predicate
+invention</NoteLink>).
+
+<MetagolTrace />
+
+## Cost
+
+- **Exponential in program size.** The number of programs grows as $(m p^{j + 1})^n$, so programs beyond about 5 to
+  10 clauses are out of reach for plain Metagol. Iterative deepening repeats the work of smaller bounds at each level,
+  a constant-factor overhead.
+- **Each proof is a search.** Binding an open predicate tries every background predicate, the target and the invented
+  ones, and each choice runs a proof. Background predicates with many facts multiply the branching.
+- **Few examples.** The examples are proved, not counted, so a handful of examples is typical. Recursive programs are
+  often learnt from one to five positives.
+
+## Trade-offs
+
+- **Whole programs against single clauses.** Proving the examples together finds mutually dependent clauses, recursion
+  and invented predicates. Clause-by-clause learners scale to more examples and tolerate noise better.
+- **Metarules as bias.** A user who knows the shape of the solution writes few metarules and gets a fast search; the
+  wrong metarules make the target inexpressible. Choosing them is the main design decision
+  <Cite id="cropper2020metarules" />.
+- **Exact consistency.** Metagol requires every positive to be proved and no negative. One mislabelled example makes
+  the target unlearnable, and Metagol returns a larger program that fits the error, or none.
+- **Successors.** <NoteLink to="learning-from-failures">Popper</NoteLink> drops metarules for a declaration of
+  predicates and size bounds, and turns each failed program into constraints that prune whole regions of the program
+  space <Cite id="cropper2021popper" />.
+
+## Pitfalls
+
+- **Too many metarules.** Each metarule adds $p^{j+1}$ clauses to the choices at every level of the search, and the
+  number of programs grows as the $n$-th power of the number of clauses. Adding precon, postcon and inverse to ident
+  and chain multiplies the search for a 3-clause program many times over on the same task.
+- **Non-terminating proofs.** Without ordering constraints or a depth bound, a recursive metarule can call itself
+  forever. Left-recursive clauses must be excluded.
+- **Uninformative negatives.** Negatives that no plausible program proves do not constrain the search. The
+  great-grandparent negatives were chosen to reject the recursive programs: without (ann, eve) the learner would accept
+  the recursive ancestor-like program, which is wrong.
+- **Invented predicates without meaning.** The learner names them inv1, inv2. An invented predicate can be correct
+  for the training examples without matching any concept a person would name.

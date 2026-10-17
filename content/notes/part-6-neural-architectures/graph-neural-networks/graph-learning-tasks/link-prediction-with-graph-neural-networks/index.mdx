@@ -1,0 +1,193 @@
+---
+title: 'Link prediction with graph neural networks'
+kind: technique
+summary: 'A link predictor scores node pairs with a decoder on endpoint embeddings, a dot product or an MLP, trained against sampled non-edges. The graph autoencoder (GAE, VGAE) is the basic form; SEAL and neural common-neighbour models add pair structure node embeddings miss.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['link prediction', 'graph autoencoder', 'VGAE', 'SEAL', 'negative sampling for edges']
+requires: [graph-convolutional-network]
+related:
+  [
+    knowledge-graph-embeddings,
+    graph-collaborative-filtering,
+    graphsage,
+    graph-splits-and-sampling,
+    random-walk-embeddings,
+    sampled-softmax-and-negative-sampling,
+    receiver-operating-characteristic-curve-and-area,
+  ]
+references:
+  [
+    kipf2016vgae,
+    zhang2018seal,
+    zhang2021labeling,
+    wang2024ncn,
+    li2023linkpitfalls,
+    libennowell2007,
+    hu2020ogb,
+    hamilton2020grl,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { GraphAutoencoderRun } from './GraphAutoencoderRun'
+
+<Definition>
+**Link prediction** scores unobserved node pairs $(u, v)$ of a graph by how likely an edge between them is. A
+<Gloss name="gnn">graph neural network</Gloss> encoder maps every node to an embedding $\zvec_v \in \reals^k$ by message
+passing over the observed edges, and a decoder turns the two endpoint embeddings into a score, such as
+$\zvec_u^\tr \zvec_v$ or an <Gloss name="mlp" /> of $\zvec_u \odot \zvec_v$. Training treats observed edges as positives
+and sampled non-edges as negatives under a <Gloss name="bce">binary cross-entropy</Gloss> loss. Pair-aware models (SEAL,
+neural common neighbours) also feed the structure around the pair, which per-node embeddings cannot represent.
+</Definition>
+
+## Problem
+
+Many tasks ask which edges are missing or will appear: which products a user will buy, which proteins interact, which
+papers a new paper will cite, which drug binds which target. The observed graph is a sample of the true one, and the
+task is to rank the absent pairs. <NoteLink to="graphs-as-neural-network-inputs">Node classification</NoteLink> asks a
+question about one node; link prediction asks a question about two, and the answer depends on how they sit relative to
+each other, not only on what each is.
+
+Classical heuristics score a pair from its neighbourhoods <Cite id="libennowell2007" />. The common-neighbour count
+$\abs{\Ncal(u) \cap \Ncal(v)}$ says that two people with many friends in common are likely to be friends. The
+Adamic–Adar index $\sum_{w \in \Ncal(u) \cap \Ncal(v)} 1 / \log \deg(w)$ counts shared neighbours with weight falling
+in their degree, since sharing a hub says less than sharing a rarely connected node. These heuristics need no training
+and remain strong baselines. They use structure only, cannot use node features, and each encodes one fixed assumption
+about why edges form. A learned model can use features and learn which structural patterns predict edges in a given
+graph.
+
+## Mechanism
+
+**Encoder.** Any message passing network maps the node features $\Xmat \in \reals^{n \times f}$ and the observed
+adjacency $\Amat$ to embeddings $\Zmat \in \reals^{n \times k}$. The graph
+<NoteLink to="autoencoder">autoencoder</NoteLink> (<Gloss name="gae" />) of Kipf and Welling uses two
+<NoteLink to="graph-convolutional-network">graph convolution</NoteLink> layers <Cite id="kipf2016vgae" />:
+
+$$
+\Zmat = \hat\Amat \,\mathrm{ReLU}\paren{\hat\Amat \Xmat \Wmat_1} \Wmat_2,
+$$
+
+with $\hat\Amat$ the normalised adjacency with self-loops of the observed graph.
+
+**Decoder.** The inner product $s_{uv} = \zvec_u^\tr \zvec_v$ gives the probability $\sigma(s_{uv})$ of an edge, with
+$\sigma$ the logistic function. The decoder reconstructs the whole adjacency as $\sigma(\Zmat\Zmat^\tr)$, which is the
+"autoencoder" in the name. An MLP of $\zvec_u \odot \zvec_v$, with $\odot$ the elementwise product, is the usual
+alternative. It stays symmetric in $u$ and $v$ and can express relations an inner product cannot, such as "a pair is
+likely when both nodes are hubs".
+
+**Training with negatives.** A sparse graph has $O(n)$ edges among $O(n^2)$ pairs, so training on every non-edge
+would be dominated by negatives and cost quadratic time. Each step instead draws a set $\Ecal^-$ of non-edges, often one
+per positive edge, and minimises
+
+$$
+\ell = -\frac{1}{\abs{\Ecal^+} + \abs{\Ecal^-}}
+\paren{\sum_{(u, v) \in \Ecal^+} \log \sigma(s_{uv}) + \sum_{(u, v) \in \Ecal^-} \log\paren{1 - \sigma(s_{uv})}}.
+$$
+
+This is the graph form of <NoteLink to="sampled-softmax-and-negative-sampling">negative sampling</NoteLink>. The
+variational form (VGAE) makes each $\zvec_v$ a Gaussian with mean and log-variance from two encoder heads and adds the
+KL divergence to a standard normal prior, as in a <NoteLink to="variational-autoencoder">variational
+autoencoder</NoteLink> <Cite id="kipf2016vgae" />.
+
+**Evaluation split.** The edges to be predicted must be absent from the graph the encoder sees. A split holds out a
+share of the edges as positive test pairs, draws as many non-edges as negative test pairs, and trains on the graph of
+the remaining edges. If a test edge stays in the message passing graph, its two ends aggregate each other's features
+and the task becomes trivial (<NoteLink to="graph-splits-and-sampling">splitting and sampling graphs</NoteLink>).
+Scores are compared by the <NoteLink to="receiver-operating-characteristic-curve-and-area">AUC</NoteLink>, the
+probability that a random positive pair outscores a random negative one, or by ranking metrics: Hits@$K$, the share of
+positives ranked above the $K$-th best negative, and the <Gloss name="mrr">mean reciprocal rank</Gloss>.
+
+### What node embeddings cannot see
+
+A decoder of two <NoteLink to="node-embeddings">node embeddings</NoteLink> gives the same score to any two pairs whose
+endpoints have the same embeddings. Node embeddings from message passing are equal for nodes that are structurally
+interchangeable, so such a model can confuse a pair of adjacent nodes with a pair of distant ones. Take the path
+1–2–3–4–5 with the same feature on every node. The reflection $1 \leftrightarrow 5$, $2 \leftrightarrow 4$ maps the
+graph onto itself, so every equivariant encoder gives $\zvec_2 = \zvec_4$. Any decoder then scores the pair $(1, 2)$,
+one hop apart, the same as the pair $(1, 4)$, three hops apart. Zhang et al. prove the general form: aggregating
+independently computed node representations cannot capture the dependence between the nodes of a set
+<Cite id="zhang2021labeling" />.
+
+**SEAL** extracts the $h$-hop subgraph enclosing each target pair, labels every node by its distances to the two
+targets, and classifies the subgraph with a GNN <Cite id="zhang2018seal" />. The labels make $(1, 2)$ and $(1, 4)$ look
+different: in the first subgraph a node at distance 0 from one target sits at distance 1 from the other, in the second
+at distance 3. Zhang et al. call any such target-aware labelling the **labeling trick** and show it lets a
+sufficiently expressive GNN learn the most expressive pair representations <Cite id="zhang2021labeling" />. SEAL's
+weakness is cost: one subgraph and one GNN pass per scored pair. **Neural common neighbours** (NCN) keep a single
+encoder pass and add the sum of the embeddings of the pair's common neighbours to the decoder's input, so the
+common-neighbour heuristic becomes a learned feature <Cite id="wang2024ncn" />.
+
+## Worked example
+
+**One loss term of each kind.** Let four nodes have embeddings $\zvec_1 = (1, 0)$, $\zvec_2 = (0.8, 0.6)$,
+$\zvec_3 = (-0.6, 0.8)$ and $\zvec_4 = (0, -1)$, with $(1, 2)$ an edge and $(1, 3)$ a sampled non-edge.
+
+- Positive pair: $s_{12} = 1 \cdot 0.8 + 0 \cdot 0.6 = 0.8$, $\sigma(0.8) = 0.690$, loss $-\log 0.690 = 0.371$.
+- Negative pair: $s_{13} = -0.6$, $\sigma(-0.6) = 0.354$, loss $-\log(1 - 0.354) = 0.437$.
+- The mean loss over the two pairs is $0.404$. Its gradient raises $s_{12}$ and lowers $s_{13}$, pulling $\zvec_2$
+  towards $\zvec_1$ and pushing $\zvec_3$ away.
+
+**AUC by counting.** Three held-out edges score $(2.1, 0.9, 0.4)$ and three non-edges score $(1.2, 0.3, -0.5)$. Of the
+nine positive–negative pairs, $2.1$ beats all three negatives, $0.9$ beats two and $0.4$ beats two, so
+$\text{AUC} = 7/9 = 0.78$.
+
+**Heuristics.** In the triangle 1–2–3 with a tail 3–4, the non-edge $(1, 4)$ has one common neighbour, node 3, of degree
+3, so its common-neighbour score is 1 and its Adamic–Adar score is $1/\ln 3 = 0.91$. The non-edge $(2, 4)$ has the same
+scores, and so it should: nodes 1 and 2 are interchangeable in this graph.
+
+## Training on a planted-partition graph
+
+The figure trains a GAE on a three-community <Gloss name="sbm">stochastic block model</Gloss>, holds out 15% of the
+edges, and compares the held-out AUC with the two heuristics.
+
+<GraphAutoencoderRun />
+
+With one-hot node identities the encoder learns an embedding per node and passes both heuristics within 200 steps.
+With the same feature on every node, nodes differ only in degree, so their embeddings nearly coincide, the loss stays
+near $\log 2$, and the AUC stays near 0.5. The heuristics work here because communities are dense: two nodes in the
+same community share neighbours far more often than two nodes in different communities. Held-out pairs with no common
+neighbour all tie at a score of 0, which caps the heuristics' AUC on a graph this sparse.
+
+## Cost
+
+- **Encoder:** one forward pass over the graph, $O(\abs{\Ecal} k + n k^2)$ per layer, shared by every scored pair.
+- **Training:** each step scores $\abs{\Ecal^+} + \abs{\Ecal^-}$ pairs at $O(k)$ each.
+- **Inference:** scoring all pairs costs $O(n^2 k)$. Recommenders instead retrieve the top candidates for a node by
+  <Gloss name="ann-search">approximate nearest-neighbour search</Gloss> over the embeddings, which an inner-product
+  decoder allows.
+- **SEAL:** one subgraph extraction and one GNN pass per pair, so inference over many candidates is orders of magnitude
+  slower than an embedding lookup.
+
+## Trade-offs
+
+| model | uses features | pair structure | cost per scored pair |
+| --- | --- | --- | --- |
+| common neighbours, Adamic–Adar | no | fixed heuristic | neighbourhood intersection |
+| GAE with inner-product decoder | yes | none beyond the embeddings | $O(k)$ |
+| GAE with MLP decoder | yes | none beyond the embeddings | $O(k^2)$ |
+| NCN | yes | learned common-neighbour feature | $O(k \cdot \abs{\Ncal(u) \cap \Ncal(v)})$ |
+| SEAL | yes | full labelled subgraph | one GNN pass on a subgraph |
+
+Node-embedding decoders suit retrieval over millions of candidates. Pair-aware models lead on benchmarks where local
+structure decides, such as the collaboration and protein-association graphs of the
+<NoteLink to="graph-learning-benchmarks">Open Graph Benchmark</NoteLink> <Cite id="hu2020ogb" />, at higher cost per
+pair. <NoteLink to="knowledge-graph-embeddings">Knowledge graph embeddings</NoteLink> are the multi-relational case,
+with one learned relation operator per edge type, and <NoteLink to="graph-collaborative-filtering">graph collaborative
+filtering</NoteLink> is the case of a bipartite user–item graph.
+
+## Pitfalls
+
+- **Test edges in the message passing graph.** The encoder then sees the answer. Remove held-out edges before
+  computing any embedding, heuristic or feature.
+- **Easy negatives.** Uniformly random non-edges are mostly between distant nodes and are trivial to reject. Li et al.
+  found that results under random negatives overstate how models rank realistic candidates, that several baselines
+  had been under-tuned, and that hard negatives chosen by heuristics change the ranking of methods
+  <Cite id="li2023linkpitfalls" />.
+- **AUC on a balanced test set.** A real candidate set holds far more non-edges than edges. AUC on one negative per
+  positive hides precision problems that Hits@$K$ or mean reciprocal rank expose.
+- **Symmetric nodes.** With uninformative features, interchangeable nodes get equal embeddings, and the decoder cannot
+  separate pairs that differ only in distance. Distinctive features, <NoteLink to="positional-encoding">positional
+  encodings</NoteLink> or a labeling trick are needed.
+- **Disconnected nodes after the split.** Holding out all edges of a low-degree node leaves it with no messages. Splits
+  that keep a spanning tree of every component in the training graph avoid it.

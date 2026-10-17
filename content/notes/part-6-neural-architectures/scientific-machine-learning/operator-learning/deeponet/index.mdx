@@ -1,0 +1,133 @@
+---
+title: 'DeepONet'
+kind: concept
+summary: 'DeepONet approximates an operator by $G(u)(y)\approx\sum_{k=1}^p b_k(u)\,t_k(y)$: a branch network reads $u$ at $m$ fixed sensors, a trunk network reads the query point $y$, and their $p$ outputs are combined by a dot product.'
+tags: [scientific-machine-learning, deep-learning, worked-example]
+aliases: ['deep operator network', 'branch network', 'trunk network', 'unstacked DeepONet', 'physics-informed DeepONet']
+requires: [operator-learning]
+related: [fourier-neural-operator, universal-approximation-theorem, physics-informed-neural-operator, principal-component-analysis, gaussian-process, multilayer-perceptron, quasi-newton-methods]
+references: [lu2021deeponet, chen1995operators, wang2021pideeponet, lu2022fairoperators, kovachki2023neuraloperator]
+status: draft
+updated: 2026-10-17
+---
+
+import { DeepOnetAntiderivative } from './DeepOnetAntiderivative'
+import { DeepOnetDiagram } from './DeepOnetDiagram'
+
+<Definition>
+A **deep operator network** (<Gloss name="deeponet" />) approximates an operator $G$, which maps an input function $u$
+to an output function $G(u)$, by
+
+$$
+G(u)(y) \approx \sum_{k=1}^{p} b_k\paren{u(x_1), \dots, u(x_m)}\, t_k(y) + b_0 .
+$$
+
+The **branch network** $\bvec : \reals^m \to \reals^p$ reads the input function at $m$ fixed **sensors**
+$x_1, \dots, x_m$. The **trunk network** $\tvec : \reals^d \to \reals^p$ reads a query point $y$ of the output's
+$d$-dimensional domain. The integer $p$ is the **latent width** and $b_0$ is a learned scalar bias. Both networks are
+trained together on triples $(u, y, G(u)(y))$ by least squares <Cite id="lu2021deeponet" />.
+</Definition>
+
+## Intuition
+
+Many outputs of a physical model are close to combinations of a few shapes. The temperature along a rod a short time
+after an arbitrary start is close to a sum of a few smooth profiles; only the weights of the profiles change from one
+start to the next. DeepONet builds this into the network. The trunk network learns the shapes $t_1(y), \dots, t_p(y)$,
+which are shared by every output. The branch network learns, for each input function, how much of each shape to use.
+
+The split also matches how the two arguments of $G(u)(y)$ behave. The input $u$ is a whole function, presented as a
+vector of $m$ samples. The query point $y$ is a coordinate that can be any point of the domain. The trunk is a
+coordinate network, so the output is a function that can be evaluated anywhere, not a vector on a grid.
+
+<DeepOnetDiagram />
+
+## Details
+
+**Where the form comes from.** Chen and Chen proved that every continuous operator on a compact set of functions can be
+approximated to any accuracy by a sum $\sum_k b_k(u)\, t_k(y)$ with one-hidden-layer networks $b_k$ of $m$ sensor
+values and single neurons $t_k(y) = \sigma(\wvec_k^\tr y + \zeta_k)$ <Cite id="chen1995operators" />. DeepONet keeps
+the sum and replaces both parts with deep networks <Cite id="lu2021deeponet" />. The **unstacked** DeepONet uses one
+branch network with $p$ outputs, which Lu et al. found to generalise better than $p$ separate ("stacked") branch
+networks and to need fewer parameters. The trunk network applies the activation in its last layer as well, so each
+$t_k$ is a nonlinear feature of $y$.
+
+**A low-rank output.** For a fixed trunk, every prediction lies in the $p$-dimensional space spanned by
+$t_1, \dots, t_p$. DeepONet is a learned basis expansion: the trunk learns a basis of the output space and the branch
+learns a nonlinear encoder of the input onto the coefficients. The best possible $p$-dimensional linear space for the
+outputs, in <Gloss name="mse">mean squared error</Gloss>, is spanned by the first $p$ principal components of the output
+functions (<NoteLink to="principal-component-analysis">principal component analysis</NoteLink> in function space). If
+those components carry most of the variance, a small $p$ suffices; if the outputs have no low-dimensional linear
+structure, as for transport problems with moving sharp fronts, $p$ must be large.
+
+**Cost.** Training data usually share one set of query points $y_1, \dots, y_Q$ for all $N$ input functions. The branch
+network then runs once per function, giving an $N \times p$ matrix $\Bmat$, and the trunk once per query point, giving a
+$Q \times p$ matrix $\Tmat$. All $NQ$ predictions are $\Bmat\Tmat^\tr + b_0$, one matrix product. Queries can also
+differ between functions, which is how DeepONet uses scattered measurements.
+
+**Sensors.** The sensors are fixed: every input function must be observed at the same $m$ points. The input must be
+resolved by them. For the <NoteLink to="operator-learning">solution operators</NoteLink> of <Gloss name="ode">ordinary
+differential equations</Gloss> driven by $u$, Lu et al. bound the error of reading $u$ only at $m$ evenly spaced sensors
+by the error of its piecewise-linear interpolant, which for <NoteLink to="gaussian-process">Gaussian-process</NoteLink>
+inputs with an <Gloss name="rbf-kernel" /> of length scale $\ell$ scales as $1/(m^2\ell^2)$
+<Cite id="lu2021deeponet" />. Inputs observed elsewhere have to be interpolated to the sensors first.
+
+**Training.** The loss is the mean squared error over the triples. Lu et al. learned the antiderivative of
+Gaussian-process inputs with length scale 0.2 from 10,000 triples, with $m = 100$ sensors, a branch network of depth 2
+and width 40, and a trunk network of depth 3 and width 40 <Cite id="lu2021deeponet" />. A
+<NoteLink to="quasi-newton-methods">quasi-Newton</NoteLink> phase after <NoteLink to="adam">Adam</NoteLink>, as for
+physics-informed networks, lowers the error further on small problems.
+
+**Physics-informed DeepONet.** The trunk is a coordinate network, so the output $\sum_k b_k(u)\, t_k(y)$ can be
+differentiated in $y$ by <NoteLink to="automatic-differentiation">automatic differentiation</NoteLink>. Wang, Wang and
+Perdikaris add the <Gloss name="pde" /> residual of the output at
+<NoteLink to="physics-informed-neural-networks">collocation points</NoteLink> to the loss, which reduces or removes the
+need for solved pairs <Cite id="wang2021pideeponet" />. The same idea for the <Gloss name="fno">Fourier neural
+operator</Gloss> is the <NoteLink to="physics-informed-neural-operator">physics-informed neural operator</NoteLink>.
+
+<DeepOnetAntiderivative />
+
+The figure trains a small DeepONet, with <NoteLink to="multilayer-perceptron">hidden layers</NoteLink> of 20 units, on
+100 functions with 25 sensors. With the defaults, $p = 10$, 100 Adam steps and 400 L-BFGS steps, the relative test error
+is 4.9%. The latent width controls the error floor: with the same settings, $p = 1$ stays at 29%, $p = 2$ at 13%, and
+$p = 5$ reaches 5.2%, close to the 4.4% of $p = 20$ and 4.5% of $p = 40$. The antiderivatives of functions with length
+scale 0.2 lie close to a five-dimensional space, so more basis functions help little once optimisation and data limit
+the error.
+
+## Worked example
+
+Learn the antiderivative operator $G(u)(y) = \int_0^y u(s)\, ds$ for linear inputs $u(s) = \alpha + \beta s$, with
+$m = 3$ sensors at $s = 0, 0.5, 1$ and $p = 2$.
+
+1. **The output space.** $G(u)(y) = \alpha y + \beta y^2/2$. Every output is a combination of the two functions $y$ and
+   $y^2/2$, so a trunk with $t_1(y) = y$ and $t_2(y) = y^2/2$ spans all of them, and $b_0 = 0$.
+2. **The branch.** The coefficients are $\alpha = u(0)$ and $\beta = u(1) - u(0)$. A linear branch network
+   $\bvec(u) = \paren{u(x_1),\ u(x_3) - u(x_1)}$ computes them from the sensor values; the middle sensor is not needed.
+3. **One input.** For $u(s) = 1 + 2s$ the sensor values are $(1, 2, 3)$ and $\bvec = (1, 2)$. At $y = 0.5$ the
+   prediction is $1 \times 0.5 + 2 \times 0.125 = 0.75$. The exact value is $\int_0^{0.5}(1 + 2s)\, ds = 0.5 + 0.25 =
+   0.75$.
+4. **An input outside the family.** For $u(s) = s^2$ the sensors read $(0, 0.25, 1)$ and $\bvec = (0, 1)$, so the
+   prediction at $y = 1$ is $t_2(1) = 0.5$. The exact value is $1/3$. The output $y^3/3$ is not in the span of $y$ and
+   $y^2/2$, and no branch network can fix that.
+5. **Adding a basis function.** For quadratic inputs $u(s) = \alpha + \beta s + \gamma s^2$, the three sensors
+   determine the coefficients: $\gamma = 2\paren{u(0) - 2u(0.5) + u(1)}$, $\beta = u(1) - u(0) - \gamma$ and
+   $\alpha = u(0)$. With $p = 3$, $t_3(y) = y^3/3$ and the branch $\bvec(u) = (\alpha, \beta, \gamma)$, the input
+   $u(s) = s^2$ gives $\gamma = 2(0 - 0.5 + 1) = 1$, $\beta = 1 - 0 - 1 = 0$ and $\alpha = 0$, so the prediction at
+   $y = 1$ is $t_3(1) = 1/3$, the exact value. A trained DeepONet finds such bases and encoders from data instead of by
+   construction.
+
+## Assumptions
+
+- Every input function is observed at the same $m$ sensors, which resolve its variation.
+- The outputs are close to a $p$-dimensional linear space, with $p$ small enough to learn.
+- The training inputs cover the distribution of test inputs.
+
+## Pitfalls
+
+- **Too few basis functions.** With $p$ below the effective dimension of the outputs, the error stops falling however
+  long the networks train.
+- **Moving features.** Solutions with fronts or shocks at input-dependent positions have no low-dimensional linear
+  structure, and a DeepONet needs a large $p$ to represent them.
+- **Changed sensors.** A trained branch network cannot read inputs sampled at other points; changing the grid of the
+  input requires interpolation or retraining.
+- **Unscaled coordinates.** A trunk network trains poorly when $y$ is far from $[-1, 1]$; queries are mapped there
+  affinely, as for any coordinate network.

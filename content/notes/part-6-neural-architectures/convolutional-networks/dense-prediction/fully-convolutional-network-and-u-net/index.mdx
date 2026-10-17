@@ -1,0 +1,182 @@
+---
+title: 'Fully convolutional network and U-Net'
+kind: concept
+summary: 'A fully convolutional network replaces dense layers by $1\times1$ convolutions, so it accepts any image size and outputs a score map. U-Net adds an expanding path that upsamples and concatenates the matching encoder features, recovering full resolution.'
+tags: [convolutional-networks, computer-vision, deep-learning, worked-example]
+aliases: ['FCN', 'U-Net', 'encoder-decoder network', 'skip concatenation', 'contracting and expanding path', 'convolutionalisation']
+requires: [transposed-convolution, one-by-one-convolution]
+related: [semantic-segmentation, latent-diffusion, segmentation-decoders, feature-pyramid-network, residual-network]
+references: [long2015, ronneberger2015, isensee2021, badrinarayanan2017, ho2020, rombach2022, cheng2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { OutputStrideBoundary } from './OutputStrideBoundary'
+import { UNetShapes } from './UNetShapes'
+
+<Definition>
+A fully convolutional network (FCN) is a network built only from convolutions, pooling and pointwise nonlinearities,
+with every fully connected layer of a classifier rewritten as a convolution. It maps an image of any size $H \times W$
+to a score map of $K$ class scores at each of $H/s \times W/s$ positions, where $s$ is the output stride. U-Net is an
+FCN with a contracting path (encoder) that halves the resolution at each stage and an expanding path (decoder) that
+doubles it again, joined at every resolution by a <NoteLink to="residual-network">skip connection</NoteLink> that
+concatenates the encoder's <NoteLink to="convolutional-layer">feature map</NoteLink> with the decoder's upsampled one.
+Its output has a class score for every pixel.
+</Definition>
+
+## Intuition
+
+An image classifier ends with layers that discard position: a <NoteLink to="graph-pooling-and-readout">global
+pooling</NoteLink> or a flattening, then fully connected layers that output one vector of class scores per image. Dense
+prediction needs one score vector per pixel. The convolutional part of the classifier already computes a feature vector
+at every position of its last feature map; only the head throws the grid away.
+
+A fully connected layer applied to every position of a feature map is a <NoteLink to="one-by-one-convolution" />.
+Rewriting the head this way keeps the grid: the network now slides the classifier over the image and reports a score at
+every place. The scores are coarse, because the backbone has downsampled by its output stride $s$, often 32.
+
+The coarse map knows what is present but not exactly where. Recovering the boundary needs the fine feature maps of the
+early layers, which know where edges are but not what they belong to. U-Net brings the two together. Its decoder
+upsamples step by step, and at each resolution it receives the encoder's map of the same size through a skip
+connection. The decoder supplies context from the bottom of the U; the skip supplies location.
+
+## Details
+
+### Convolutionalisation
+
+A fully connected layer that reads a $k \times k \times C$ feature map and outputs $C'$ numbers has the same weights as
+a convolution with a $k \times k$ kernel, $C$ input and $C'$ output channels: both compute $C'$ weighted sums over the
+same $k^2 C$ inputs. On a $k \times k$ input the two give identical outputs. On a larger input the convolution keeps
+going and outputs a grid. Long, Shelhamer and Darrell converted VGG-16 this way: the first fully connected layer, which
+reads the $7 \times 7 \times 512$ output of the last pooling layer, becomes a $7 \times 7$ convolution, and the later
+fully connected layers become $1 \times 1$ convolutions <Cite id="long2015" />. The weights are reused unchanged, so
+ImageNet pretraining transfers to dense prediction.
+
+The output stride $s$ of a network is the ratio of input size to output size, the product of all strides. A score map at
+stride $s$ cannot place a boundary more precisely than about $s/2$ pixels. Worse, a structure narrower than $s$ pixels
+can vanish: each coarse cell covers an $s \times s$ block, and a thin pole that fills a quarter of two neighbouring
+blocks wins neither.
+
+<OutputStrideBoundary />
+
+### Upsampling and skip fusion in FCN
+
+The score map is brought back to the input size by a <NoteLink to="transposed-convolution" /> with stride $s$, whose
+kernel is initialised to bilinear interpolation and may then be learned <Cite id="long2015" />. FCN-32s upsamples the
+stride-32 scores in one step. FCN-16s first predicts a second score map from the stride-16 pooling layer with a
+$1 \times 1$ convolution, adds it to the stride-32 scores upsampled by 2, and upsamples the sum by 16. FCN-8s repeats
+the step once more at stride 8. Each step adds fine location from an earlier layer to the coarse semantics of the last
+one, and boundaries sharpen at each step.
+
+### U-Net
+
+U-Net turns the skip idea into a symmetric architecture <Cite id="ronneberger2015" />. Each stage of the contracting
+path has two $3 \times 3$ convolutions with ReLU, followed by a $2 \times 2$ max pool with stride 2. The channel count
+doubles at each pooling, from 64 to 1024 over four poolings. Each stage of the expanding path has a $2 \times 2$
+transposed convolution with stride 2 that doubles the resolution and halves the channels, a concatenation with the
+encoder's map at that resolution, and two $3 \times 3$ convolutions. A final $1 \times 1$ convolution maps the 64
+channels to $K$ class scores. The network has 23 convolutional layers.
+
+Concatenation, rather than addition, lets the decoder's convolutions weigh encoder and decoder features differently.
+After concatenation the decoder stage at width $c$ reads $2c$ channels: $c$ from the skip and $c$ from below. SegNet
+passes less through its skips: it keeps only the positions of the encoder's max-pooling maxima and places the
+decoder's values back at those positions <Cite id="badrinarayanan2017" />.
+
+**Valid against same padding.** The original U-Net uses unpadded ("valid") convolutions. Each $3 \times 3$ layer
+trims one pixel from every side, so the output is smaller than the input and the encoder maps are larger than the
+decoder maps they join. Each skip therefore crops the centre of the encoder map. Valid convolutions mean every output
+pixel has seen a complete context, with no zero padding. Large images are segmented tile by tile, each tile extended by
+the context the network trims, mirrored at the image border (the overlap-tile strategy). Most implementations today
+use padded ("same") convolutions instead: sizes are kept, nothing is cropped, and any input side divisible by $2^D$ for
+$D$ poolings works.
+
+<UNetShapes />
+
+**Cost.** Most of the parameters sit at the bottom of the U, where channels are widest. Most of the computation sits
+at the top, where maps are largest. The number of parameters scales with the square of the base width: halving it
+from 64 to 32 cuts the original U-Net from 31.0 million to 7.8 million parameters.
+
+### Practice
+
+U-Net with same padding, batch or instance normalisation and a pretrained or plain encoder is the default for
+segmentation when labelled images are few, above all in medical imaging. nnU-Net showed that a plain 2-D or 3-D U-Net
+whose preprocessing, patch size, depth and training schedule are configured automatically from the dataset's
+properties outperformed most existing methods, specialised ones included, on 23 public biomedical datasets
+<Cite id="isensee2021" />. For
+natural images, current segmenters pair a large pretrained backbone with a multi-scale decoder; see
+<NoteLink to="segmentation-decoders" /> and <NoteLink to="feature-pyramid-network" />, and mask-classification models
+such as Mask2Former <Cite id="cheng2022" />. The U shape also became the standard denoising network of
+<NoteLink to="denoising-diffusion-probabilistic-models">diffusion models</NoteLink>, with residual blocks and attention
+at the low resolutions <Cite id="ho2020" />, including the latent-space U-Net of
+<NoteLink to="latent-diffusion" /> <Cite id="rombach2022" />. The task view, with losses and evaluation, is in
+<NoteLink to="semantic-segmentation" />.
+
+## Worked example
+
+**A $1 \times 1$ convolution as a per-pixel classifier.** A feature map has $C = 2$ channels on a $2 \times 2$ grid,
+with feature vectors $(3, 1)$, $(0, 2)$, $(1, 2)$ and $(2, 0)$ at positions $(0, 0)$, $(0, 1)$, $(1, 0)$ and $(1, 1)$.
+A $1 \times 1$ convolution with $K = 2$ output channels has weight rows $(1, -1)$ for class 0 and $(-1, 1)$ for class
+1, and zero bias. At each position it takes the two dot products:
+
+$$
+(3, 1) \mapsto (2, -2), \quad (0, 2) \mapsto (-2, 2), \quad (1, 2) \mapsto (-1, 1), \quad (2, 0) \mapsto (2, -2).
+$$
+
+The argmax gives the label map $\begin{bmatrix} 0 & 1 \\ 1 & 0 \end{bmatrix}$. The same four weights classify every
+position, and a $100 \times 100$ feature map would be classified with the same four weights.
+
+**Upsampling the scores.** Take one row of class-0 scores at stride 2, $(2, -2)$, and upsample it with a stride-2
+transposed convolution whose kernel is the linear-interpolation tent $(\tfrac12, 1, \tfrac12)$. Each input value is
+multiplied by the kernel and added into the output at positions $2i, 2i + 1, 2i + 2$. The first value contributes
+$(1, 2, 1)$ at positions 0 to 2, the second $(-1, -2, -1)$ at positions 2 to 4, and the sum is $(1, 2, 0, -2, -1)$.
+Position 2, halfway between the two coarse cells, gets their average, 0: linear interpolation. The output length is
+$(2 - 1) \cdot 2 + 3 = 5$.
+
+**Tracing the original U-Net.** Take a $572 \times 572$ input and valid padding. Each pair of $3 \times 3$ convolutions
+trims 4 pixels; each pooling halves.
+
+| Stage | Input side | After two convolutions | Channels |
+| --- | --- | --- | --- |
+| encoder 1 | 572 | 568 | 64 |
+| encoder 2 | 284 | 280 | 128 |
+| encoder 3 | 140 | 136 | 256 |
+| encoder 4 | 68 | 64 | 512 |
+| bottleneck | 32 | 28 | 1024 |
+| decoder 4 | 56 | 52 | 512 |
+| decoder 3 | 104 | 100 | 256 |
+| decoder 2 | 200 | 196 | 128 |
+| decoder 1 | 392 | 388 | 64 |
+
+Each decoder row starts from twice the side of the row above it, after the transposed convolution. At decoder 1 the
+upsampled map is 392 pixels wide and the encoder map is 568, so the skip crops $(568 - 392)/2 = 88$ pixels from each
+side. The output is $388 \times 388$ with 2 class scores per pixel.
+
+The sizes follow a rule. Let $b$ be the side of the bottleneck's output. Undoing the encoder, the input side is
+$n = 16b + 124$: four poolings multiply by 16, and the trims add $4 \cdot (1 + 2 + 4 + 8) + 4 \cdot 16 = 124$. Running
+the decoder, the output side is $16b - 60 = n - 184$. With $b = 28$, $n = 572$ and the output is 388. An input works
+only when $n - 124$ is a multiple of 16 with $b \ge 4$, so that the decoder keeps a positive size. This is why the paper
+chose 572 rather than a round number. Counting the weights and biases of all 23 layers gives 31,030,658 parameters, and
+one <NoteLink to="multilayer-perceptron">forward pass</NoteLink> costs about 150 billion multiply-accumulates. With same
+padding and a $512 \times 512$ input the parameter count is unchanged and the output is $512 \times 512$.
+
+## Assumptions
+
+- The task is translation equivariant away from the borders: the same local evidence means the same label anywhere in
+  the image. This is the assumption of every convolution.
+- Fine detail is present in the early layers and context in the late ones, so concatenating the two is enough to place
+  boundaries. Structures that need context larger than the network's
+  <NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink> are labelled from partial evidence.
+- Input sides fit the network: divisible by $2^D$ with same padding, or of the form $2^D b + c$ with valid padding.
+
+## Pitfalls
+
+- **Odd sizes.** A $2 \times 2$ pooling on an odd side drops a row, and the decoder's upsampled map no longer matches
+  the skip. Pad the input to a valid size and crop the output back.
+- **Tiling seams.** Segmenting a large image in tiles with padded convolutions gives different predictions at tile
+  edges, because the zeros differ from the true neighbours. Overlap the tiles and keep only their centres.
+- **Coarse output without skips.** A plain FCN at stride 32 loses thin and small structures entirely, as the figure
+  shows. More upsampling steps with skips, or a smaller output stride, are needed for sharp boundaries.
+- **Memory.** The top stages hold full-resolution maps with 64 channels. A $1024 \times 1024$ input stores over 67
+  million activations per layer there, which limits batch size more than the parameter count does.
+- **Checkerboard artefacts.** A learned transposed convolution whose kernel size is not divisible by its stride
+  overlaps unevenly; see <NoteLink to="transposed-convolution" />. Resizing then convolving avoids it.

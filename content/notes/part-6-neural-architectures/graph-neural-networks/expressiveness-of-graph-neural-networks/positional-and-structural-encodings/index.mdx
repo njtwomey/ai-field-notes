@@ -1,0 +1,194 @@
+---
+title: 'Positional and structural encodings for graphs'
+kind: technique
+summary: 'Positional encodings (Laplacian eigenvectors) and structural encodings (random-walk return probabilities, degrees, cycle counts) give nodes information message passing cannot compute. Eigenvector signs and bases are arbitrary, so the encoder must be sign- and basis-invariant.'
+tags: [graph-neural-networks, expressivity, deep-learning, worked-example]
+aliases: ['random-walk structural encoding', 'RWSE', 'RWPE', 'LapPE', 'Laplacian positional encoding', 'SignNet', 'graph positional encoding']
+requires: [graph-laplacian-and-graph-fourier-transform, expressive-power-of-message-passing]
+related: [graph-transformer, positional-encoding, higher-order-and-subgraph-graph-neural-networks, graph-features, laplacian-eigenmaps]
+references: [dwivedi2022, dwivedi2020benchmarking, lim2022signnet, kreuzer2021san, rampasek2022gps, bouritsas2023gsn, xu2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { ReturnProbabilities } from './ReturnProbabilities'
+import { EigenvectorSigns } from './EigenvectorSigns'
+
+<Definition>
+A positional or structural encoding is a vector $\pvec_v \in \reals^{k}$ computed from the graph alone for every node
+$v$ and appended to its input features, $\hvec_v^{(0)} = [\xvec_v \Vert \pvec_v]$, before <Gloss name="gnn">message
+passing</Gloss> or attention. A **structural** encoding describes the node's neighbourhood and is equal on nodes that an
+automorphism maps onto each other: degrees, cycle counts, random-walk return probabilities. A **positional** encoding
+describes where the node sits in the graph, as coordinates: entries of Laplacian eigenvectors. Both supply information
+that a <NoteLink to="message-passing-neural-network">message passing network</NoteLink> cannot compute from equal
+features.
+</Definition>
+
+## Problem
+
+A message passing network can separate only what colour refinement (<Gloss name="wl" form="short" />) separates
+<Cite id="xu2019" />. With equal node features it gives every node of a 6-cycle and of two disjoint triangles the same
+vector, it cannot count triangles, and it sees decalin and bicyclopentyl as the same molecule; see
+<NoteLink to="expressive-power-of-message-passing" />. A graph transformer has the opposite gap: attention between all
+pairs of nodes ignores the edges entirely unless structure is supplied.
+
+Encodings close both gaps cheaply. They are computed once per graph, before training, and the network itself stays a
+standard message passing network or transformer. Refinement started from the encodings as colours is at least as strong
+as refinement started from constant colours, so an encoding can only add separating power.
+
+Sequences have an obvious encoding: the position index, as in a
+<NoteLink to="positional-encoding">transformer</NoteLink>. Graphs have no canonical order of nodes, so an index would
+break permutation equivariance. Graph encodings must come from quantities that relabelling the nodes only permutes.
+
+## Mechanism
+
+### Random-walk structural encoding
+
+Let $\Amat$ be the adjacency matrix and $\Dmat$ the diagonal degree matrix. The random-walk matrix
+$\Pmat = \Dmat^{-1}\Amat$ moves a walker from a node to a uniformly chosen neighbour, so $(\Pmat^k)_{vv}$ is the
+probability that a walk of $k$ steps from $v$ ends back at $v$. The random-walk structural encoding (RWSE) is
+
+$$
+\pvec_v = \paren{(\Pmat)_{vv},\ (\Pmat^2)_{vv},\ \dots,\ (\Pmat^K)_{vv}} \in [0, 1]^K.
+$$
+
+<Cite id="dwivedi2022" /> introduced it as a positional encoding (RWPE) and found it beat Laplacian encodings on
+molecules. Relabelling the nodes permutes the rows and columns of $\Pmat^k$ together, so the diagonal entry of a node
+moves with the node: the encoding is equivariant, with no arbitrary choices. It is structural: nodes that an
+automorphism exchanges get the same vector.
+
+Return probabilities see cycles. A closed walk of odd length must use an odd cycle, so $(\Pmat^3)_{vv} > 0$ exactly when
+$v$ lies on a triangle, and odd entries vanish on bipartite graphs. Entry $k$ depends on the $\lfloor k/2 \rfloor$-hop
+neighbourhood, so $K$ sets the radius of the structure the encoding describes.
+
+### Laplacian positional encoding
+
+Take the symmetric <NoteLink to="graph-laplacian-and-graph-fourier-transform">normalised Laplacian</NoteLink>
+$\Lmat_{\text{sym}} = \I - \Dmat^{-1/2}\Amat\Dmat^{-1/2}$ with eigenvalues
+$0 = \lambda_1 \le \lambda_2 \le \dots \le \lambda_n \le 2$ and orthonormal eigenvectors $\uvec_1, \dots, \uvec_n$. The
+Laplacian positional encoding (LapPE) gives node $v$ the entries of the eigenvectors for the $k$ smallest non-zero
+eigenvalues:
+
+$$
+\pvec_v = \paren{u_{2}(v),\ u_{3}(v),\ \dots,\ u_{k+1}(v)} \in \reals^{k}.
+$$
+
+These are the coordinates of a spectral embedding: the eigenvectors of small eigenvalues vary slowly across edges, so
+nearby nodes get nearby encodings, as in <NoteLink to="laplacian-eigenmaps" />. On a cycle the eigenvectors are sines
+and cosines of the position, the functions of the sinusoidal encoding of sequences, so LapPE generalises that encoding
+to graphs <Cite id="dwivedi2020benchmarking" />. The encoding is positional: on a path, the two ends are exchanged by an
+automorphism but receive opposite values.
+
+### The ambiguity of eigenvectors
+
+An eigenvector is defined only up to its sign: if $\Lmat_{\text{sym}}\uvec = \lambda\uvec$ then
+$\Lmat_{\text{sym}}(-\uvec) = \lambda(-\uvec)$. With $k$ eigenvectors there are $2^k$ equally valid encodings of one
+graph. When an eigenvalue is repeated with multiplicity $m$, any orthonormal basis of its $m$-dimensional eigenspace is
+valid, a continuum of choices. A network fed one choice in training and another at test time sees two different inputs
+for the same graph. Three remedies are used.
+
+- **Random sign flips.** Flip each eigenvector's sign at random in every training batch, so the network learns to ignore
+  signs <Cite id="dwivedi2020benchmarking" />. This handles signs, not bases, and the network only approximately learns
+  the invariance.
+- **Sign- and basis-invariant encoders.** SignNet maps each eigenvector by $\rho\paren{\phi(\uvec_i) + \phi(-\uvec_i)}$,
+  which is unchanged by $\uvec_i \to -\uvec_i$ by construction. BasisNet processes the projector $\Umat_\lambda
+  \Umat_\lambda^\tr$ onto each eigenspace, which does not depend on the basis <Cite id="lim2022signnet" />.
+- **Spectral attention.** The spectral attention network treats each (eigenvalue, eigenvector entry) pair as a token and
+  attends over the spectrum, learning which frequencies to use <Cite id="kreuzer2021san" />.
+
+### Other encodings
+
+- **Degree** and centralities add little to a message passing network, which already sees degrees after one round, but
+  they help a transformer.
+- **Substructure counts.** The number of triangles, cycles of length 4 to 6 or cliques through each node or edge,
+  computed by subgraph matching, gives the graph substructure network its power beyond 1-WL
+  <Cite id="bouritsas2023gsn" />.
+- **Relative encodings.** Shortest-path distances or random-walk probabilities $(\Pmat^k)_{uv}$ between pairs of nodes
+  become attention biases in a <NoteLink to="graph-transformer" />.
+
+## Worked example
+
+**Return probabilities on the 6-cycle and two triangles.** In both graphs every node has degree 2, so each step goes to
+either neighbour with probability $1/2$, and a walk of $k$ steps has probability $(1/2)^k$.
+
+- **Step 1.** Neither graph has self-loops, so $(\Pmat)_{vv} = 0$.
+- **Step 2.** The walk returns by going out and straight back, to either neighbour: 2 walks, $2 \cdot (1/2)^2 = 1/2$ in
+  both graphs.
+- **Step 3.** In a triangle, the walks $v \to a \to b \to v$ and $v \to b \to a \to v$ return: $2 \cdot (1/2)^3 = 1/4$.
+  The 6-cycle is bipartite, so no walk of odd length returns: 0.
+
+The encodings $(0, \tfrac12, 0)$ and $(0, \tfrac12, \tfrac14)$ differ at $K = 3$, and a <Gloss name="gin" /> given them
+separates the two graphs that it cannot separate without them.
+
+**Decalin and bicyclopentyl.** Decalin has only six-membered rings and is bipartite, so its odd return probabilities
+are 0. Bicyclopentyl has two five-membered rings. A node on a pentagon returns after five steps by going round the ring
+in either direction, passing four degree-2 nodes and one degree-3 node, so its probability is
+$2 \cdot (1/2)^4 \cdot (1/3) = 1/24 \approx 0.042$. The encodings first differ at $K = 5$, as Dwivedi et al. report
+<Cite id="dwivedi2022" />.
+
+**Where it stops.** The 4-by-4 rook's graph and the Shrikhande graph are both strongly regular with parameters
+$(16, 6, 2, 2)$, have the same eigenvalues, and look the same from every node. All their return probabilities agree, so
+RWSE leaves them tied.
+
+<ReturnProbabilities />
+
+**A Laplacian encoding on a path.** The path on 4 nodes, $1{-}2{-}3{-}4$, has degrees $(1, 2, 2, 1)$. The eigenvalues
+of $\Lmat_{\text{sym}}$ are $1 - \cos(\pi j / 3)$ for $j = 0, 1, 2, 3$, that is $0, \tfrac12, \tfrac32, 2$, all simple.
+The eigenvector of $\lambda_2 = \tfrac12$ is
+
+$$
+\uvec_2 = \paren{\tfrac{1}{\sqrt3},\ \tfrac{1}{\sqrt6},\ -\tfrac{1}{\sqrt6},\ -\tfrac{1}{\sqrt3}}
+\approx (0.577,\ 0.408,\ -0.408,\ -0.577).
+$$
+
+Check one row: $(\Lmat_{\text{sym}}\uvec_2)_1 = u_1 - u_2/\sqrt{1 \cdot 2} = 0.577 - 0.289 = 0.289 = \tfrac12 \cdot
+0.577$. With $k = 1$, node 1 gets $p_1 = 0.577$ and node 4 gets $-0.577$, although the reflection of the path exchanges
+them. The sign of $\uvec_2$ is arbitrary: $-\uvec_2$ gives node 1 the value $-0.577$. The absolute value $0.577$ is the
+same under both signs, which is what a sign-invariant encoder computes.
+
+On the 6-cycle, $\lambda = \tfrac12$ has multiplicity 2, and every rotation of a basis of its eigenspace gives another
+valid pair of eigenvectors. The diagonal of the projector onto the eigenspace is $\tfrac13$ at every node for every
+choice of basis, which shows that the basis-invariant information in that eigenspace does not separate the nodes of a
+cycle.
+
+<EigenvectorSigns />
+
+## Cost
+
+- **RWSE.** Computing the diagonals of $\Pmat, \dots, \Pmat^K$ by repeated sparse-dense products costs $O(K\,n\,m)$
+  time and $O(n^2)$ memory for a graph with $n$ nodes and $m$ edges. For molecules with tens of nodes this is negligible
+  and done once in preprocessing. For large graphs, estimating the diagonal with random probe vectors or sampled walks
+  avoids the dense matrix.
+- **LapPE.** A full eigendecomposition costs $O(n^3)$, acceptable for small graphs. For large graphs, the $k$ smallest
+  eigenpairs come from a Lanczos iteration, each step of which costs one sparse product, $O(m)$.
+- **Model.** The encodings add $k$ input dimensions, and SignNet adds a small network per eigenvector. Message passing
+  costs are unchanged.
+
+## Trade-offs
+
+| | RWSE | LapPE |
+| --- | --- | --- |
+| kind | structural | positional |
+| arbitrary choices | none | sign and basis |
+| automorphic nodes | equal encodings | can differ |
+| sees | cycles and local density within $K/2$ hops | global position, clusters, long-range distance |
+| fails on | strongly regular and other cospectral, vertex-transitive pairs | depends on handling of ambiguity |
+
+GPS, a framework for graph transformers, tested both inside one architecture. Random-walk encodings helped most on
+molecular data, Laplacian encodings on image superpixel graphs, and Laplacian eigenvectors processed by SignNet worked
+well across tasks <Cite id="rampasek2022gps" />. The GPS configurations use RWSE with 16 or 20 steps on molecular
+benchmarks <Cite id="rampasek2022gps" />, and in 2024 to 2026 that remains the usual default: RWSE appended to the input
+of a message passing network or graph transformer, with LapPE through a sign-invariant encoder added where global
+position matters.
+
+## Pitfalls
+
+- **Feeding raw eigenvectors.** Without sign flipping or an invariant encoder, the model learns a sign convention that
+  the eigensolver does not guarantee. A different solver, or a relabelled graph, can flip signs and change predictions.
+- **Repeated eigenvalues.** Sign flips do not fix basis ambiguity. Symmetric graphs such as cycles, grids and many
+  molecules have repeated eigenvalues, and basis choices there are arbitrary.
+- **Disconnected graphs.** Each connected component adds an eigenvalue 0. Skipping only the first eigenvector then
+  leaves indicator-like vectors of components in the encoding.
+- **Too few steps.** RWSE with $K$ steps sees only cycles up to length $K$. Decalin and bicyclopentyl need $K \ge 5$.
+- **Encodings are not a complete invariant.** Neither encoding separates all non-isomorphic graphs. The rook's and
+  Shrikhande graphs defeat both.

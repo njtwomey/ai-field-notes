@@ -1,0 +1,204 @@
+---
+title: Pooling and strides
+kind: concept
+summary: Pooling replaces each window of a feature map by its maximum or mean, and a stride $s > 1$ evaluates a layer only at every $s$-th position. Both shrink the feature map and make the receptive field grow geometrically with depth instead of linearly.
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases: [max pooling, average pooling, global average pooling, strided convolution, anti-aliased pooling, blur pooling]
+requires: [convolutional-layer]
+related: [receptive-field-and-dilated-convolution, aliasing, decimation-and-interpolation, transposed-convolution, class-activation-mapping, classic-convolutional-network-architectures, symmetry-and-equivariance]
+references: [lecun1998b, dumoulin2016, luo2016, he2016, lin2014nin, springenberg2015, liu2022, azulay2019, zhang2019antialiased, simonyan2015]
+status: draft
+updated: 2026-10-17
+---
+
+import { ReceptiveFieldGrowth } from './ReceptiveFieldGrowth'
+import { ShiftSensitivity } from './ShiftSensitivity'
+
+<Definition>
+A pooling layer slides a $k \times k$ window over each channel of a feature map with stride $s$ and outputs one summary
+per window: the maximum (max pooling) or the mean (average pooling). It has no parameters and treats channels
+independently. A strided layer, pooling or convolution, computes its output only at every $s$-th position, so the output
+is about $s$ times smaller along each axis.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="convolutional-layer">convolutional layer</NoteLink> with stride 1 keeps the spatial size of its input.
+A network made only of such layers keeps full resolution to the end. That is expensive, and each output still sees only
+a small window of the image. Downsampling fixes both problems. After a stride-2 layer, one step on the feature map
+covers two pixels of the input, so the next $3 \times 3$ kernel covers a region twice as wide.
+
+Max pooling also discards the exact position of a feature within each window. If an edge moves by one pixel inside a
+$2 \times 2$ window, the window's maximum does not change. This gives a small amount of translation invariance, but
+only for movements that stay inside a window. A movement that crosses a window boundary changes the output, and
+subsampling a signal that contains fine detail mixes that detail into coarser frequencies. Both effects make
+downsampling the part of a convolutional network that breaks its symmetry under shifts.
+
+## Pooling
+
+For channel $c$, max pooling with window $k$ and stride $s$ outputs
+
+$$
+y_{c, i, j} = \max_{0 \le u, v < k} x_{c,\, si + u,\, sj + v},
+$$
+
+and average pooling replaces the maximum by the mean of the $k^2$ values. The output size follows the same formula as a
+convolution: for input side length $n$ and padding $p$, it is $\lfloor (n + 2p - k)/s \rfloor + 1$.
+The standard choice is $k = s = 2$, which halves each side and keeps one value in four.
+
+**<NoteLink to="gradient">Gradient</NoteLink> of max pooling.** Within one window, $y = \max_m x_m$. When the maximum is
+unique at position $m^\star$, changing any other $x_m$ by a small amount leaves $y$ unchanged, and changing
+$x_{m^\star}$ changes $y$ one for one:
+
+$$
+\frac{\partial y}{\partial x_m} = \begin{cases} 1 & m = m^\star, \\ 0 & \text{otherwise.} \end{cases}
+$$
+
+Backpropagation therefore routes the whole gradient of each output to the input $x_{m^\star}$ that attains the maximum.
+Average pooling spreads it evenly, $\partial y / \partial x_m = 1/k^2$. Average pooling is a convolution of each channel
+with the constant kernel $1/k^2$, so it is linear; max pooling is not.
+
+## Global average pooling
+
+Global average pooling takes the mean of each channel over the whole feature map:
+
+$$
+z_c = \frac{1}{HW} \sum_{i=1}^{H} \sum_{j=1}^{W} x_{c, i, j}.
+$$
+
+A $[C, H, W]$ map becomes a vector of $C$ numbers, whatever $H$ and $W$ are. Lin, Chen and Yan introduced it as the end
+of a classifier: the last convolution has one channel per class, and the class scores are the channel means
+<Cite id="lin2014nin" />. The common form today pools the last feature map and feeds the vector to one linear layer.
+
+It replaces flattening, which is where most of the parameters of early networks lived.
+<NoteLink to="classic-convolutional-network-architectures">VGG-16</NoteLink> flattens a $512 \times 7 \times 7$ map into
+$25{,}088$ numbers and maps them to 4096 units, a single layer of $1.03 \times 10^8$ weights <Cite id="simonyan2015" />.
+Global average pooling followed by a linear layer from 512 features to 1000 classes has $5.1 \times 10^5$ weights. The
+network then accepts images of any size, and every spatial position is treated alike. Because each class score is a
+weighted sum of channel means, the weights can be projected back onto the feature map to show where each class was
+found; see <NoteLink to="class-activation-mapping">class activation mapping</NoteLink>. Since <Gloss name="resnet" />,
+nearly every image classifier ends this way <Cite id="he2016" />.
+
+## Strided convolution against pooling
+
+A convolution with stride $s$ downsamples and filters in one layer. It equals a stride-1 convolution followed by keeping
+every $s$-th output, but it skips the discarded work, so it costs $1/s^2$ as much. Springenberg et al. replaced every
+max-pooling layer of a classifier by a convolution with stride 2 and lost no accuracy <Cite id="springenberg2015" />.
+
+Modern architectures downsample with learned strided layers and keep pooling only at the ends. ResNet uses one
+$3 \times 3$ max pool in its stem, stride-2 convolutions inside the first block of each later stage, and global average
+pooling at the end <Cite id="he2016" />. <NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> has no max
+pooling at all: a $4 \times 4$ convolution with stride 4 cuts the image into patches, and a $2 \times 2$ stride-2
+convolution between stages halves the resolution <Cite id="liu2022" />. The trade-off is between a parameter-free
+summary that keeps the strongest response, and a learned downsampler that can decide what to keep. Both lose resolution,
+which dense prediction recovers with <NoteLink to="transposed-convolution">upsampling</NoteLink> or skip connections.
+
+## Receptive field growth
+
+The jump of a layer, the distance in input pixels between two adjacent units, is the product of all strides up to it.
+Each later $k \times k$ layer adds $(k - 1)$ times the jump to the receptive field. With stride 1 everywhere the field
+grows linearly with depth. With a stride-2 layer in every stage the jump doubles per stage, so the field grows
+geometrically with the number of stages <Cite id="dumoulin2016" />.
+<NoteLink to="receptive-field-and-dilated-convolution">Receptive field and dilated convolution</NoteLink> derives the
+recursion and works it through VGG-16.
+
+<ReceptiveFieldGrowth />
+
+## Shift invariance made precise
+
+Let $T_a$ shift a one-dimensional signal by $a$ positions, $(T_a x)_n = x_{n - a}$, and let $D_s$ keep every $s$-th
+sample, $(D_s x)_m = x_{sm}$. A map $f$ is **equivariant** to $T_a$ when $f(T_a x) = T_a f(x)$, and **invariant** when
+$f(T_a x) = f(x)$. A stride-1 convolution is equivariant to every shift, away from the borders.
+
+Subsampling is equivariant only to shifts by multiples of $s$:
+
+$$
+(D_s T_{sa}\, x)_m = x_{sm - sa} = (D_s x)_{m - a} = (T_a D_s\, x)_m,
+$$
+
+so a shift of $sa$ input samples becomes a shift of $a$ output samples. A shift by a number $b$ that is not a multiple
+of $s$ has no counterpart: $D_s T_b\, x$ reads a different set of samples of $x$, the ones at positions
+$\equiv -b \pmod s$, and is not a shifted copy of $D_s x$. A strided convolution and a pooling layer are each a stride-1
+operation followed by $D_s$, so they inherit this.
+
+A network with $L$ stride-2 stages is therefore equivariant only to shifts by multiples of $2^L$, 32 pixels for a
+five-stage <Gloss name="resnet" />. Global average pooling of an equivariant map is invariant, since a mean over all
+positions does not change when the positions are shifted. The whole classifier is invariant to shifts by multiples of
+32, and nothing guarantees invariance to a shift by one pixel. Azulay and Weiss found that shifting an image by a single
+pixel changes the top prediction of standard <Gloss name="imagenet" /> classifiers for a noticeable fraction of images,
+and that data augmentation teaches the invariance only for images like the training set <Cite id="azulay2019" />.
+
+## Aliasing and anti-aliased pooling
+
+Subsampling by $s$ is the <NoteLink to="decimation-and-interpolation">decimation</NoteLink> of
+<NoteLink to="signal-processing">signal processing</NoteLink>. Frequencies above $\pi/s$ cannot be represented at the
+lower rate, and they fold back onto lower frequencies; see <NoteLink to="aliasing">aliasing</NoteLink>. The classical
+remedy is a lowpass filter before the subsampler, so that nothing remains above $\pi/s$. A stride-1 convolution or a
+stride-1 max applied before $D_s$ is not designed as a lowpass filter, and max pooling creates high frequencies of its
+own, because a maximum has sharp corners.
+
+Zhang split each downsampling layer into its stride-1 part and its subsampling, and inserted a fixed blur between them
+<Cite id="zhang2019antialiased" />:
+
+- **Max pooling** becomes max with stride 1, a blur, then subsampling (MaxBlurPool).
+- **Strided convolution** becomes the convolution with stride 1 and its nonlinearity, then blur and subsampling.
+- **Average pooling** becomes blur and subsampling (BlurPool).
+
+The blur is a small binomial kernel such as $\tfrac14(1, 2, 1)$ per axis, applied to each channel. The outputs of the
+anti-aliased network changed less under one-pixel shifts, and ImageNet accuracy rose for ResNet,
+<NoteLink to="densely-connected-network">DenseNet</NoteLink> and
+<NoteLink to="efficient-convolutional-networks">MobileNet</NoteLink> <Cite id="zhang2019antialiased" />. The cost is one
+fixed <NoteLink to="depthwise-and-grouped-convolution">depthwise convolution</NoteLink> per downsampling layer and the
+stride-1 evaluation of the layer before it.
+
+<ShiftSensitivity />
+
+## Worked example
+
+Take the one-dimensional signal $x = (0, 0, 1, 1, 0, 0, 0, 0)$, a bar of width 2, and three shifts of it. Max pooling
+with $k = s = 2$ reads the windows $(x_0, x_1), (x_2, x_3), (x_4, x_5), (x_6, x_7)$.
+
+| shift | input           | max pool $k = s = 2$ | output energy $\sum y^2$ |
+| ----- | --------------- | -------------------- | ------------------------ |
+| 0     | 0 0 1 1 0 0 0 0 | 0 1 0 0              | 1                        |
+| 1     | 0 0 0 1 1 0 0 0 | 0 1 1 0              | 2                        |
+| 2     | 0 0 0 0 1 1 0 0 | 0 0 1 0              | 1                        |
+
+The shift by 2 moves the output by one position, as equivariance to even shifts predicts. The shift by 1 does not move
+the output; it doubles the bar, because the bar now straddles a window boundary. Its energy doubles with it.
+
+Now anti-alias it. Max with window 2 and stride 1 gives seven values. For shift 0 they are $(0, 1, 1, 1, 0, 0, 0)$.
+Blur with $\tfrac14(1, 2, 1)$, padding 1, and keep positions $0, 2, 4, 6$:
+
+- Position 0: $\tfrac14(0 + 2 \cdot 0 + 1) = 0.25$, using a padded zero on the left.
+- Position 2: $\tfrac14(1 + 2 \cdot 1 + 1) = 1$.
+- Position 4: $\tfrac14(1 + 2 \cdot 0 + 0) = 0.25$.
+- Position 6: $0$.
+
+The output is $(0.25, 1, 0.25, 0)$ with energy $1.125$. For shift 1 the stride-1 maxima are $(0, 0, 1, 1, 1, 0, 0)$ and
+the output is $(0, 0.75, 0.75, 0)$, with the same energy $1.125$. For shift 2 it is $(0, 0.25, 1, 0.25)$, the shift-0
+output moved by one. The odd shift now gives an output halfway between its two even neighbours instead of a different
+shape.
+
+## Assumptions
+
+- The exact position of a feature within a pooling window does not matter for the task. This holds for classification.
+  It fails for tasks that need precise localisation, such as segmentation, which recover resolution with upsampling or
+  skip connections.
+- The signal has little energy above the new Nyquist frequency $\pi/s$, or a filter removes it before subsampling.
+  Otherwise the downsampled map depends on the phase of the input's position relative to the sampling grid.
+
+## Pitfalls
+
+- **Invariance is approximate.** A $2 \times 2$ pool is invariant only to shifts that stay inside its window. Deep
+  strided networks can change their prediction when the input moves by one pixel <Cite id="azulay2019" />.
+- **Augmentation does not repair it.** Random crops and shifts teach approximate invariance on training-like images,
+  not a guarantee on new ones <Cite id="azulay2019" />.
+- **Theoretical versus effective field.** The recursion gives the region that can affect a unit. The influence of
+  input pixels on a unit falls off roughly like a Gaussian from the centre, so the effective field is much smaller than
+  the theoretical one <Cite id="luo2016" />.
+- **Gradient sparsity.** Max pooling passes gradient to one input in each window. Early in training this can leave many
+  units with zero gradient for many steps.
+- **<NoteLink to="graph-pooling-and-readout">Global pooling</NoteLink> discards layout.** After global average pooling
+  the classifier cannot tell a face from the same parts in the wrong arrangement, unless earlier layers encoded the
+  arrangement in the channels.

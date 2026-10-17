@@ -1,0 +1,185 @@
+---
+title: Graph attention network
+kind: concept
+summary: A graph attention network replaces the fixed degree-based weights of a graph convolution with learned attention weights. Each node averages its neighbours' transformed features with weights $\alpha_{ij}$, a softmax over the neighbourhood of scores computed from both endpoints.
+tags: [deep-learning, graph-neural-networks, attention, worked-example]
+aliases: [GAT, GATv2, graph attention, static attention, dynamic attention]
+requires: [message-passing-neural-network, softmax-and-log-sum-exp]
+related:
+  [
+    graph-convolutional-network,
+    multi-head-attention,
+    bahdanau-attention,
+    scaled-dot-product-attention,
+    graph-transformer,
+    gated-and-edge-conditioned-message-passing,
+  ]
+references: [velickovic2018, brody2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { AttentionOnGraph } from './AttentionOnGraph'
+
+<Definition>
+A graph attention layer maps node features $\hvec_i \in \reals^F$ to
+$$
+\hvec_i' = \sigma\paren{\sum_{j \in \Ncal(i) \cup \set{i}} \alpha_{ij} \Wmat \hvec_j}, \qquad
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{k \in \Ncal(i) \cup \set{i}} \exp(e_{ik})},
+$$
+with scores $e_{ij} = \operatorname{LeakyReLU}\paren{\avec^{\tr} [\Wmat \hvec_i \,\Vert\, \Wmat \hvec_j]}$. Here
+$\Wmat \in \reals^{F' \times F}$ and $\avec \in \reals^{2F'}$ are learned and $\Vert$ is concatenation
+<Cite id="velickovic2018" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="graph-convolutional-network">graph convolutional network</NoteLink> weights neighbour $j$ of node $i$ by
+$1/\sqrt{\tilde d_i \tilde d_j}$. The weight depends only on the graph's structure. Every neighbour of the same degree
+counts the same, whether its features are relevant or not.
+
+A graph attention network lets the features decide. Each node scores each neighbour, turns the scores into a probability
+distribution with a softmax, and takes the weighted average. The mechanism is the attention used in
+<NoteLink to="sequence-models">sequence models</NoteLink>, restricted to the edges of the graph: a node attends only to
+its neighbours. It is a <NoteLink to="message-passing-neural-network">message passing</NoteLink> layer whose aggregation
+weights are computed from the messages.
+
+## Mechanism
+
+1. **Transform.** Apply a shared <NoteLink to="matrix-vector-product">linear map</NoteLink> to every node:
+   $\zvec_j = \Wmat \hvec_j$.
+2. **Score.** For each edge $(i, j)$, including the self-loop, compute
+   $e_{ij} = \operatorname{LeakyReLU}(\avec^{\tr} [\zvec_i \Vert \zvec_j])$ with negative slope $0.2$.
+3. **Normalise.** Softmax the scores over the neighbourhood of $i$ to get $\alpha_{ij}$. The weights of each node's
+   neighbours sum to 1.
+4. **Aggregate.** $\hvec_i' = \sigma(\sum_j \alpha_{ij} \zvec_j)$.
+
+**Cost.** Scoring is one dot product per edge, so a layer costs $O(\abs{\Vcal} F F' + \abs{\Ecal} F')$ per head, the
+same order as a graph convolutional network (GCN). No <NoteLink to="eigendecomposition">eigendecomposition</NoteLink> or
+knowledge of the full graph is needed, so the layer applies to graphs not seen during training.
+
+## Multi-head attention
+
+One set of attention weights gives each node one way of averaging its neighbours. <Gloss name="mha">Multi-head
+attention</Gloss> runs $K$ independent heads, each with its own $\Wmat^k \in \reals^{F' \times F}$ and
+$\avec^k \in \reals^{2F'}$, and combines their outputs:
+
+$$
+\hvec_i' = \Big\Vert_{k=1}^{K} \sigma\paren{\sum_{j} \alpha_{ij}^k \Wmat^k \hvec_j}
+\quad \text{(hidden layers)},
+$$
+
+$$
+\hvec_i' = \sigma\paren{\frac{1}{K} \sum_{k=1}^{K} \sum_{j} \alpha_{ij}^k \Wmat^k \hvec_j}
+\quad \text{(output layer)}.
+$$
+
+Concatenation gives a hidden vector of size $KF'$. The output layer averages the heads instead, so its size stays the
+number of classes. Averaging over heads also lowers the variance that a single softmax over a few neighbours has early
+in training. The original model uses $K = 8$ heads of $F' = 8$ features in its
+<NoteLink to="multilayer-perceptron">hidden layer</NoteLink>, so each node carries a 64-dimensional vector
+<Cite id="velickovic2018" />. Each head costs as much as a single-head layer, so $K$ heads cost $K$ times as much.
+
+## Worked example
+
+Take a node $i$ with two neighbours, $j_1$ and $j_2$, and scalar transformed features $z_i = 1$, $z_{j_1} = 2$ and
+$z_{j_2} = -1$. Let $\avec = (a_1, a_2) = (0.5, 1)$. The scores are
+
+$$
+\begin{aligned}
+e_{ii} &= \operatorname{LeakyReLU}(0.5 \cdot 1 + 1 \cdot 1) = 1.5, \\
+e_{ij_1} &= \operatorname{LeakyReLU}(0.5 + 2) = 2.5, \\
+e_{ij_2} &= \operatorname{LeakyReLU}(0.5 - 1) = 0.2 \cdot (-0.5) = -0.1.
+\end{aligned}
+$$
+
+The softmax gives $\alpha = (0.255, 0.693, 0.052)$ for $(i, j_1, j_2)$. The aggregate before $\sigma$ is
+$0.255 \cdot 1 + 0.693 \cdot 2 + 0.052 \cdot (-1) = 1.590$. A GCN would have weighted all three by degree alone.
+
+A second head with $\avec^2 = (-1, 0.5)$ and the same features scores $(-0.1, 0, -0.3)$, which the softmax turns into
+$\alpha^2 = (0.342, 0.378, 0.280)$. Its aggregate is $0.342 - 0.280 + 0.378 \cdot 2 = 0.818$. The second head spreads
+its weight almost evenly. A hidden layer concatenates the two heads into $(1.590, 0.818)$; an output layer averages them
+to $1.204$.
+
+## Static attention
+
+Split $\avec = [\avec_1; \avec_2]$ into the halves that multiply $\zvec_i$ and $\zvec_j$. Then
+
+$$
+e_{ij} = \operatorname{LeakyReLU}\paren{\avec_1^{\tr} \zvec_i + \avec_2^{\tr} \zvec_j}.
+$$
+
+LeakyReLU is strictly increasing. For a fixed query node $i$, the term $\avec_1^{\tr} \zvec_i$ is a constant, so the
+order of the scores $e_{ij}$ over $j$ is the order of $\avec_2^{\tr} \zvec_j$. That order does not depend on $i$. If
+node $j^\star$ maximises $\avec_2^{\tr} \zvec_j$ over all nodes, every node that has $j^\star$ as a neighbour attends to
+it most. The ranking of keys is the same for every query. Brody, Alon and Yahav call this static attention
+<Cite id="brody2022" />.
+
+In the worked example, any other node that sees $j_1$ and $j_2$ also scores $j_1$ above $j_2$, because
+$a_2 z_{j_1} > a_2 z_{j_2}$.
+
+Static attention fails on problems where the right neighbour depends on the query. Brody et al. build a bipartite graph
+of $k$ query nodes and $k$ key nodes in which each query must retrieve the value stored at the key whose attribute
+matches its own. GAT cannot fit even the training set of this dictionary-lookup task, because one global ranking of keys
+cannot send each query to a different key <Cite id="brody2022" />.
+
+## Dynamic attention in GATv2
+
+GATv2 moves the nonlinearity between the two linear maps:
+
+$$
+e_{ij} = \avec^{\tr} \operatorname{LeakyReLU}\paren{\Wmat [\hvec_i \Vert \hvec_j]}, \qquad \avec \in \reals^{F'},\;
+\Wmat \in \reals^{F' \times 2F}.
+$$
+
+Write $\Wmat [\hvec_i \Vert \hvec_j] = \Wmat_1 \hvec_i + \Wmat_2 \hvec_j$. The LeakyReLU acts on each coordinate of the
+sum, and which coordinates fall on its negative side depends on $\hvec_i$. So the score of key $j$ is a different
+piecewise-linear function of $\hvec_j$ for each query, and the ranking of the keys can change with the query. Brody et
+al. call this dynamic attention and prove that GATv2 can express any choice of most-attended key per query on a finite
+set of nodes, which GAT cannot <Cite id="brody2022" />. A common variant shares the two halves, $\Wmat_1 = \Wmat_2$. The
+parameter count per head is the same order as GAT's, and so is the cost.
+
+**By hand.** Use two-dimensional features, $\Wmat_1 = \Wmat_2 = \I$, and $\avec = (1, 0.5)$; tie GAT's halves to the
+same $\avec$ for comparison. Take keys $\zvec_A = (1, 0)$ and $\zvec_B = (0, 1)$.
+
+- Query $\zvec_A = (1, 0)$. GATv2: $\zvec_A + \zvec_A = (2, 0)$ scores $2$, and $\zvec_B + \zvec_A = (1, 1)$ scores
+  $1 + 0.5 = 1.5$. Key A ranks first.
+- Query $\zvec_C = (-1, 0.5)$. GATv2: $\zvec_A + \zvec_C = (0, 0.5)$ scores $0.25$, and $\zvec_B + \zvec_C = (-1, 1.5)$
+  passes through LeakyReLU as $(-0.2, 1.5)$ and scores $-0.2 + 0.75 = 0.55$. Key B ranks first.
+- GAT with the same $\avec$ ranks keys by $\avec^{\tr}\zvec_j$, which is $1$ for A and $0.5$ for B. Key A ranks first
+  for both queries.
+
+The figure runs both scores on a six-node graph with the engine's attention layer.
+
+<AttentionOnGraph />
+
+## Practice
+
+GATv2 is the usual default where attention over neighbours is wanted, because it costs the same as GAT and is strictly
+more expressive. Typical settings are 4 to 8 heads, two or three layers, and <NoteLink to="dropout">dropout</NoteLink>
+on the inputs and on the attention coefficients; the original model applied dropout with probability 0.6 to both on the
+small citation graphs <Cite id="velickovic2018" />. Edge features enter by adding a projected edge vector inside the
+score, so $e_{ij}$ depends on $\evec_{ij}$ as well as the endpoints. Attention restricted to the edges is the local half
+of a <NoteLink to="graph-transformer">graph transformer</NoteLink>, which also lets every node attend to every other
+node.
+
+The attention weights themselves account for part of the gain. On the protein–protein interaction benchmark, whose test
+graphs are unseen in training, the same three-layer architecture with every attention weight set equal reached a
+micro-averaged F1 of 0.934, and with learned attention 0.973 <Cite id="velickovic2018" />. On the small citation graphs,
+GAT's reported gains over GCN were 0 to 2.2 percentage points of accuracy.
+
+## Assumptions
+
+- The relevance of a neighbour can be judged from the features of the two endpoints.
+- The graph is given. Attention reweights existing edges; it does not add new ones.
+
+## Pitfalls
+
+- **Weights are not importance.** Attention weights show how the layer averaged its neighbours, not which neighbours
+  determined the prediction.
+- **Static ranking.** The original GAT ranks neighbours the same way for every query node. Use GATv2 when the relevance
+  of a neighbour should depend on the query node.
+- **Softmax discards degree.** Weights sum to 1 over each neighbourhood, so the layer cannot count neighbours. Like
+  mean aggregation, it cannot tell a node with two identical neighbours from one with a single such neighbour.
+- **Oversmoothing remains.** Attention weights are positive and sum to 1, so a deep stack of attention layers still
+  averages features together, as in <NoteLink to="oversmoothing">oversmoothing</NoteLink>.

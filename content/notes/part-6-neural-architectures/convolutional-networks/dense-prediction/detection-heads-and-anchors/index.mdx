@@ -1,0 +1,205 @@
+---
+title: 'Detection heads and anchors'
+kind: concept
+summary: 'A dense detection head predicts, at each feature-map cell and anchor box, an objectness score, class scores and offsets $(t_x,t_y,t_w,t_h)$ that move and rescale the anchor. Anchor-free heads (FCOS, later YOLO versions) predict distances to box edges from each cell.'
+tags: [convolutional-networks, computer-vision, deep-learning, worked-example]
+aliases: ['anchor boxes', 'region proposal network', 'RPN', 'box regression', 'YOLO head', 'anchor-free detection', 'FCOS', 'label assignment', 'box offsets']
+requires: [feature-pyramid-network]
+related: [object-detection, mean-average-precision-for-detection, detection-and-segmentation-datasets, focal-loss, intersection-over-union]
+references: [ren2015, redmon2016, redmon2017, lin2017, lin2017fpn, tian2019, zhang2020atss, ge2021yolox, wang2024yolov10, carion2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { AnchorMatching } from './AnchorMatching'
+
+<Definition>
+A dense detection head is a small convolutional network that runs on every cell of a
+<NoteLink to="convolutional-layer">feature map</NoteLink>, or of every level of a
+<NoteLink to="feature-pyramid-network">feature pyramid</NoteLink>, and outputs a fixed set of candidate detections per
+cell. In an anchor-based head each cell holds $A$ anchors, reference boxes of preset sizes and aspect ratios centred on
+the cell. For each anchor the head outputs $K$ class scores (or an objectness score and $K$ class scores) and four
+offsets $(t_x, t_y, t_w, t_h)$ that move and rescale the anchor into a predicted box. An anchor-free head predicts, at
+each cell, class scores and the distances from the cell to the four edges of a box. Training assigns each ground-truth
+box to some anchors or cells as positives; inference decodes every candidate, discards low scores and removes duplicates
+by non-maximum suppression.
+</Definition>
+
+## Intuition
+
+An image holds an unknown number of objects, and a network outputs a tensor of fixed size. A dense detector resolves
+the mismatch by making many guesses: one candidate box per anchor per cell, tens of thousands per image. Each candidate
+says how likely it is to hold an object of each class and how to adjust its box. Almost all candidates are background,
+and only those that score highly are kept.
+
+Predicting a box from nothing is hard: its corners can be anywhere and its size ranges over two orders of magnitude.
+Predicting a correction to a nearby reference box is easy. An anchor near an object and of about its size needs only a
+small shift and a small rescaling, numbers of order 0.1. The anchor set covers the range of sizes and shapes, and each
+object is learned by the anchors that already roughly fit it.
+
+The hard part is deciding which anchors should fit which object during training, the label assignment. The choice of
+positives, more than the choice between anchors and points, separates detectors of similar architecture
+<Cite id="zhang2020atss" />.
+
+## Details
+
+### Anchors
+
+An anchor of size $a$ (the square root of its area) and aspect ratio $\rho = h/w$ has width $a/\sqrt{\rho}$ and height
+$a\sqrt{\rho}$. On a feature map of stride $s$, cell $(i, j)$ is centred at $((j + \tfrac12)s, (i + \tfrac12)s)$ in
+input pixels, and every cell carries the same $A$ anchors there. Faster R-CNN's region proposal network (RPN) uses
+$A = 9$ on one map: areas $128^2$, $256^2$ and $512^2$, each in ratios $\tfrac12$, 1 and 2 <Cite id="ren2015" />. With
+a feature pyramid each level takes one size, $32 \cdot 2^{\ell - 2}$ on $P_\ell$, in three ratios
+<Cite id="lin2017fpn" />. RetinaNet adds the scales $2^0$, $2^{1/3}$ and $2^{2/3}$ per level, so $A = 9$ on each of
+$P_3$ to $P_7$ <Cite id="lin2017" />. YOLOv2 chose its anchor shapes by $k$-means on the training boxes with the
+distance $1 - \text{IoU}$, settling on $k = 5$ <Cite id="redmon2017" />.
+
+### The head
+
+The head is fully convolutional and shared by all cells and all pyramid levels. The RPN applies a $3 \times 3$
+convolution and then two sibling $1 \times 1$ convolutions, one with $2A$ outputs (object or not) and one with $4A$
+outputs (the offsets) <Cite id="ren2015" />. RetinaNet uses two subnetworks of four $3 \times 3$ convolutions with 256
+channels each: the classification branch ends in $KA$ outputs with a sigmoid per class, the box branch in $4A$ linear
+outputs <Cite id="lin2017" />. YOLO first predicted a few boxes and one set of class scores per cell
+<Cite id="redmon2016" />; from YOLOv2 on, the head predicts per anchor an objectness score, $K$ class scores and four
+box numbers, $A(5 + K)$ channels per cell <Cite id="redmon2017" />.
+
+Almost every anchor is background, so a classifier initialised to output probability $\tfrac12$ starts with a loss
+dominated by easy negatives. RetinaNet initialises the bias $b$ of the last classification layer so that every
+anchor's foreground probability starts at a prior $\pi = 0.01$: $\sigma(b) = \pi$ gives
+$b = \log(\pi / (1 - \pi)) = -4.6$ <Cite id="lin2017" />. The training loss for the class scores is the
+<NoteLink to="focal-loss" />, which down-weights well-classified anchors.
+
+### Box offsets
+
+Let an anchor have centre $(x_a, y_a)$, width $w_a$ and height $h_a$, and let the target box have centre $(x, y)$,
+width $w$ and height $h$. The regression targets are
+
+$$
+t_x = \frac{x - x_a}{w_a}, \qquad t_y = \frac{y - y_a}{h_a}, \qquad t_w = \log\frac{w}{w_a}, \qquad
+t_h = \log\frac{h}{h_a},
+$$
+
+and decoding a prediction inverts them: $x = x_a + t_x w_a$, $y = y_a + t_y h_a$, $w = w_a e^{t_w}$,
+$h = h_a e^{t_h}$ <Cite id="ren2015" />.
+
+The form follows from what the targets should not depend on. Scale the image, the anchor and the box together by
+$c > 0$. The centre offset $x - x_a$ and the width $w_a$ both scale by $c$, so $t_x$ is unchanged; the ratio $w / w_a$
+is unchanged, so $t_w$ is too. A detector therefore learns one regression for small and large objects alike. The
+logarithm makes any real $t_w$ decode to a positive width, and it treats doubling and halving symmetrically as
+$\pm \log 2$. YOLOv2 bounds the centre instead: it predicts $x = c_x + \sigma(t_x)$ in units of cells, with $c_x$ the
+cell's corner, so a prediction cannot leave its cell, and keeps $w = w_a e^{t_w}$ <Cite id="redmon2017" />.
+
+The offsets are trained with the smooth $L_1$ loss in Faster R-CNN and RetinaNet. Many current detectors train the
+decoded box against the target with an <NoteLink to="intersection-over-union">IoU</NoteLink>-based loss instead, so
+that the loss measures overlap directly.
+
+### Label assignment
+
+Training needs, for every candidate, a label: positive (with a matched ground-truth box), negative, or ignored.
+
+- **IoU thresholds.** Compute the IoU of every anchor with every ground-truth box. The RPN makes an anchor positive if
+  its IoU with some box is above 0.7 or if it is that box's best anchor, and negative if its IoU is below 0.3 with every
+  box; the rest are ignored <Cite id="ren2015" />. RetinaNet uses 0.5 and 0.4 <Cite id="lin2017" />. The best-anchor
+  rule ensures that a box whose shape no anchor fits still gets one positive.
+- **Adaptive thresholds.** ATSS takes, on each pyramid level, the $k = 9$ anchors whose centres are closest to the
+  box's centre, computes their IoUs with the box, and sets the box's threshold to the mean plus the standard deviation
+  of those IoUs; candidates above it whose centres lie inside the box are positive <Cite id="zhang2020atss" />.
+- **Points instead of anchors.** FCOS makes a cell positive for a box when the cell's centre lies inside it. The target
+  is the distances $(l, t, r, b)$ from the centre to the box's left, top, right and bottom edges. A level $\ell$ keeps
+  only cells with $m_{\ell - 1} \le \max(l, t, r, b) \le m_\ell$, where $m_2, \dots, m_7$ are 0, 64, 128, 256, 512 and
+  $\infty$ and the levels are $P_3$ to $P_7$, so each box goes to one level by size. A cell inside two boxes takes the
+  smaller. A centre-ness branch predicts $\sqrt{\frac{\min(l, r)}{\max(l, r)} \cdot \frac{\min(t, b)}{\max(t, b)}}$,
+  which is 1 at the box's centre and falls to 0 at its edges, and multiplies the class score at inference so that
+  off-centre boxes rank lower <Cite id="tian2019" />.
+- **Dynamic assignment.** YOLOX scores each candidate against each box by a cost that adds the classification loss to
+  the IoU loss of the current prediction, and gives each box its lowest-cost candidates, their number set from the IoUs
+  (SimOTA) <Cite id="ge2021yolox" />. The positives then change during training as the predictions improve.
+
+<AnchorMatching />
+
+### From many candidates to a set
+
+Dense heads fire on several neighbouring anchors or cells for one object. Inference keeps candidates above a score
+threshold, decodes their boxes and runs non-maximum suppression per class; see the NMS explorer in
+<NoteLink to="object-detection" />. A head trained with one-to-one assignment, one positive per object, can skip NMS.
+DETR predicts a fixed set of boxes matched to the objects by the Hungarian algorithm <Cite id="carion2020" />, and
+YOLOv10 trains a one-to-many head and a one-to-one head together and uses only the one-to-one head at inference
+<Cite id="wang2024yolov10" />.
+
+### Practice
+
+Current real-time detectors in the YOLO line are anchor-free, with separate ("decoupled") classification and box
+branches, a PAN-style feature pyramid and dynamic label assignment, a design YOLOX established
+<Cite id="ge2021yolox" />. Anchor-based heads remain in two-stage detectors, whose RPN feeds a second stage, and in many
+deployed RetinaNet-style models. The evaluation of all of them is the <Gloss name="mean-average-precision">mean average
+precision</Gloss> of <NoteLink to="mean-average-precision-for-detection" />.
+
+## Worked example
+
+**Decoding.** Take a stride-16 map and cell $(5, 7)$, row 5 and column 7. Its centre is
+$(x_a, y_a) = (7.5 \cdot 16, 5.5 \cdot 16) = (120, 88)$, and its $64 \times 64$ anchor spans $[88, 152]$ in $x$ and
+$[56, 120]$ in $y$. The head predicts $(t_x, t_y, t_w, t_h) = (0.1, -0.2, 0.3, 0)$. Then
+
+$$
+x = 120 + 0.1 \cdot 64 = 126.4, \quad y = 88 - 0.2 \cdot 64 = 75.2, \quad w = 64\, e^{0.3} = 86.4, \quad
+h = 64\, e^{0} = 64.
+$$
+
+The predicted box has corners $(126.4 \mp 43.2,\; 75.2 \mp 32)$, that is $[83.2, 169.6]$ in $x$ and $[43.2, 107.2]$ in
+$y$. The anchor moved right by 6.4 and up by 12.8 pixels and widened by 35%.
+
+**Encoding.** A ground-truth box has corners $(90, 50)$ and $(170, 110)$: centre $(130, 80)$, size $80 \times 60$. Its
+targets relative to the same anchor are
+
+$$
+t_x = \frac{130 - 120}{64} = 0.156, \quad t_y = \frac{80 - 88}{64} = -0.125, \quad t_w = \log\frac{80}{64} = 0.223,
+\quad t_h = \log\frac{60}{64} = -0.065.
+$$
+
+The overlap of anchor and box spans $[90, 152]$ in $x$ and $[56, 110]$ in $y$, an area of $62 \cdot 54 = 3348$. The
+union is $4800 + 4096 - 3348 = 5548$, so the IoU is $3348 / 5548 = 0.603$.
+
+**Matching on the grid.** Give every cell of the $16 \times 16$ map nine anchors, sides 32, 64 and 128 in ratios
+$\tfrac12$, 1 and 2, as in the figure's starting position. With RetinaNet's thresholds, 8 anchors are positive: the
+side-64 anchors of ratio $\tfrac12$ and 1 at cells $(4, 7)$, $(4, 8)$, $(5, 7)$ and $(5, 8)$, with IoUs from 0.603 to
+0.660. Ten more fall between 0.4 and 0.5 and are ignored. The best is the wide anchor (ratio $\tfrac12$, $90.5 \times
+45.3$) at cell $(4, 8)$, IoU 0.660, since the box itself is wider than tall. With the RPN's 0.7 no anchor passes, and
+only the best-anchor rule makes $(4, 8)$ positive; 39 anchors fall between 0.3 and 0.7 and are ignored.
+
+**Anchor-free targets.** Under FCOS's rule the cells whose centres lie inside the box are positive: 5 columns (centres
+104 to 168) by 4 rows (56 to 104), 20 points. The cell centred at $(136, 72)$ has
+$(l, t, r, b) = (46, 22, 34, 38)$ and centre-ness
+
+$$
+\sqrt{\frac{34}{46} \cdot \frac{22}{38}} = \sqrt{0.739 \cdot 0.579} = 0.654,
+$$
+
+the highest of the 20, shared with the cell below it at $(136, 88)$; the corner cell at $(168, 56)$, 2 pixels from the
+right edge, has 0.053.
+
+**Head size.** RetinaNet on an $800 \times 1024$ image with $K = 80$ classes predicts on $P_3$ to $P_7$, with
+$100 \times 128$, $50 \times 64$, $25 \times 32$, $13 \times 16$ and $7 \times 8$ cells: 17,064 cells and, at 9 anchors
+each, 153,576 anchors. Its classification branch outputs $9 \cdot 80 = 720$ channels per cell and its box branch 36.
+
+## Assumptions
+
+- Every object is well described by an axis-aligned box whose centre lies on or near a cell of a level of about its
+  size. Thin, rotated or heavily occluded objects fit boxes and cells poorly.
+- The anchors, or the points with their regression ranges, cover the sizes and shapes of the dataset's objects.
+- One positive set per object, fixed or recomputed, defines what the head should learn. Ambiguous cells that lie in two
+  boxes are resolved by a rule (higher IoU, smaller box), not by the data.
+
+## Pitfalls
+
+- **Anchors that miss the data.** Objects whose size or shape no anchor approaches have no anchor above the positive
+  threshold and are learned only through the best-anchor rule, from one positive. Check the IoU of each training box
+  with its best anchor before training.
+- **Imbalance.** About 150,000 anchors for a handful of objects swamp an unweighted loss with easy negatives. The focal
+  loss, the prior initialisation, or sampling a fixed ratio of positives to negatives is needed.
+- **Thresholds and NMS interact.** Loose assignment produces many positives per object and more duplicates for NMS to
+  remove; strict assignment starves small objects of positives.
+- **Inconsistent coordinates.** Implementations differ on whether a box's width is $x_1 - x_0$ or $x_1 - x_0 + 1$ and
+  on where a cell's centre lies. Encoding with one convention and decoding with another shifts every box.
+- **Scores that ignore localisation.** A high class score on a badly placed box ranks above a lower score on a good
+  box. Centre-ness, an IoU-aware score or a one-to-one head counters it.

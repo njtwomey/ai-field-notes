@@ -1,0 +1,189 @@
+---
+title: 'Self-supervised pretraining for semi-supervised learning'
+kind: concept
+summary: 'Pretrain an encoder on all inputs by self-supervision, fine-tune it on the labelled subset, then distil it into a student on the unlabelled data (SimCLRv2). Larger pretrained encoders need fewer labels, and the recipe competes with semi-supervised training from scratch.'
+tags: [semi-supervised, self-supervised-learning, worked-example]
+aliases: ['SimCLRv2', 'pretrain, fine-tune, distil']
+requires: [self-supervised-learning, pseudo-labelling]
+related:
+  [
+    transfer-learning-and-fine-tuning,
+    knowledge-distillation,
+    contrastive-learning,
+    theory-of-contrastive-learning,
+    evaluating-semi-supervised-learning,
+    noisy-student,
+    laplacian-eigenmaps,
+    foundation-models,
+  ]
+references: [chen2020big, chen2020, hinton2015, haochen2021spectral, zhai2019s4l, zoph2020rethinking, oliver2018realistic, wang2022usb]
+status: draft
+updated: 2026-10-17
+---
+
+import { PretrainFineTuneDistil } from './PretrainFineTuneDistil'
+
+<Definition>
+**Self-supervised pretraining for semi-supervised learning** uses the unlabelled data twice. First, an encoder is
+trained on all inputs, labelled and unlabelled, with a self-supervised objective that needs no labels. Second, the
+encoder with a classification head is fine-tuned on the labelled subset. Third, the fine-tuned model labels the
+unlabelled inputs with its predicted class probabilities, and a student network is trained to match them. Chen,
+Kornblith, Swersky, Norouzi and Hinton set out this three-step recipe as SimCLRv2 <Cite id="chen2020big" />.
+</Definition>
+
+## Intuition
+
+The semi-supervised methods of the earlier chapters, such as <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink>
+and <NoteLink to="fixmatch">FixMatch</NoteLink>, train one network from scratch on a labelled loss and an unlabelled
+loss together. The unlabelled data shape the network only through the task: every unlabelled loss is defined by the
+classifier's own predictions. With very few labels those predictions are poor, and the network's features are learned
+from little signal.
+
+Self-supervised learning separates the two jobs. A pretext task, such as making the representations of two augmented
+views of one image agree, trains the encoder on the unlabelled data without any classifier. If the pretext task groups
+inputs the way the classes do, the classes become simple regions in representation space, and a small head on top needs
+few labels to find them. The unlabelled data have done the clustering before the labels arrive. The labels only name
+the clusters.
+
+The third step uses the unlabelled data again, this time for the task. The fine-tuned model is a good classifier; its
+predictions on the unlabelled data are soft labels, and a student trained on them inherits the classifier's knowledge.
+The student can be the same network (self-distillation, which refines it) or a smaller one (which compresses it). This
+step is <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> and <NoteLink to="knowledge-distillation">knowledge
+distillation</NoteLink> at once.
+
+## Details
+
+### The three steps
+
+**Pretraining.** SimCLRv2 pretrains with the contrastive loss of SimCLR <Cite id="chen2020" />: two random augmentations
+of each image pass through the encoder and a projection head, and the InfoNCE loss pulls each pair together and pushes
+the other images of the batch apart (see <NoteLink to="contrastive-learning">contrastive learning</NoteLink>). It
+changes three things. The encoder is larger, up to a ResNet-152 three times wider than standard with selective kernels.
+The projection head is deeper, three layers instead of two. And the fine-tuning step keeps part of the head
+<Cite id="chen2020big" />.
+
+**Fine-tuning.** SimCLR discarded the projection head after pretraining. SimCLRv2 keeps its first layer, adding a fully
+connected layer to the encoder, and fine-tunes the whole network with a new linear classifier on the labelled examples.
+Fine-tuning from the middle of the head gives better accuracy than from its input when labels are few
+<Cite id="chen2020big" />.
+
+**Distillation.** The fine-tuned network $f^{T}$ is frozen and serves as the teacher. With logits $f(\xvec)$ and a
+temperature $\tau > 0$, write $P(y \mid \xvec; \tau) = \exp(f(\xvec)_y/\tau) / \sum_{y'}\exp(f(\xvec)_{y'}/\tau)$. The
+student $f^{S}$ minimises the cross-entropy between the teacher's and its own tempered predictions over the
+unlabelled set $\Dcal$:
+
+$$
+\mathcal{L}^{\text{distill}} = -\sum_{\xvec \in \Dcal}\sum_{y} P^{T}(y \mid \xvec; \tau)\,\log P^{S}(y \mid \xvec; \tau).
+$$
+
+No true labels appear in the loss <Cite id="chen2020big" />. This is the distillation loss of Hinton, Vinyals and Dean
+<Cite id="hinton2015" /> applied to unlabelled data. The gradient of one term with respect to the student's logits is
+$(\pvec^{S} - \pvec^{T})/\tau$: the student's probabilities are pulled towards the teacher's. As $\tau \to 0$ the
+teacher's distribution becomes one-hot at its arg max, and the loss becomes pseudo-labelling with hard labels and no
+threshold. SimCLRv2 uses $\tau = 0.1$ when the student has the teacher's architecture and $\tau = 1$ for a smaller
+student <Cite id="chen2020big" />. When labels are plentiful, the loss can be mixed with the labelled cross-entropy,
+$(1 - \alpha)$ times the one plus $\alpha$ times the other.
+
+### What the recipe gains
+
+On <Gloss name="imagenet" /> with 1% of the labels (about 13 images per class) and 10% of the labels, a ResNet-50
+student distilled from a larger SimCLRv2 teacher reached 73.9% and 77.5% top-1 accuracy. A ResNet-50 trained with
+supervision on all labels reached 76.6% <Cite id="chen2020big" />. Two findings carry the idea.
+
+- **Bigger models are more label-efficient.** The gain from a larger encoder was largest at 1% of the labels. Growing
+  the encoder ten times, from ResNet-50 to a ResNet-152 twice as wide, improved label efficiency ten times
+  <Cite id="chen2020big" />. The fewer the labels, the more the
+  pretrained capacity matters, because the labels no longer have to teach the features.
+- **The unlabelled data matter at distillation too.** A ResNet-50 trained on the 1% labels alone reached 12.3%; the same
+  network trained on a teacher's soft labels over the labelled and unlabelled images reached 68.9%, with the teacher at
+  70.6% <Cite id="chen2020big" />. Most of the teacher's knowledge reaches the student only through the unlabelled
+  inputs.
+
+### Why it works: the representation does the clustering
+
+Self-supervised pretraining moves the <NoteLink to="semi-supervised-assumptions">cluster assumption</NoteLink> from
+input space to representation space. HaoChen, Wei, Gaidon and Ma make the link exact for one loss
+<Cite id="haochen2021spectral" />. Build the **augmentation graph** whose nodes are all possible augmented inputs and
+whose edge weights are the probabilities that two of them come from the same natural input. Their
+<NoteLink to="theory-of-contrastive-learning">spectral contrastive loss</NoteLink>, a contrastive objective on network
+outputs, is minimised by a representation spanned by the graph's leading eigenvectors: a spectral embedding of the
+augmentation graph. If the classes are well-connected subgraphs, with few edges between them, the eigenvectors are
+nearly constant on each class, and a linear head on the representation separates the classes. A linear head in a few
+dimensions can be fitted from a few labels, however complex the class boundary is in input space.
+
+This is the same mechanism as <NoteLink to="manifold-regularisation">graph-based semi-supervised learning</NoteLink>,
+with the graph built from augmentations instead of from distances. The figure uses it directly: the representation is
+<NoteLink to="laplacian-eigenmaps">Laplacian eigenmaps</NoteLink> of a nearest-neighbour graph, which is the spectral
+embedding a spectral contrastive loss recovers when the neighbour graph plays the augmentation graph.
+
+### Pretraining against semi-supervised training
+
+The recipe and training from scratch compete and combine. Zhai, Oliver, Kolesnikov and Beyer add a self-supervised loss
+(predicting image rotations, or exemplar invariance) to the labelled loss in one training run, and combine it with
+semi-supervised losses (S4L) <Cite id="zhai2019s4l" />. Zoph and colleagues find on <Gloss name="coco" /> detection that
+the value of ImageNet pretraining falls as augmentation gets stronger and labelled data more plentiful, and turns
+negative with all of COCO's labels, while <NoteLink to="self-training">self-training</NoteLink> improved accuracy by 1.3
+to 3.4 <Gloss name="ap" /> at every dataset size <Cite id="zoph2020rethinking" />. Pretraining buys the most where
+labels are fewest.
+
+In current practice the pretraining step is usually someone else's: a vision encoder such as
+<NoteLink to="self-distillation-and-dino">DINOv2</NoteLink> or <Gloss name="clip" />'s image tower, or a pretrained
+<Gloss name="language-model">language model</Gloss>, is downloaded and fine-tuned (see
+<NoteLink to="foundation-models">foundation models</NoteLink> and
+<NoteLink to="transfer-learning-and-fine-tuning">transfer learning and fine-tuning</NoteLink>). The USB benchmark starts
+every semi-supervised method from such a pretrained network, so its results measure what semi-supervised training adds
+on top of pretraining <Cite id="wang2022usb" />. Oliver and colleagues had already found that fine-tuning from a related
+labelled dataset beat every semi-supervised method trained from scratch on <Gloss name="cifar-10" /> with 4,000 labels
+<Cite id="oliver2018realistic" />. A fair comparison therefore puts the semi-supervised method and the fine-tuned
+baseline on the same pretrained network (see <NoteLink to="evaluating-semi-supervised-learning">evaluating
+semi-supervised learning</NoteLink>).
+
+## Worked example
+
+**One distillation term.** A teacher gives logits $(2.0, 0.5, -1.0)$ over three classes for an unlabelled input; the
+student's logits are $(1.0, 1.0, 0.0)$.
+
+1. **Teacher probabilities at $\tau = 1$.** The exponentials are $e^{2} = 7.389$, $e^{0.5} = 1.649$ and
+   $e^{-1} = 0.368$, which sum to 9.406, so $\pvec^{T} = (0.786, 0.175, 0.039)$. The teacher prefers class 1 and keeps
+   some belief in class 2.
+2. **Student probabilities.** $e^{1} = 2.718$ twice and $e^{0} = 1$ sum to 6.437, so
+   $\pvec^{S} = (0.422, 0.422, 0.155)$.
+3. **The loss.** $-\sum_y p^{T}_y \log p^{S}_y = 0.786 \times 0.862 + 0.175 \times 0.862 + 0.039 \times 1.862 = 0.901$.
+4. **The gradient.** $(\pvec^{S} - \pvec^{T})/\tau = (-0.363, 0.247, 0.116)$. A gradient step raises the student's
+   first logit and lowers the other two, the second more than the third, as the teacher's ranking says.
+5. **A colder teacher.** At $\tau = 0.1$ the teacher's logits become $(20, 5, -10)$ and $\pvec^{T} = (1.000, 0.000,
+   0.000)$ to three decimals. The target is the hard pseudo-label of class 1, and the teacher's preference for class 2
+   over class 3 is gone. The temperature sets how much of the teacher's ranking of the wrong classes the student learns.
+
+**Label efficiency.** The figure runs the recipe on two circles with 200 points: a two-dimensional spectral embedding of
+all 200 inputs, a logistic head on the labelled points, and a distilled random-feature student. With data seed 1 and 2
+labels per class, the head classifies all of the unlabelled points correctly, while
+<NoteLink to="logistic-regression">logistic regression</NoteLink> on random features of the raw inputs reaches 0.668 and
+self-training 0.663. The supervised model reaches 0.970 at 16 labels per class. On two blobs whose class cuts across
+both blobs, the embedding separates the blobs and ignores the class, and at 16 labels per class the pretrained model
+reaches 0.808 against 0.929 for supervised training.
+
+<PretrainFineTuneDistil />
+
+## Assumptions
+
+- **The pretext task respects the classes.** Augmentations define what the representation ignores. Colour jitter makes
+  it ignore colour; if colour decides the class, the representation has discarded the signal. The "class cuts across
+  the clusters" case in the figure is this failure in miniature.
+- **The pretraining data cover the task's inputs.** A representation pretrained on natural images transfers poorly to
+  very different inputs: Oliver and colleagues obtained no useful transfer from ImageNet to SVHN street numbers
+  <Cite id="oliver2018realistic" />.
+- **The teacher is better than the student would be alone.** Distillation copies the teacher's mistakes along with its
+  knowledge, so a poor teacher limits the student.
+
+## Pitfalls
+
+- **Comparing against a scratch baseline only.** A semi-supervised method trained from scratch that beats a scratch
+  supervised baseline may still lose to fine-tuning a pretrained network on the labels alone.
+- **<NoteLink to="embedding-evaluation">Linear probes</NoteLink> as the only measure.** A representation that does well
+  under a linear probe can rank differently after full fine-tuning; SimCLRv2 fine-tunes the whole network from the
+  middle of the projection head <Cite id="chen2020big" />.
+- **Leaking test inputs into pretraining.** Pretraining on all available inputs is legitimate only if the test inputs
+  are not among them, unless the deployment is itself transductive.
+- **Choosing the temperature by test accuracy.** $\tau$ and the student's size are hyperparameters and, like all others,
+  must be chosen on labelled validation data.

@@ -1,0 +1,168 @@
+---
+title: 'Expressive power of message passing'
+kind: concept
+summary: 'Message-passing networks cannot distinguish two graphs that the 1-WL test cannot, so they cannot count triangles or tell a 6-cycle from two triangles. Higher-order WL tests, subgraph methods and node features such as random or positional encodings go beyond the bound.'
+tags: [graph-neural-networks, expressivity, deep-learning, worked-example]
+aliases: ['1-WL bound', 'WL hierarchy', 'limits of message passing', 'expressivity of graph neural networks']
+requires: [weisfeiler-leman-test, graph-isomorphism-network]
+related: [positional-and-structural-encodings, higher-order-and-subgraph-graph-neural-networks, link-prediction-with-graph-neural-networks, graph-transformer, oversquashing-and-graph-rewiring]
+references: [xu2019, morris2019weisfeiler, morris2023wl, chen2020count, arvind2020wl, cai1992, babai1980random, sato2021random, abboud2021random, bouritsas2023gsn, bevilacqua2022esan, frasca2022subgraph, maron2019ppgn]
+status: draft
+updated: 2026-10-17
+---
+
+import { FailurePairs } from './FailurePairs'
+
+<Definition>
+The expressive power of a family of graph networks is the set of pairs of inputs it can map to different outputs for
+some choice of weights. For <Gloss name="gnn">message passing</Gloss> networks the set is bounded by colour refinement,
+the 1-dimensional Weisfeiler-Leman test (<Gloss name="wl" form="short" />): if 1-WL gives two graphs the same colour
+histograms, every message passing network, with any weights, gives them the same output, and if 1-WL gives two nodes the
+same colour, every such network gives them the same vector <Cite id="xu2019" /> <Cite id="morris2019weisfeiler" />. The
+<NoteLink to="graph-isomorphism-network">graph isomorphism network</NoteLink> reaches the bound.
+</Definition>
+
+## Intuition
+
+A model can only learn a function that it can represent. For a function $f$ on graphs and two graphs $G$ and $H$ with
+$f(G) \ne f(H)$, a model family that maps $G$ and $H$ to the same output for every weight setting cannot approximate
+$f$ on both. The pairs a family cannot separate are therefore a list of things it can never learn, however much data it
+sees.
+
+A message passing layer gives each node a function of its own vector and the multiset of its neighbours' vectors. After
+$L$ layers, a node's vector is a function of its depth-$L$ unfolding tree: the tree of walks of length $L$ out of the
+node. Two nodes with isomorphic unfolding trees get equal vectors. Colour refinement assigns colours by exactly these
+trees, so it marks the ceiling.
+
+The unfolding tree records where walks go but not where they meet. A walk around a triangle returns to its start after
+three steps, and in the tree the return looks like a visit to a new node with the same colour. A message passing network
+therefore cannot tell a closed cycle from an open path of the same local shape. This one fact explains most of the
+failures below.
+
+## Details
+
+### The bound
+
+The proof is an induction over layers, given in <NoteLink to="graph-isomorphism-network" />: equal colours at round $k$
+imply equal vectors at layer $k$, because a layer receives equal arguments for equal signatures. It covers every layer
+of the form $\hvec_v' = \phi\paren{\hvec_v, \mset{(\hvec_u, \evec_{uv}) : u \in \Ncal(v)}}$, including graph
+convolution, <Gloss name="graphsage" />, <NoteLink to="graph-attention-network">graph attention</NoteLink> (whose
+weights are computed from the same equal vectors), gated and edge-conditioned layers, and any readout over the multiset
+of node vectors. Edge features enter as edge colours of the refinement. Node features enter as initial colours, so the
+bound is relative to them.
+
+Two consequences follow.
+
+- **Graph level.** Graphs that 1-WL ties get identical outputs.
+- **Node level.** Nodes that end with the same colour get identical vectors, whether or not some automorphism of the
+  graph maps one to the other.
+
+### What lies beyond the bound
+
+- **Cycles and connectivity.** The 6-cycle $C_6$ and two disjoint triangles $2C_3$ tie, so no message passing network
+  can decide whether a graph is connected, whether it contains a triangle, or how long its shortest cycle is.
+- **Substructure counts.** Message passing networks cannot count induced subgraphs on three or more nodes, such as
+  triangles or 4-cycles, although they can count stars <Cite id="chen2020count" />. Which counts 1-WL determines is
+  characterised exactly by Arvind et al. <Cite id="arvind2020wl" />.
+- **Ring sizes in molecules.** Decalin (two fused six-membered rings) and bicyclopentyl (two five-membered rings joined
+  by a bond) tie. Ring size changes the chemistry, and a model without extra features sees both molecules the same.
+- **Strongly regular graphs.** A strongly regular graph with parameters $(n, d, \lambda, \mu)$ has $n$ nodes of degree
+  $d$; adjacent nodes share $\lambda$ neighbours, non-adjacent nodes $\mu$. The 4-by-4 rook's graph and the Shrikhande
+  graph are both $(16, 6, 2, 2)$. They tie under 1-WL and under the stronger 2-dimensional folklore test as well
+  <Cite id="arvind2020wl" />.
+- **Pairs of nodes.** In $C_6$ with equal features, all six nodes get the same vector. A link predictor that scores a
+  node pair from the two endpoint vectors gives an adjacent pair and an opposite pair the same score. Link prediction
+  methods add pair-specific labels for this reason; see <NoteLink to="link-prediction-with-graph-neural-networks" />.
+
+### How strong the bound is
+
+The bound is not weak. For a graph drawn uniformly at random on $n$ nodes, 1-WL gives every node a distinct colour with
+probability tending to 1, and identifies the graph <Cite id="babai1980random" />. It also identifies every tree
+<Cite id="morris2023wl" />. The failures concentrate on graphs with much symmetry and few distinct features: regular
+graphs, rings, lattices and strongly regular graphs. Molecules sit close to that regime, with many identical carbon
+atoms in symmetric rings, and so do synthetic benchmarks built to test expressiveness.
+
+### The Weisfeiler-Leman hierarchy
+
+The $k$-dimensional Weisfeiler-Leman test colours ordered $k$-tuples of nodes and refines a tuple's colour by the
+colours of the tuples that differ from it in one position. Two conventions exist. The **folklore** test $k$-FWL is as
+strong as the **oblivious** test $(k+1)$-WL, and 2-WL is exactly as strong as 1-WL. Each step up the hierarchy is
+strictly stronger: 2-FWL separates $C_6$ from $2C_3$ and decalin from bicyclopentyl, but not the rook's graph from the
+Shrikhande graph. No fixed $k$ suffices for all graphs: for every $k$ there are pairs of non-isomorphic graphs with
+$O(k)$ nodes that $k$-WL cannot separate <Cite id="cai1992" />. The $k$-dimensional tests cost $O(n^k)$ memory and more
+time, so higher-order networks pay the same price; see
+<NoteLink to="higher-order-and-subgraph-graph-neural-networks" />.
+
+### Four ways past the bound
+
+- **Random node features.** Append a random number to every node's features before message passing. Nodes become
+  distinguishable, and message passing networks with random node initialisation are
+  <NoteLink to="universal-approximation-theorem">universal approximators</NoteLink> of invariant functions on graphs of
+  bounded size <Cite id="abboud2021random" /> <Cite id="sato2021random" />. The price is invariance: a single
+  <NoteLink to="multilayer-perceptron">forward pass</NoteLink> depends on the draw, and the network is invariant only in
+  expectation, so training and test predictions average over draws.
+- **Structural and <NoteLink to="positional-encoding">positional encodings</NoteLink>.** Append features that message
+  passing cannot compute: counts of triangles or cycles through each node <Cite id="bouritsas2023gsn" />, random-walk
+  return probabilities, or Laplacian eigenvectors. The model stays a cheap message passing network and becomes as strong
+  as refinement started from those features. See <NoteLink to="positional-and-structural-encodings" />.
+- **Subgraph networks.** Run message passing on a bag of subgraphs, such as all node-deleted or ego-network subgraphs,
+  and pool the results <Cite id="bevilacqua2022esan" />. These methods separate $C_6$ from $2C_3$. With one subgraph per
+  node, such as node deletion or ego networks, their power is bounded by 3-WL <Cite id="frasca2022subgraph" />.
+- **Higher-order networks.** Pass messages between $k$-tuples of nodes, matching $k$-WL
+  <Cite id="morris2019weisfeiler" />, or use the provably powerful graph network, which matches 3-WL with $n \times n$
+  feature matrices and matrix products at $O(n^3)$ time per layer <Cite id="maron2019ppgn" />.
+
+Graph transformers by themselves add no structural power: attention over all nodes, without encodings, cannot see the
+edges. Their expressiveness comes from the encodings and attention biases they are given; see
+<NoteLink to="graph-transformer" />.
+
+## Worked example
+
+**Message passing on $C_6$ and $2C_3$.** Give every node feature $h^{(0)} = 1$. Take any layer
+$h' = \phi(h_v, \mset{h_u : u \in \Ncal(v)})$.
+
+1. In both graphs every node has two neighbours. Every node computes $\phi(1, \mset{1, 1})$, the same number $a$.
+2. In layer 2 every node computes $\phi(a, \mset{a, a})$, again the same number in both graphs.
+3. By induction, all twelve nodes hold the same vector after every layer. Any readout over the node multiset, such as a
+   sum, gives the same graph vector, whatever $\phi$ is.
+
+**Adding triangle counts.** Set $h^{(0)}_v = 1 + t_v$, where $t_v$ is the number of triangles through $v$. In $C_6$,
+$t_v = 0$ at every node. In $2C_3$, $t_v = 1$. The histograms differ at round 0, and a GIN separates the graphs with no
+message passing at all.
+
+**Triangle counts are not enough.** Decalin and bicyclopentyl have no triangles, so the count is 0 everywhere and the
+pair still ties. The return probability of a random walk separates them. A walk that moves to a uniformly chosen
+neighbour at each step can return to its start after an odd number of steps only through an odd cycle. Decalin is
+bipartite, with only even rings, so its return probabilities at steps 1, 3 and 5 are 0. Bicyclopentyl has
+five-membered rings, and its return probability at step 5 is about 0.042 at every node.
+
+**Not even that.** The rook's graph and the Shrikhande graph are 6-regular, and every node lies in 6 triangles: a rook's
+graph node's six neighbours form two disjoint triangles, a Shrikhande node's six neighbours form a 6-cycle, and both
+contain six edges. Both graphs have the same eigenvalues and every node looks like every other, so every return
+probability agrees as well. These features leave the pair tied.
+
+The figure checks each statement. Its readouts run a GIN and a <Gloss name="gcn">graph convolutional network</Gloss>
+with fixed random weights on both graphs and report the distance between their graph vectors.
+
+<FailurePairs />
+
+## Assumptions
+
+- **Discrete or countable features.** The statements compare colours. Continuous features that are all distinct break
+  every symmetry at round 0, and the bound then says nothing restrictive.
+- **Separation, not learnability.** The bound is about which functions can be represented. It says nothing about how
+  many examples or steps training needs to find them.
+- **Enough depth and width.** An $L$-layer network sees only the depth-$L$ unfolding tree, so it separates only pairs
+  that refinement separates within $L$ rounds. Narrow layers may also merge vectors that injectivity would keep apart.
+
+## Pitfalls
+
+- **Expressiveness is not accuracy.** On citation and social graphs with rich node features, 1-WL already separates
+  almost every node, and more expressive models rarely help. They help on molecules, counting tasks and symmetric
+  graphs.
+- **Random features without averaging.** A model with random node features predicts differently on every call. Without
+  averaging over draws, its outputs are noisy and it loses invariance: the figure shows a graph separated from itself.
+- **Eigenvector encodings are not unique.** Laplacian eigenvectors can be flipped in sign and, for repeated eigenvalues,
+  rotated within their eigenspace. An encoder that ignores this sees two encodings of one graph as different graphs.
+- **More layers do not add power.** Depth beyond the stable round of refinement adds no separating power, and deep
+  message passing smooths node vectors together; see <NoteLink to="oversmoothing" />.

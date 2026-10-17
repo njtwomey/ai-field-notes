@@ -1,0 +1,174 @@
+---
+title: 'Theta-subsumption'
+kind: concept
+summary: 'A clause $C$ θ-subsumes a clause $D$ if some substitution θ maps every literal of $C$ to a literal of $D$. θ-subsumption implies entailment, defines the generality order that ILP systems search, and is NP-complete to test.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['θ-subsumption', 'clause subsumption', 'subsumption lattice', 'reduced clause']
+requires: [generality-ordering-and-refinement, unification-and-resolution]
+related: [least-general-generalisation, inverse-entailment-and-progol, foil, inductive-logic-programming]
+references: [plotkin1972thesis, gottlob1985, gottlob1987, kapur1986, nienhuyscheng1997, deraedt2008, shapiro1983]
+status: draft
+updated: 2026-10-17
+---
+
+import { SubsumptionSearch } from './SubsumptionSearch'
+
+<Definition>
+Treat a clause as the set of its literals. A clause $C$ **θ-subsumes** a clause $D$, written $C \succeq D$, when there
+is a substitution $\theta$ with $C\theta \subseteq D$: applying $\theta$ to every literal of $C$ gives literals that all
+occur in $D$ <Cite id="plotkin1972thesis" />. For <NoteLink to="horn-clauses-and-logic-programs">Horn clauses</NoteLink>
+this means $\theta$ maps the head of $C$ onto the head of $D$ and each body literal of $C$ onto some body literal of
+$D$. $C$ is then at least as general as $D$, and $C \models D$. Two clauses that θ-subsume each other are
+**equivalent**, and a clause equivalent to no proper subset of itself is **reduced**.
+</Definition>
+
+## Intuition
+
+A general clause says less than a specific one. $\text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z) \land
+\text{parent}(Z, Y)$ holds of any $X$ and $Y$ joined by a chain of two parent links. The clause
+
+$$
+\text{grandparent}(\text{ann}, \text{dee}) \leftarrow \text{parent}(\text{ann}, \text{bob}) \land
+\text{parent}(\text{bob}, \text{dee}) \land \text{female}(\text{dee})
+$$
+
+talks about two named people and adds a condition on Dee. The substitution
+$\set{X \mapsto \text{ann}, Y \mapsto \text{dee}, Z \mapsto \text{bob}}$ turns the first clause into a subset of the
+second. Every situation that satisfies the specific clause's body therefore satisfies the general clause's body.
+
+θ-subsumption captures the two ways a clause becomes more specific: binding variables (to constants, to other variables
+or to compound terms) and adding literals. It is a purely syntactic test, so a learner can compare two hypotheses
+without enumerating the examples they cover. That makes it the working generality order of
+<NoteLink to="inductive-logic-programming">inductive logic programming</NoteLink>
+(<NoteLink to="generality-ordering-and-refinement">generality ordering and refinement</NoteLink>).
+
+The same test decides coverage. Write an example $e$ with ground background facts $B$ as the clause $e \leftarrow B$.
+A non-recursive definite clause $C$ covers $e$ exactly when $C$ θ-subsumes $e \leftarrow B$: $\theta$ maps the head onto
+$e$ and every body literal onto a fact. The specific clause above is such an example clause with part of $B$ as its
+body.
+
+## Details
+
+### Subsumption is one-way matching
+
+The test differs from <NoteLink to="unification-and-resolution">unification</NoteLink> in two ways. Only the variables
+of $C$ may be bound; those of $D$ are renamed apart and treated as constants, so the test is **matching**, not
+unification. And $\theta$ must work for all literals of $C$ at once: binding $Z \mapsto \text{bob}$ for one literal
+constrains every other literal that contains $Z$. A substitution need not be injective. Several variables of $C$ may map
+to the same term, and several literals of $C$ may map onto the same literal of $D$.
+
+### θ-subsumption implies entailment
+
+If $C\theta \subseteq D$ then $C \models D$. A clause is universally quantified, so $C$ entails every instance of it,
+in particular $C\theta$. A clause is a disjunction of its literals, and $C\theta \subseteq D$ means $D$ is the
+disjunction $C\theta \lor R$ for the remaining literals $R$. Every model of $C\theta$ makes one of its literals true,
+hence one of $D$'s, so $C\theta \models D$, and $C \models D$ follows by transitivity.
+
+The converse fails. The clause $C = p(f(X)) \leftarrow p(X)$ entails $D = p(f(f(Y))) \leftarrow p(Y)$: resolving $C$
+with a renamed copy of itself gives $D$. No substitution maps $C$ into $D$, because mapping the head forces
+$X \mapsto f(Y)$, and then the body becomes $p(f(Y))$, which is not in $D$. Gottlob showed that this gap needs
+recursion: if $C$ does not resolve with itself and $D$ is not a tautology, then $C \models D$ implies that $C$
+θ-subsumes $D$ <Cite id="gottlob1987" />. For the non-recursive clauses that most rule learners produce, θ-subsumption
+and entailment coincide.
+
+### The order, equivalence and reduction
+
+θ-subsumption is reflexive (take the empty substitution) and transitive (compose the substitutions), so it is a
+quasi-order. It is not antisymmetric. The clauses $p(X) \leftarrow q(X, Y) \land q(X, Z)$ and
+$p(X) \leftarrow q(X, Y)$ θ-subsume each other: $\set{Z \mapsto Y}$ maps the longer onto the shorter, and the empty
+substitution maps the shorter into the longer. They cover the same examples, and the literal $q(X, Z)$ adds nothing.
+
+Plotkin proved that every clause has a **reduced** equivalent, obtained by deleting literals while the clause stays
+equivalent, and that the reduced form is unique up to renaming of variables <Cite id="plotkin1972thesis" />. On reduced
+clauses, modulo renaming, θ-subsumption is a partial order. It is moreover a lattice. The least upper bound of two
+clauses is their <NoteLink to="least-general-generalisation">least general generalisation</NoteLink>. For general
+clauses the greatest lower bound is their union after renaming the variables of one apart, the least specific clause
+that both θ-subsume <Cite id="nienhuyscheng1997" />. The union of two Horn clauses has two heads, so a Horn learner
+specialises by unifying the heads instead.
+
+### Refinement under θ-subsumption
+
+Shapiro's downward refinement operator specialises a clause in three ways <Cite id="shapiro1983" />: add a literal whose
+arguments are new variables, unify two variables, or replace a variable by a constant or by a compound term with new
+variables. Each step gives a clause that the original θ-subsumes. No refinement operator for θ-subsumption is ideal,
+that is locally finite, proper and complete at once <Cite id="nienhuyscheng1997" />, so practical systems bound the
+clause length and the number of new variables (<NoteLink to="generality-ordering-and-refinement">generality ordering and
+refinement</NoteLink>).
+
+### Testing subsumption is NP-complete
+
+A certificate for $C \succeq D$ is the substitution itself, which is checked in time polynomial in the clause sizes, so
+the problem is in NP. It is also NP-hard <Cite id="kapur1986" />.
+
+<Derivation title="NP-hardness by reduction from graph 3-colouring">
+Take a graph $G$ with vertices $v_1, \dots, v_n$. Let $C$ be the clause with one variable $X_i$ per vertex and the
+body literal $e(X_i, X_j)$ for each edge $\set{v_i, v_j}$. Let $D$ be the clause whose body lists the six ordered pairs
+of distinct colours, $e(r, g), e(g, r), e(r, b), e(b, r), e(g, b), e(b, g)$, both with the same nullary head. A
+substitution with $C\theta \subseteq D$ maps each $X_i$ to a colour such that every edge of $G$ becomes a pair of
+different colours, which is a proper 3-colouring of $G$. Conversely, a proper 3-colouring read as a substitution maps
+every literal of $C$ into $D$. So $C$ θ-subsumes $D$ exactly when $G$ is 3-colourable, which is NP-complete. The
+reduction is polynomial: $C$ has one literal per edge and $D$ has six.
+</Derivation>
+
+Practical subsumption testers treat the problem as constraint satisfaction <Cite id="gottlob1985" />. They map first the
+literals of $C$ with the fewest candidate targets, propagate the bindings, and backtrack on failure. Restricted clause
+languages are polynomial. In a determinate clause each body literal has at most one match once the variables before
+it are bound, so matching proceeds without choice.
+
+## Worked example
+
+The first preset of the figure tests whether
+$C = \text{grandparent}(X, Y) \leftarrow \text{parent}(X, Z) \land \text{parent}(Z, Y)$ θ-subsumes
+$D = \text{grandparent}(\text{ann}, \text{dee}) \leftarrow \text{parent}(\text{ann}, \text{cid}) \land
+\text{parent}(\text{ann}, \text{bob}) \land \text{parent}(\text{bob}, \text{dee}) \land \text{female}(\text{dee})$.
+The literals of $C$ are mapped in order, the head first.
+
+1. **Head.** $\text{grandparent}(X, Y)$ matches $\text{grandparent}(\text{ann}, \text{dee})$ with $X \mapsto \text{ann}$
+   and $Y \mapsto \text{dee}$.
+2. **First body literal.** $\text{parent}(X, Z)$ is now $\text{parent}(\text{ann}, Z)$. Its first candidate in $D$,
+   $\text{parent}(\text{ann}, \text{cid})$, matches with $Z \mapsto \text{cid}$.
+3. **Second body literal.** $\text{parent}(Z, Y)$ is now $\text{parent}(\text{cid}, \text{dee})$. None of the three
+   parent literals of $D$ is that literal: three clashes.
+4. **Backtrack.** The second literal has no target left, so the search undoes $Z \mapsto \text{cid}$ and gives the first
+   body literal its next target, $\text{parent}(\text{ann}, \text{bob})$, with $Z \mapsto \text{bob}$.
+5. **Second body literal again.** $\text{parent}(\text{bob}, \text{dee})$ clashes with the first two parent literals of
+   $D$ and matches the third.
+6. **Result.** $\theta = \set{X \mapsto \text{ann}, Y \mapsto \text{dee}, Z \mapsto \text{bob}}$ maps all three literals
+   of $C$ into $D$. The search took 11 steps after the start: 4 matches, 5 clashes, 1 backtrack and the final
+   success.
+   $\text{female}(\text{dee})$ is the image of no literal, which is allowed: $D$ may have extra literals.
+
+The other presets show the remaining cases. The daughter pair fails: with $X \mapsto \text{ann}$ and
+$Y \mapsto \text{cid}$, $\text{parent}(Y, X)$ needs $\text{parent}(\text{cid}, \text{ann})$, which $D$ lacks. The
+recursive pair fails at the body after the head forces $X \mapsto f(Y)$, although $C \models D$. The longer clause maps
+both of its $q$ literals onto the single $q(A, B)$, so it subsumes the shorter one and is equivalent to it. The triangle
+preset asks for a closed walk of length 3 in a 4-cycle, which does not exist because the cycle is bipartite. The search
+needs 227 steps, 176 of them clashes, before it fails: the cost of NP-hard matching on an 8-literal clause.
+
+<SubsumptionSearch />
+
+## Assumptions
+
+- **Clauses are sets.** Order and repetition of literals do not matter, which is why a literal of $D$ can be the image
+  of several literals of $C$.
+- **Variables of the two clauses are distinct.** $D$'s variables are renamed apart before the test and act as
+  constants. $p(X)$ θ-subsumes $p(f(X))$ through $\set{X \mapsto f(X')}$ once $D$'s $X$ is renamed to $X'$. Without
+  renaming, the binding $X \mapsto f(X)$ would be circular and the test would wrongly fail.
+- **Generality is judged without background knowledge.** Plain θ-subsumption ignores $B$. Relative subsumption, $C
+  \succeq_B D$ when $C$ θ-subsumes $D$ extended by the facts of $B$, accounts for background knowledge and underlies the
+  <NoteLink to="least-general-generalisation">relative least general generalisation</NoteLink> and the
+  <NoteLink to="inverse-entailment-and-progol">bottom clause</NoteLink>.
+
+## Pitfalls
+
+- **Treating subsumption as entailment.** For self-recursive clauses a hypothesis can entail another without
+  θ-subsuming it, so a learner that prunes by θ-subsumption may discard a recursive clause that is more general than it
+  seems.
+- **Counting redundant literals as conditions.** A clause with a literal that a substitution can fold onto another,
+  such as $q(X, Z)$ next to $q(X, Y)$ with $Z$ unused, is no more specific. Without reduction, a learner may report and
+  score equivalent clauses as different.
+- **Underestimating test cost.** Each coverage test of a long clause against a large example clause is an NP-hard
+  problem. Clauses with many literals sharing many free variables, as in the triangle preset, can take exponential time;
+  bounding new variables and ordering literals by their candidate counts keeps tests fast in practice.
+- **Confusing direction.** $C \succeq D$ means $C$ is the more general clause and has the fewer or more abstract
+  literals. Specialising a hypothesis moves from $C$ to some $D$ below it.

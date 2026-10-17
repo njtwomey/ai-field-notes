@@ -1,0 +1,85 @@
+---
+title: 'Comparing and combining sequence models'
+kind: overview
+summary: 'Attention set against linear recurrences and state-space layers: recall and long-range benchmarks, the parity and permutation tasks that fixed-size states cannot track, hybrid stacks with one attention layer per 1 to 7 others, and state-space layers for images, audio and DNA.'
+tags: [sequence-models, state-space-models, overview]
+aliases: []
+requires: [mamba]
+related:
+  [
+    efficient-and-state-space-sequence-models,
+    structured-and-selective-state-space-models,
+    linear-recurrent-models,
+    sparse-linear-and-low-rank-attention,
+  ]
+references: [arora2024zoology, merrill2024illusion, waleffe2024]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+This topic compares the token-mixing layers of <NoteLink to="sequence-models">sequence models</NoteLink>,
+<NoteLink to="scaled-dot-product-attention">softmax attention</NoteLink> against layers with a fixed-size state
+(state-space layers, gated linear recurrences, linear attention and delta rules), and covers the models that combine
+them. It asks three questions: what each kind of layer can retrieve and compute, how the kinds are mixed in one network,
+and how state-space layers carry over from text to other data.
+</Definition>
+
+## What it is for
+
+The efficient sequence layers of the neighbouring topics, <NoteLink to="structured-and-selective-state-space-models" />
+and <NoteLink to="linear-recurrent-models" />, generate each token at a constant cost and train in parallel. They
+replace the growing <NoteLink to="key-value-cache">key-value cache</NoteLink> of attention by a state of fixed size. The
+notes here say what that replacement loses, in tasks a model designer can test, and how current
+<Gloss name="language-model">language models</Gloss> recover it with a few attention layers. They also cover the use
+of state-space layers on long non-text inputs, where their linear cost matters most.
+
+## Main ideas
+
+**Two kinds of long-context ability.** Carrying a signal across thousands of steps and holding many facts at once are
+different demands. <NoteLink to="long-range-and-recall-benchmarks" /> separates them: <Gloss name="s4" /> solved the
+16,384-step Path-X task of Long Range Arena, while fixed-state layers fall behind attention on multi-query associative
+recall as the number of stored pairs grows against the state. On the Pile, recall of earlier n-grams accounted for 82%
+of the perplexity gap between attention and gated-convolution models <Cite id="arora2024zoology" />. A counting argument
+sets the limit: a state of $s$ numbers cannot store more pairs than its bits allow, and a $d \times d$ linear memory
+holds at most $d$ exact associations.
+
+**What a fixed-size state cannot compute.** <NoteLink to="expressiveness-of-linear-recurrences" /> treats state
+tracking: parity, counting mod $m$ and composing permutations. Diagonal transitions with entries in $[0, 1]$, as in
+Mamba and gated linear attention, cannot compute parity at every length with finite precision, and stacks of them, like
+transformers, lie in $\mathrm{TC}^0$ and cannot compose permutations of five objects at fixed depth unless
+$\mathrm{TC}^0 = \mathrm{NC}^1$ <Cite id="merrill2024illusion" />. Negative eigenvalues give parity; input-dependent
+non-diagonal transitions, as in DeltaNet with a widened step, DeltaProduct and
+<NoteLink to="rwkv-and-retentive-networks">RWKV-7</NoteLink>, give permutations and regular languages while keeping a
+parallel scan.
+
+**Hybrids.** <NoteLink to="hybrid-sequence-models" /> interleave a few attention layers among recurrent ones. Jamba and
+MiniMax-01 use one attention layer per 7 others, Nemotron-H about 8% attention layers, Qwen3-Next and Kimi Linear one
+per 3 delta-rule layers, Samba alternates Mamba with <NoteLink to="sliding-window-and-sparse-attention">sliding-window
+attention</NoteLink>, Hymba runs attention and SSM heads in parallel in every layer, and Zamba calls one shared
+attention block every 6 Mamba blocks. A controlled 8B study found a hybrid with 7% attention layers better than a
+transformer on all 12 tasks tested <Cite id="waleffe2024" />.
+
+**Beyond text.** <NoteLink to="state-space-models-beyond-text" /> covers images, audio, DNA and
+<NoteLink to="time-series">time series</NoteLink>. Images need a scan order and bidirectional scans (Vision Mamba,
+VMamba's four-route scan); DNA needs both directions and reverse-complement symmetry (Caduceus); raw audio needs stable
+recurrences for generation (SaShiMi).
+
+## How the notes fit together
+
+- Start with <NoteLink to="long-range-and-recall-benchmarks" />: it states the recall limit that motivates the rest.
+- <NoteLink to="expressiveness-of-linear-recurrences" /> needs the <NoteLink to="gated-linear-recurrence" /> and
+  <NoteLink to="delta-rule-and-test-time-training" /> notes, and explains why delta-rule layers appear in recent
+  hybrids.
+- <NoteLink to="hybrid-sequence-models" /> uses both: attention layers supply recall, recurrent layers the rest.
+- <NoteLink to="state-space-models-beyond-text" /> needs only <NoteLink to="mamba" /> and can be read on its own.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="mamba" />, <NoteLink to="linear-attention" /> and the <NoteLink to="transformer" />. The
+layers being compared are built in <NoteLink to="structured-and-selective-state-space-models" />,
+<NoteLink to="linear-recurrent-models" /> and <NoteLink to="sparse-linear-and-low-rank-attention" />. The attention
+circuits that do recall in transformers are in <NoteLink to="induction-heads-and-circuits" />, the evaluation of long
+contexts in pretrained models in <NoteLink to="effective-context-length" />, and the analogous question for graphs, what
+<Gloss name="gnn">message passing</Gloss> can distinguish, in <NoteLink to="expressive-power-of-message-passing" />. The
+whole area is mapped in <NoteLink to="efficient-and-state-space-sequence-models" />.

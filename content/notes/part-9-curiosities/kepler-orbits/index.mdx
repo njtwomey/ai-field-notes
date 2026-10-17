@@ -1,0 +1,218 @@
+---
+title: 'Kepler orbits'
+kind: concept
+summary: 'A body moving under an inverse-square attraction traces a conic section: an ellipse, parabola or hyperbola set by its energy and angular momentum, with the attracting mass at a focus and equal areas swept in equal times.'
+tags: [orbital-mechanics, worked-example]
+aliases: [Kepler problem, Kepler's laws, two-body problem, vis-viva equation, Laplace–Runge–Lenz vector, eccentricity vector, reduced mass]
+requires: [ordinary-differential-equations]
+related: [keplers-equation, symplectic-integrators-and-energy-drift, three-body-problem, lagrange-points, periodic-three-body-orbits, numerical-ode-solvers]
+references: [murray1999, goldstein2002]
+status: draft
+updated: 2026-10-17
+---
+
+import { KeplerOrbit } from './KeplerOrbit'
+
+<Definition>
+The **Kepler problem** is the motion of a body under the acceleration $\ddot{\rvec} = -\mu\,\rvec/r^3$ towards a fixed
+centre, where $\rvec$ is the body's position relative to the centre, $r = \norm{\rvec}$ and $\mu = GM$ is the
+gravitational parameter of the attracting mass $M$. Every solution moves on a **conic section** with the centre at one
+focus: an ellipse when the specific energy $\Ecal = \tfrac12 v^2 - \mu/r$ is negative, a parabola when it is zero and a
+hyperbola when it is positive <Cite id="murray1999" />. The radius vector sweeps area at the constant rate $h/2$, where
+$h$ is the specific angular momentum.
+</Definition>
+
+## Intuition
+
+A body thrown sideways near a planet falls towards it and also moves across. If the sideways speed is small, the fall
+wins and the body drops close to the planet, swings round it fast and climbs back out to where it started. If the
+sideways speed is just right, the fall bends the path exactly as fast as the planet's surface curves away, and the
+orbit is a circle. If the speed is large enough, the body climbs out and never comes back.
+
+Three facts make this problem special. First, the path closes: a bound body returns to the same point with the same
+velocity after one period, orbit after orbit, so the orbit is a fixed ellipse. Of all central forces only the
+inverse-square law and the linear spring have this property for every bound start (Bertrand's theorem)
+<Cite id="goldstein2002" />. Second, the shape of the path follows from two conserved numbers, the energy and the
+angular momentum, without solving for the motion in time. Third, the timing along the ellipse is fixed by area: the
+line from the centre to the body sweeps equal areas in equal times. Johannes Kepler found the ellipse and the area law
+in Tycho Brahe's observations of Mars (1609) and the relation between period and size ten years later. Isaac Newton
+derived all three from the inverse-square law in 1687.
+
+## Two bodies reduce to one
+
+Two bodies of masses $m_1$ and $m_2$ at $\rvec_1$ and $\rvec_2$ attract each other with the force $G m_1 m_2/r^2$
+along the line between them. Their centre of mass $(m_1\rvec_1 + m_2\rvec_2)/(m_1 + m_2)$ feels no net force, so it
+moves in a straight line at constant speed. The separation $\rvec = \rvec_2 - \rvec_1$ obeys
+$\ddot{\rvec} = -G(m_1 + m_2)\,\rvec/r^3$, which is the Kepler problem with $\mu = G(m_1 + m_2)$. Equivalently, the
+relative motion is that of one particle of **reduced mass** $m_1 m_2/(m_1 + m_2)$ in the potential energy
+$-G m_1 m_2/r$ <Cite id="goldstein2002" />. Each body then moves on a copy of the relative orbit about the centre of
+mass, scaled by $m_2/(m_1 + m_2)$ for body 1 and $m_1/(m_1 + m_2)$ for body 2. The rest of this note treats one body
+about a fixed centre with parameter $\mu$.
+
+## Two conserved quantities
+
+The **specific energy** (energy per unit mass of the body) is
+
+$$
+\Ecal = \tfrac12 v^2 - \frac{\mu}{r},
+$$
+
+where $v = \norm{\vvec}$ is the speed and $\vvec = \dot{\rvec}$ the velocity. Its time derivative is
+$\vvec \cdot \dot{\vvec} + \mu\,\dot r/r^2 = -\mu\,(\vvec \cdot \rvec)/r^3 + \mu\,\dot r/r^2$, which is zero because
+$\vvec \cdot \rvec = r\dot r$. So $\Ecal$ is constant.
+
+The **specific angular momentum** is the vector $\hvec = \rvec \times \vvec$. Its derivative is
+$\vvec \times \vvec + \rvec \times \ddot{\rvec} = \zeros$, because the acceleration is parallel to $\rvec$. So $\hvec$
+is constant. Two consequences follow at once. The body stays in the plane through the centre perpendicular to
+$\hvec$, so the problem is two-dimensional. And the area swept by the radius vector in a short time $dt$ is the
+triangle $\tfrac12\norm{\rvec \times \vvec\,dt} = \tfrac12 h\,dt$, with $h = \norm{\hvec}$. The area rate $h/2$ is
+constant, which is **Kepler's second law**. In the plane of the orbit, with coordinates $(x, y)$, the angular
+momentum is the single number $h = x v_y - y v_x$.
+
+## The orbit is a conic
+
+A third conserved vector gives the shape. Take the cross product of the equation of motion with $\hvec$:
+
+$$
+\frac{d}{dt}\paren{\vvec \times \hvec} = \ddot{\rvec} \times \hvec = -\frac{\mu}{r^3}\,\rvec \times (\rvec \times
+\vvec) = -\frac{\mu}{r^3}\paren{\rvec\,(\rvec \cdot \vvec) - \vvec\,r^2}.
+$$
+
+The last step is the vector triple product identity $\avec \times (\bvec \times \cvec) = \bvec(\avec \cdot \cvec) -
+\cvec(\avec \cdot \bvec)$. With $\rvec \cdot \vvec = r\dot r$, the right-hand side is
+$\mu\paren{\vvec/r - \rvec\,\dot r/r^2}$, which is exactly $\mu\,\frac{d}{dt}(\rvec/r)$. Both sides are time
+derivatives, so their difference is constant:
+
+$$
+\evec = \frac{\vvec \times \hvec}{\mu} - \frac{\rvec}{r}.
+$$
+
+The dimensionless vector $\evec$ is the **eccentricity vector**. Multiplied by $\mu$, it is the
+**Laplace–Runge–Lenz vector** <Cite id="goldstein2002" />. It lies in the orbital plane, because both terms do.
+
+Dot $\evec$ with $\rvec$. The scalar triple product gives $\rvec \cdot (\vvec \times \hvec) = \hvec \cdot (\rvec \times
+\vvec) = h^2$, so
+
+$$
+\evec \cdot \rvec = \frac{h^2}{\mu} - r.
+$$
+
+Write $e = \norm{\evec}$ and let $\nu$ be the angle from $\evec$ to $\rvec$, the **true anomaly**. Then
+$\evec \cdot \rvec = e r \cos\nu$, and solving for $r$ gives
+
+$$
+r = \frac{p}{1 + e\cos\nu}, \qquad p = \frac{h^2}{\mu}.
+$$
+
+This is the polar equation of a conic with one focus at the centre, **eccentricity** $e$ and **semi-latus rectum**
+$p$ (the distance from the focus to the orbit at $\nu = \pm 90°$). The orbit is a circle for $e = 0$, an ellipse for
+$0 < e < 1$, a parabola for $e = 1$ and a hyperbola for $e > 1$. The distance is smallest at $\nu = 0$, so $\evec$
+points from the centre to the **pericentre**, the closest point. This is **Kepler's first law** for bound orbits.
+
+<Derivation title="The same conic from the Binet equation">
+In <NoteLink to="polar-coordinates">polar coordinates</NoteLink> $(r, \theta)$ in the orbital plane, the radial equation
+of motion is $\ddot r - r\dot\theta^2 =
+-\mu/r^2$ and the angular momentum is $h = r^2\dot\theta$. Substitute $u = 1/r$ and use $\theta$ as the independent
+variable. The centripetal term is $r\dot\theta^2 = h^2u^3$. Then $\dot r = -\dot u/u^2 = -h\,du/d\theta$ and $\ddot r = -h\,\dot\theta\,d^2u/d\theta^2 = -h^2u^2\,d^2u/
+d\theta^2$. The radial equation becomes
+
+$$
+-h^2u^2\frac{d^2u}{d\theta^2} - h^2u^3 = -\mu u^2 \quad\Longrightarrow\quad \frac{d^2u}{d\theta^2} + u =
+\frac{\mu}{h^2}.
+$$
+
+This is a harmonic oscillator in $\theta$ with a constant forcing. Its general solution is
+$u = \mu/h^2\,\paren{1 + e\cos(\theta - \omega)}$ for constants $e \ge 0$ and $\omega$, which is the conic
+$r = p/(1 + e\cos\nu)$ with $\nu = \theta - \omega$ <Cite id="goldstein2002" />. The constant $\omega$, the **argument
+of pericentre**, is the direction of $\evec$.
+</Derivation>
+
+## Energy fixes the size
+
+The length of $\evec$ ties the shape to the energy. Since $\vvec$ is perpendicular to $\hvec$, the length of
+$\vvec \times \hvec$ is $vh$, and its dot product with $\rvec$ is $h^2$. Expanding $\mu^2 e^2 = \norm{\vvec \times
+\hvec - \mu\rvec/r}^2$ gives $v^2h^2 - 2\mu h^2/r + \mu^2$, so
+
+$$
+e^2 = 1 + \frac{2\Ecal h^2}{\mu^2}.
+$$
+
+Negative energy gives $e < 1$ (a closed ellipse), zero energy gives $e = 1$ and positive energy gives $e > 1$. For an
+ellipse, the pericentre and apocentre distances are $p/(1 + e)$ and $p/(1 - e)$, and the **semi-major axis** $a$ is
+their mean, $a = p/(1 - e^2)$. Substituting $p = h^2/\mu$ and $1 - e^2 = -2\Ecal h^2/\mu^2$ gives
+
+$$
+\Ecal = -\frac{\mu}{2a}.
+$$
+
+The energy depends on the size of the ellipse only, not on its shape. Putting this into the definition of $\Ecal$
+gives the **vis-viva equation**, the speed at any distance on a given orbit:
+
+$$
+v^2 = \mu\paren{\frac{2}{r} - \frac{1}{a}}.
+$$
+
+Two speeds at distance $r$ stand out. The **circular speed** $\sqrt{\mu/r}$ is the vis-viva speed with $a = r$. The
+**escape speed** $\sqrt{2\mu/r}$ makes $\Ecal = 0$. A body launched at distance $r$ is bound if and only if its speed is
+below the escape speed, whatever the direction of launch. The direction sets $h$, and therefore the eccentricity.
+
+## Kepler's third law
+
+An ellipse with semi-major axis $a$ has semi-minor axis $b = a\sqrt{1 - e^2}$ and area $\pi ab$. The radius vector
+sweeps it at the constant rate $h/2$, so the period is $T = 2\pi ab/h$. With $h = \sqrt{\mu p} = \sqrt{\mu a(1 -
+e^2)}$,
+
+$$
+T = \frac{2\pi a^2\sqrt{1 - e^2}}{\sqrt{\mu a (1 - e^2)}} = 2\pi\sqrt{\frac{a^3}{\mu}}.
+$$
+
+The square of the period is proportional to the cube of the semi-major axis, which is **Kepler's third law**
+<Cite id="murray1999" />. The eccentricity cancels: every orbit with the same $a$ has the same period, from the circle
+to a needle-thin ellipse. For two bodies, $\mu = G(m_1 + m_2)$, so the measured period and size of a binary orbit give
+the total mass.
+
+## Worked example
+
+Take units with $G M = 1$: distance in units of the starting radius $r_0$, and time in units of
+$\sqrt{r_0^3/GM}$, so that a circular orbit at $r = 1$ has speed 1 and period $2\pi$. Start the body at
+$\rvec_0 = (1, 0)$ with velocity $\vvec_0 = (0, 0.8)$.
+
+1. **Energy.** $\Ecal = \tfrac12(0.8)^2 - 1/1 = 0.32 - 1 = -0.68$. It is negative, so the orbit is an ellipse. The
+   speed $0.8$ is below the escape speed $\sqrt 2 = 1.414$.
+2. **Angular momentum.** $h = x v_y - y v_x = 1 \times 0.8 - 0 = 0.8$, so $p = h^2/\mu = 0.64$.
+3. **Eccentricity.** $e^2 = 1 + 2(-0.68)(0.64) = 1 - 0.8704 = 0.1296$, so $e = 0.36$.
+4. **Direction of pericentre.** In the plane, $\vvec \times \hvec = (v_y h, -v_x h) = (0.64, 0)$, so $\evec = (0.64,
+   0) - (1, 0) = (-0.36, 0)$. Pericentre lies on the negative $x$-axis, and the start is the apocentre.
+5. **Distances.** The pericentre is at $0.64/1.36 = 0.471$ and the apocentre at $0.64/0.64 = 1$, as expected for the
+   start. The semi-major axis is their mean, $0.735$, and $-\mu/(2\Ecal) = 1/1.36 = 0.735$ agrees.
+6. **Period.** $T = 2\pi(0.735)^{3/2} = 2\pi \times 0.631 = 3.96$ time units, shorter than the $2\pi$ of the circular
+   orbit at $r = 1$ because the ellipse is smaller.
+7. **Speed at pericentre.** From the area law, $v_p = h/r_p = 0.8/0.471 = 1.70$. Vis-viva gives $v_p^2 = 2/0.471 -
+   1/0.735 = 4.25 - 1.36 = 2.89$, so $v_p = 1.70$ again. The body moves $1.70/0.8 = 2.1$ times faster at pericentre
+   than at apocentre, the inverse ratio of the two distances.
+
+## The toy
+
+The figure integrates the equation of motion numerically with velocity Verlet (a symplectic method; see
+<NoteLink to="symplectic-integrators-and-energy-drift">symplectic integrators and energy drift</NoteLink>) and draws
+the closed-form conic from the readouts behind it. The two curves agree to the width of the line for any start that
+does not pass too close to the mass. Setting $\vvec_0 = (0, 0.8)$ reproduces the worked example.
+
+<KeplerOrbit />
+
+## Pitfalls
+
+- **The conic is not the clock.** The orbit equation gives the path but not where the body is at a given time. That
+  needs <NoteLink to="keplers-equation">Kepler's equation</NoteLink>, which has no closed-form solution.
+- **Near-parabolic orbits.** As $\Ecal \to 0$ the semi-major axis $a = -\mu/(2\Ecal)$ diverges and the period
+  becomes infinite. Formulas in $p$ and $e$ stay finite through $e = 1$ and are the ones to use there.
+- **Two bodies, not one.** When the companion's mass is not negligible, the third law uses $\mu = G(m_1 + m_2)$.
+  Using $GM$ of the heavier body alone overestimates the period by the factor $\sqrt{(m_1 + m_2)/m_1}$.
+- **Real orbits precess.** The ellipse stays fixed only for an exact inverse-square force between two point masses.
+  Other planets, the oblateness of the central body and general relativity add small extra forces that turn the
+  eccentricity vector slowly, so the pericentre advances <Cite id="murray1999" />. A <NoteLink
+  to="three-body-problem">third body</NoteLink> can change the orbit completely.
+- **Close passes break fixed-step integrators.** The time scale near pericentre is about $\sqrt{r_p^3/\mu}$, which falls
+  to zero for a start aimed at the mass. A fixed step that is fine elsewhere then jumps across the pericentre, and the
+  energy error grows to the size of the energy. Adaptive steps or a regularising
+  <NoteLink to="change-of-variables">change of variables</NoteLink> handle near-collisions.

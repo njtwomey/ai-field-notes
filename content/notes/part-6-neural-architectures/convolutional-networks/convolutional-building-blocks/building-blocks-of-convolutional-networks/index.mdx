@@ -1,0 +1,85 @@
+---
+title: 'Building blocks of convolutional networks'
+kind: overview
+summary: 'The layers convolutional networks are built from: the convolutional layer, $1\times1$ channel mixing, pooling and strides, dilation and the receptive field, depthwise, grouped, transposed and deformable convolution, normalisation over tensor axes, and fast convolution algorithms.'
+tags: [convolutional-networks, deep-learning, overview]
+aliases: []
+requires: [multilayer-perceptron, convolution]
+related: [convolutional-networks, convolutional-network-architectures, dense-prediction-with-convolutional-networks, convolution-beyond-images]
+references: [dumoulin2016, goodfellow2016]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+The building blocks of convolutional networks are the layers from which image and signal networks are assembled. The
+core is the convolutional layer, a bank of small kernels shared across the positions of a grid. The other blocks vary
+one part of it: the kernel size, the channels each kernel reads, the spacing of its taps or outputs, the direction of
+the map between sizes, or the statistics used to normalise its outputs. Each block is defined by its output shape, its
+parameter count and its cost in multiply-accumulates.
+</Definition>
+
+## What it is for
+
+Every convolutional architecture, from <NoteLink to="classic-convolutional-network-architectures">LeNet</NoteLink> to
+ConvNeXt, and every dense-prediction model, from <Gloss name="u-net" /> to a feature pyramid detector, is a stack of a
+dozen kinds of layer. A designer chooses among them by their effect on three things: the shape of the feature map, the
+receptive field, and the cost. These notes give each block's definition, its shape and cost arithmetic, and a worked
+example with small numbers, so that a whole network can be read layer by layer and its sizes and costs checked by hand
+<Cite id="dumoulin2016" />.
+
+## Main ideas
+
+**One layer, three cost factors.** A <NoteLink to="convolutional-layer" /> with a $k \times k$ kernel from $C$ to $C'$
+channels on an $H' \times W'$ output costs $k^2 C C' H' W'$ multiply-accumulates and holds $k^2 C C'$ weights. Its
+output width is $\lfloor (n + 2p - k)/s \rfloor + 1$ for input width $n$, padding $p$ and stride $s$. Its backward pass
+is a convolution with the flipped kernel, and its forward pass is equivariant to translation
+<Cite id="goodfellow2016" />.
+
+**Cutting one factor at a time.** Efficient blocks each reduce one factor of the cost. A
+<NoteLink to="one-by-one-convolution" /> sets $k = 1$ and mixes channels at every pixel; it is the bottleneck of
+Inception and ResNet. <NoteLink to="depthwise-and-grouped-convolution" /> splits the channels into $g$ groups and
+divides $C C'$ by $g$; depthwise convolution followed by a $1 \times 1$ layer is the separable block of MobileNet. A
+stride or a pooling layer divides $H' W'$ by $s^2$; see <NoteLink to="pooling-and-strides" />.
+
+**Seeing further.** A unit can respond only to the input positions in its receptive field. Depth grows the field
+linearly, strides and pooling geometrically, and dilation geometrically without losing resolution; the effective field
+is narrower and roughly Gaussian. See <NoteLink to="receptive-field-and-dilated-convolution" />.
+<NoteLink to="deformable-convolution" /> goes one step further and learns, at every position, where each tap reads.
+
+**Changing resolution.** Pooling and strides downsample, and without a low-pass filter they alias, which breaks the
+shift invariance a classifier relies on. Global average pooling reduces a map to one vector per image. A
+<NoteLink to="transposed-convolution" /> upsamples by the transpose of a convolution's matrix; its uneven overlaps cause
+checkerboard artefacts, which resize-then-convolve avoids.
+
+**Normalising activations.** <NoteLink to="normalisation-in-convolutional-networks" /> compares batch, layer, instance
+and group normalisation. All four standardise the activations of an $[N, C, H, W]$ tensor and differ only in which axes
+share one mean and variance. Batch normalisation depends on the batch size; group normalisation does not.
+
+**Computing it fast.** The same output can be computed several ways. im2col turns the layer into one matrix product,
+FFT convolution makes the cost almost independent of kernel size, and Winograd's minimal filtering cuts the
+multiplications of a $3 \times 3$ layer by 2.25 to 4 times. See <NoteLink to="fast-convolution-algorithms" />.
+
+## How the notes fit together
+
+- Start with the <NoteLink to="convolutional-layer" />: every other note uses its shape and cost formulas.
+- <NoteLink to="one-by-one-convolution" /> and <NoteLink to="pooling-and-strides" /> come next.
+  <NoteLink to="depthwise-and-grouped-convolution" /> builds on the first and
+  <NoteLink to="receptive-field-and-dilated-convolution" /> on the second.
+- <NoteLink to="transposed-convolution" /> needs the matrix view of the layer and the stride arithmetic.
+- <NoteLink to="normalisation-in-convolutional-networks" /> assumes <NoteLink to="batch-normalisation" /> and
+  <NoteLink to="layer-normalisation" /> from the training chapter.
+- <NoteLink to="deformable-convolution" /> extends dilation to learned offsets, and
+  <NoteLink to="fast-convolution-algorithms" /> needs the <NoteLink to="fast-fourier-transform" />. Both can be read
+  last.
+
+## Prerequisites and next steps
+
+A reader needs the <NoteLink to="multilayer-perceptron" /> and discrete <NoteLink to="convolution" />. The blocks are
+assembled into whole networks in <NoteLink to="convolutional-network-architectures" />: the bottlenecks of the
+<NoteLink to="residual-network" />, the separable blocks of <NoteLink to="efficient-convolutional-networks" /> and the
+large depthwise kernels of <NoteLink to="modern-convolutional-networks" />. Dense prediction uses transposed
+convolution, dilation and deformable layers; see <NoteLink to="dense-prediction-with-convolutional-networks" />.
+<NoteLink to="convolution-beyond-images" /> applies the same blocks along one axis for audio and
+<NoteLink to="time-series">time series</NoteLink>, causally for generation, and in three dimensions for video. The topic
+overview is <NoteLink to="convolutional-networks" />.

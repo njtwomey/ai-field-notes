@@ -76,6 +76,10 @@ export const macroGroups: MacroGroup[] = [
       ),
       '\\ones': '\\mathbf{1}',
       '\\zeros': '\\mathbf{0}',
+      // Physical vectors written as bold capitals: total angular momentum, force, impulse.
+      '\\Lvec': '\\mathbf{L}',
+      '\\Fvec': '\\mathbf{F}',
+      '\\Jvec': '\\mathbf{J}',
     },
   },
   {
@@ -180,6 +184,7 @@ export const macroGroups: MacroGroup[] = [
       '\\norm': '\\left\\lVert #1 \\right\\rVert',
       '\\inner': '\\left\\langle #1,\\, #2 \\right\\rangle',
       '\\set': '\\left\\{ #1 \\right\\}',
+      '\\mset': '\\left\\{\\!\\!\\left\\{ #1 \\right\\}\\!\\!\\right\\}',
       '\\paren': '\\left( #1 \\right)',
       '\\brack': '\\left[ #1 \\right]',
       '\\LP': '\\left(',

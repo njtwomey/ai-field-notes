@@ -1,0 +1,274 @@
+---
+title: 'Fast convolution algorithms'
+kind: technique
+summary: 'im2col rewrites a convolution as one matrix product; FFT convolution costs $O(n\log n)$ and wins for large kernels; Winograd''s $F(2\times2,3\times3)$ computes a $2\times2$ output tile with 16 multiplications instead of 36.'
+tags: [convolutional-networks, deep-learning, parallel-computing, worked-example]
+aliases: ['im2col', 'Winograd convolution', 'Winograd minimal filtering', 'implicit GEMM', 'Toom-Cook convolution']
+requires: [convolutional-layer, fast-fourier-transform]
+related: [convolution, convolution-theorem, matrix-multiplication, overlap-add-and-overlap-save, long-convolution-models, fourier-neural-operator, floating-point-arithmetic, depthwise-and-grouped-convolution]
+references: [chellapilla2006, chetlur2014, mathieu2014fft, vasilache2015fbfft, lavin2016, winograd1980, cooley1965]
+status: draft
+updated: 2026-10-17
+---
+
+import { Im2colWalk } from './Im2colWalk'
+import { AlgorithmCosts } from './AlgorithmCosts'
+
+<Definition>
+Fast convolution algorithms compute the output of a <NoteLink to="convolutional-layer">convolutional layer</NoteLink>
+exactly, up to rounding, with less time or fewer multiplications than the direct sum. **im2col** copies every input
+window into a column of a matrix, so the layer becomes one <NoteLink to="matrix-multiplication">matrix
+product</NoteLink>. **FFT convolution** transforms the maps and kernels to the frequency domain, where
+<NoteLink to="convolution">convolution</NoteLink> is a pointwise product. **Winograd's minimal filtering** computes an
+$m \times m$ tile of outputs of an $r \times r$ kernel with $(m + r - 1)^2$ multiplications instead of $m^2 r^2$.
+</Definition>
+
+## Problem
+
+A convolutional layer with $C$ input channels, $C'$ output channels, a $k \times k$ kernel and an $H \times W$ output
+costs $k^2 C C' H W$ multiply-accumulates per image. A $3 \times 3$ layer from 64 to 64 channels on a $56 \times 56$ map
+costs $9 \cdot 64 \cdot 64 \cdot 3136 = 1.16 \times 10^8$, and a
+<NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink> runs dozens of such layers per image.
+Almost all of the compute of a convolutional network is in these layers.
+
+The direct sum is a poor fit for the hardware. Each output reads a small window, the windows overlap, and the loop nest
+has seven levels (batch, output channel, input channel, two output axes, two kernel axes). Processors run fastest on
+dense matrix products, where every number loaded from memory is reused many times. The algorithms below either reshape
+the convolution into such a product or change the arithmetic so that fewer multiplications are needed.
+
+## Mechanism
+
+### im2col and the matrix product
+
+Copy the $k \times k \times C$ window read by each output position into one column. With stride 1 and same padding there
+are $HW$ positions, so the copies form a matrix $\Xmat_{\text{col}}$ of shape $[k^2 C,\ HW]$. Reshape the weights into
+$\Wmat$ of shape $[C',\ k^2 C]$, one row per output channel. Then
+
+$$
+\Ymat = \Wmat\, \Xmat_{\text{col}}
+$$
+
+has shape $[C',\ HW]$: row $c'$ is output channel $c'$ with its spatial axes flattened. The product does exactly the
+$k^2 C C' HW$ multiplications of the direct sum, so im2col saves no arithmetic. It saves time because a tuned general
+matrix multiplication (GEMM) keeps blocks of both operands in caches or registers and reuses each loaded number many
+times. Chellapilla, Puri and Simard used this unrolling with BLAS and a <Gloss name="gpu" /> to speed up the training of
+handwriting networks <Cite id="chellapilla2006" />.
+
+The price is memory. With stride 1 each input value is copied into up to $k^2$ columns, so $\Xmat_{\text{col}}$ is about
+$k^2$ times larger than the input. cuDNN avoids storing it: its implicit-GEMM kernels build tiles of
+$\Xmat_{\text{col}}$ in on-chip memory as the product consumes them <Cite id="chetlur2014" />.
+
+<Im2colWalk />
+
+### FFT convolution
+
+The <NoteLink to="convolution-theorem">convolution theorem</NoteLink> turns convolution into multiplication: the
+<Gloss name="dft">discrete Fourier transform</Gloss> of a circular convolution is the pointwise product of the
+transforms. Zero-pad an $H \times W$ map and a $k \times k$ kernel to $N_h \times N_w$ with $N_h \ge H + k - 1$ and
+$N_w \ge W + k - 1$, so the circular convolution equals the linear one, and use the
+<NoteLink to="fast-fourier-transform">fast Fourier transform</NoteLink> <Cite id="cooley1965" />. One layer then takes
+
+1. one forward transform per input channel, $C$ in all;
+2. one forward transform per kernel, $C C'$ in all;
+3. for each output channel, the sum over input channels of the pointwise products of spectra, $C C'$ products of
+   $N_h N_w$ complex numbers;
+4. one inverse transform per output channel, $C'$ in all.
+
+A transform of $P = N_h N_w$ points costs $O(P \log P)$, and the pointwise stage costs $O(C C' P)$ whatever the kernel
+size. The direct sum grows as $k^2$; the FFT cost changes with $k$ only when $H + k - 1$ crosses a power of two. FFT
+convolution therefore wins for large kernels.
+
+The kernel transforms are the expensive part for small kernels: $C C'$ transforms of a padded $N_h \times N_w$ array for
+$k^2$ weights each. Mathieu, Henaff and LeCun made FFT training fast by reusing every transformed map many times, over
+the batch and over the channels it meets <Cite id="mathieu2014fft" />. A batch of $B$ images shares one set of kernel
+transforms among its $B C C'$ products. Vasilache et al. built GPU FFT kernels for this and analysed when the direct
+method beats the Fourier one <Cite id="vasilache2015fbfft" />.
+
+### Winograd minimal filtering
+
+Winograd's algorithms reduce the number of multiplications for a small tile. Write $F(m, r)$ for the problem of
+computing $m$ outputs of an $r$-tap correlation, $y_i = \sum_{u=0}^{r-1} g_u\, d_{i + u}$, from $m + r - 1$ inputs. The
+direct sum uses $m r$ multiplications. Winograd showed that $m + r - 1$ suffice and that no algorithm uses fewer
+<Cite id="winograd1980" /> <Cite id="lavin2016" />.
+
+For $F(2, 3)$, with inputs $d_0, \dots, d_3$ and taps $g_0, g_1, g_2$, form four products:
+
+$$
+\begin{aligned}
+m_1 &= (d_0 - d_2)\, g_0, & m_2 &= (d_1 + d_2)\, \tfrac{g_0 + g_1 + g_2}{2}, \\
+m_3 &= (d_2 - d_1)\, \tfrac{g_0 - g_1 + g_2}{2}, & m_4 &= (d_1 - d_3)\, g_2,
+\end{aligned}
+$$
+
+and set $y_0 = m_1 + m_2 + m_3$ and $y_1 = m_2 - m_3 - m_4$. To check $y_0$, add $m_2$ and $m_3$. The $d_1$ terms give
+$\tfrac{d_1}{2}\paren{(g_0 + g_1 + g_2) - (g_0 - g_1 + g_2)} = d_1 g_1$ and the $d_2$ terms give
+$\tfrac{d_2}{2}\paren{(g_0 + g_1 + g_2) + (g_0 - g_1 + g_2)} = d_2 (g_0 + g_2)$. Adding
+$m_1 = d_0 g_0 - d_2 g_0$ leaves $d_0 g_0 + d_1 g_1 + d_2 g_2$, which is $y_0$. For $y_1$, the same sums give
+$m_2 - m_3 = d_1 (g_0 + g_2) + d_2 g_1$, and subtracting $m_4 = d_1 g_2 - d_3 g_2$ leaves
+$d_1 g_0 + d_2 g_1 + d_3 g_2$. The filter terms $(g_0 \pm g_1 + g_2)/2$ depend only on the weights and are
+computed once per kernel, so each tile costs 4 multiplications instead of 6.
+
+In matrix form the algorithm is
+
+$$
+\yvec = \Amat\transpose \bigl[(\Gmat \gvec) \odot (\Bmat\transpose \dvec)\bigr],
+$$
+
+with a data transform $\Bmat\transpose$ ($n \times n$, $n = m + r - 1$), a filter transform $\Gmat$ ($n \times r$), an
+output transform $\Amat\transpose$ ($m \times n$) and $\odot$ the element-wise product. For $F(2, 3)$,
+
+$$
+\Bmat\transpose = \begin{bmatrix} 1 & 0 & -1 & 0 \\ 0 & 1 & 1 & 0 \\ 0 & -1 & 1 & 0 \\ 0 & 1 & 0 & -1 \end{bmatrix}, \quad
+\Gmat = \begin{bmatrix} 1 & 0 & 0 \\ \tfrac12 & \tfrac12 & \tfrac12 \\ \tfrac12 & -\tfrac12 & \tfrac12 \\ 0 & 0 & 1 \end{bmatrix}, \quad
+\Amat\transpose = \begin{bmatrix} 1 & 1 & 1 & 0 \\ 0 & 1 & -1 & -1 \end{bmatrix}.
+$$
+
+**Two dimensions.** Nesting the one-dimensional algorithm along rows and columns gives $F(m \times m, r \times r)$:
+
+$$
+\Ymat = \Amat\transpose \bigl[(\Gmat\, \Kmat\, \Gmat\transpose) \odot (\Bmat\transpose \Dmat\, \Bmat)\bigr] \Amat,
+$$
+
+for an $n \times n$ data tile $\Dmat$ and an $r \times r$ kernel $\Kmat$. It uses $n^2$ multiplications for $m^2$
+outputs: $F(2 \times 2, 3 \times 3)$ uses $4^2 = 16$ instead of $2^2 \cdot 3^2 = 36$, a 2.25-fold saving, and
+$F(4 \times 4, 3 \times 3)$ uses $6^2 = 36$ instead of $144$, a 4-fold saving <Cite id="lavin2016" />. Per output the
+cost is $(1 + (r - 1)/m)^2$ multiplications against $r^2$.
+
+**A whole layer.** Lavin and Gray cut each input channel into $n \times n$ tiles that overlap by $r - 1$ pixels, with
+$\lceil H/m \rceil \lceil W/m \rceil$ tiles per channel <Cite id="lavin2016" />. The transformed kernels
+$\Umat = \Gmat\, \Kmat\, \Gmat\transpose$ and the transformed tiles $\Vmat = \Bmat\transpose \Dmat\, \Bmat$ meet in the
+sum over input channels. For each of the $n^2$ positions in a tile, that sum is a matrix product of a $[C', C]$ slice of
+$\Umat$ with a $[C, \text{tiles}]$ slice of $\Vmat$. The element-wise stage thus becomes $n^2$ independent matrix
+products, which run at GEMM speed, and the output transform is applied once per output channel and tile.
+
+<Derivation title="Where the transforms come from: Toom-Cook and transposition">
+Linear convolution of a length-$m$ sequence $\avec$ with an $r$-tap filter $\gvec$ is polynomial multiplication:
+$s(x) = a(x)\, g(x)$ with $a(x) = \sum_i a_i x^i$ and $g(x) = \sum_u g_u x^u$. The product has degree $n - 1$ with
+$n = m + r - 1$, so $n$ values determine it. Choose $n - 1$ distinct points $\alpha_1, \dots, \alpha_{n-1}$ and the
+point at infinity, whose value is the leading coefficient. Evaluate $a$ and $g$ at the $n$ points, multiply the $n$
+pairs of values, and interpolate: $\svec = \Vmat^{-1}\bigl[(\Vmat_m \avec) \odot (\Vmat_r \gvec)\bigr]$, where $\Vmat_m$
+($n \times m$), $\Vmat_r$ ($n \times r$) and $\Vmat$ ($n \times n$) are Vandermonde matrices with rows
+$(1, \alpha_i, \alpha_i^2, \dots)$ and a last row that picks the leading coefficient. This is the Toom-Cook algorithm,
+with $n$ multiplications.
+
+Correlation is the transpose of convolution. Fix $\gvec$ and write the convolution as $\svec = \Tmat\, \avec$,
+with $\Tmat$ the $n \times m$ Toeplitz matrix $T_{ji} = g_{j - i}$. Then $(\Tmat\transpose \dvec)_i = \sum_j g_{j - i}\,
+d_j = \sum_u g_u\, d_{i + u}$, which is the correlation $F(m, r)$ applied to $\dvec$. Since
+$\Tmat = \Vmat^{-1} \diag(\Vmat_r \gvec)\, \Vmat_m$, transposing gives
+
+$$
+\Tmat\transpose \dvec = \Vmat_m\transpose \bigl[(\Vmat_r \gvec) \odot (\Vmat^{-\top} \dvec)\bigr],
+$$
+
+so $\Amat\transpose = \Vmat_m\transpose$, $\Gmat = \Vmat_r$ and $\Bmat\transpose = \Vmat^{-\top}$, still with $n$
+multiplications. Scaling row $i$ of $\Gmat$ by a constant and row $i$ of $\Bmat\transpose$ by its inverse leaves the
+product unchanged; Lavin and Gray's matrices for $F(2, 3)$ use the points $0, 1, -1$ and such scalings
+<Cite id="lavin2016" />. Larger tiles need more points, such as $\pm 2$ and $\pm \tfrac12$, and the entries of the
+matrices grow like powers of the points.
+</Derivation>
+
+## Worked example
+
+**im2col.** Take the $4 \times 4$ image and $3 \times 3$ vertical-edge kernel of the
+<NoteLink to="convolutional-layer">convolutional layer</NoteLink> note:
+
+$$
+x = \begin{bmatrix} 1 & 2 & 0 & 1 \\ 0 & 1 & 3 & 1 \\ 2 & 1 & 0 & 0 \\ 1 & 0 & 1 & 2 \end{bmatrix}, \qquad
+w = \begin{bmatrix} 1 & 0 & -1 \\ 1 & 0 & -1 \\ 1 & 0 & -1 \end{bmatrix}.
+$$
+
+The output is $2 \times 2$, so $\Xmat_{\text{col}}$ has four columns, one per window, and nine rows, one per tap
+$(u, v)$. Column $q = 2i + j$ holds the window at output $(i, j)$, read row by row. The window at $(0, 0)$ covers rows 0
+to 2 and columns 0 to 2 and gives the column $(1, 2, 0, 0, 1, 3, 2, 1, 0)$. The full matrix, with rows in tap order
+$(0,0), (0,1), \dots, (2,2)$, is
+
+$$
+\Xmat_{\text{col}} = \begin{bmatrix}
+1 & 2 & 0 & 1 \\ 2 & 0 & 1 & 3 \\ 0 & 1 & 3 & 1 \\ 0 & 1 & 2 & 1 \\ 1 & 3 & 1 & 0 \\ 3 & 1 & 0 & 0 \\ 2 & 1 & 1 & 0 \\ 1 & 0 & 0 & 1 \\ 0 & 0 & 1 & 2
+\end{bmatrix}.
+$$
+
+The kernel flattened in the same order is the row $\Wmat = (1, 0, -1, 1, 0, -1, 1, 0, -1)$. The product of $\Wmat$ with
+the first column is $1 - 0 + 0 - 3 + 2 - 0 = 0$, and the four products are $(0, 2, -1, -1)$, the output
+$\begin{bmatrix} 0 & 2 \\ -1 & -1 \end{bmatrix}$ of the direct sum. The matrix holds 36 numbers for a 16-pixel image:
+the centre pixels $x_{1,1}, x_{1,2}, x_{2,1}, x_{2,2}$ appear in all four columns.
+
+**Winograd $F(2, 3)$.** Take $\dvec = (3, 1, 2, 0)$ and $\gvec = (1, 2, 3)$. The direct outputs are
+$y_0 = 3 \cdot 1 + 1 \cdot 2 + 2 \cdot 3 = 11$ and $y_1 = 1 \cdot 1 + 2 \cdot 2 + 0 \cdot 3 = 5$, six multiplications.
+
+1. Filter transform, once per kernel: $g_0 = 1$, $(g_0 + g_1 + g_2)/2 = 3$, $(g_0 - g_1 + g_2)/2 = 1$, $g_2 = 3$.
+2. Data transform, additions only: $d_0 - d_2 = 1$, $d_1 + d_2 = 3$, $d_2 - d_1 = 1$, $d_1 - d_3 = 1$.
+3. Four multiplications: $m_1 = 1 \cdot 1 = 1$, $m_2 = 3 \cdot 3 = 9$, $m_3 = 1 \cdot 1 = 1$, $m_4 = 1 \cdot 3 = 3$.
+4. Output transform, additions only: $y_0 = 1 + 9 + 1 = 11$ and $y_1 = 9 - 1 - 3 = 5$.
+
+The results match. In two dimensions the same tile of $2 \times 2$ outputs from a $4 \times 4$ input patch costs 16
+multiplications instead of 36.
+
+## Cost
+
+The figure counts real multiplications for one stride-1 layer with same padding, under a simple model: a real 2-D FFT of
+$P$ points costs $P \log_2 P$ real multiplications, a complex product costs 4, the pointwise stage runs over the
+Hermitian half of each spectrum, and a Winograd transform costs one multiplication per matrix entry outside
+$\set{0, \pm 1}$ per use.
+
+At the defaults ($56 \times 56$, 64 to 64 channels, batch 32), the counts per image for a $3 \times 3$ kernel are
+$1.16 \times 10^8$ for the direct sum and im2col, $4.7 \times 10^7$ for the FFT, $5.1 \times 10^7$ for Winograd with
+$m = 2$ and $3.1 \times 10^7$ with $m = 4$. For a $7 \times 7$ kernel the direct sum needs $6.3 \times 10^8$, the FFT
+still $4.7 \times 10^7$, and Winograd with $m = 2$ $2.3 \times 10^8$. At batch 1 the FFT needs $2.4 \times 10^8$ for
+the $3 \times 3$ layer, twice the direct sum, because the $4096$ kernel transforms are no longer shared.
+
+<AlgorithmCosts />
+
+Multiplications are not the whole cost. The three algorithms also differ in memory:
+
+| Algorithm | Multiplications per output (one channel pair) | Extra memory |
+| --- | --- | --- |
+| Direct | $k^2$ | none |
+| im2col + GEMM | $k^2$ | $k^2$ copies of the input (none for implicit GEMM) |
+| FFT | about $2 N_h N_w / (HW)$, independent of $k$, plus transforms | padded spectra of every map and kernel |
+| Winograd $F(m \times m, k \times k)$ | $(m + k - 1)^2 / m^2$, plus transforms | transformed tiles, $(n/m)^2$ times the maps |
+
+## Trade-offs
+
+- **Kernel size.** Winograd suits $3 \times 3$ kernels with small tiles. FFT suits kernels of $7 \times 7$ and more,
+  and long one-dimensional filters. The direct sum and implicit GEMM suit $1 \times 1$ kernels, where no algorithm saves
+  multiplications, and strided layers.
+- **Stride and dilation.** Winograd and FFT compute every output position. A stride $s$ discards all but one in $s^2$
+  of them, and the saving is lost. Libraries use these algorithms for stride-1 layers.
+- **Precision.** Winograd's transforms have entries that grow with the tile, and
+  <NoteLink to="floating-point-arithmetic">rounding error</NoteLink> grows with them. Lavin and Gray note that the
+  transforms of large tiles cannot be computed accurately, and treat $F(6 \times 6, 3 \times 3)$ only in a supplement
+  <Cite id="lavin2016" />. On random tiles in float32, the error of $F(2 \times 2, 3 \times 3)$ is about 1.7 times that
+  of the direct sum, $F(6 \times 6, 3 \times 3)$ about 25 times, and $F(8 \times 8, 3 \times 3)$ over 2,000 times; the
+  figure's readout computes the first cases. Float16 and int8 have less precision to spare.
+- **Batch and channels.** Transforms are amortised over the channels and the batch. Layers with few channels, and
+  depthwise layers with one input channel per group, gain little; see
+  <NoteLink to="depthwise-and-grouped-convolution">depthwise and grouped convolution</NoteLink>.
+- **Memory traffic.** On a modern GPU a layer is often limited by memory bandwidth, not by arithmetic. FFT and Winograd
+  read and write their transformed copies, and the extra traffic can cancel the saved multiplications.
+
+**Practice.** Libraries implement several algorithms and pick one per layer shape. cuDNN began with implicit GEMM
+<Cite id="chetlur2014" /> and now also has explicit im2col, FFT and Winograd kernels. In PyTorch,
+`torch.backends.cudnn.benchmark = True` times the candidates on the first call for each shape and keeps the fastest. The
+best choice depends on the GPU, the precision and the layer shape, which is why libraries measure it rather than
+predict it. FFT convolution is
+the standard method for convolutions as long as the input: the filters of
+<NoteLink to="long-convolution-models">long convolution models</NoteLink> and the spectral layers of the
+<NoteLink to="fourier-neural-operator">Fourier neural operator</NoteLink>.
+
+## Pitfalls
+
+- **Circular wrap-around.** FFT convolution without enough zero padding computes a circular convolution: outputs near
+  one edge pick up inputs from the opposite edge. Pad each axis to at least $H + k - 1$.
+- **Correlation against convolution.** Convolutional layers compute a cross-correlation. An FFT routine that computes
+  true convolution needs the kernel flipped, or the result is mirrored; see
+  <NoteLink to="convolutional-layer">convolutional layer</NoteLink>.
+- **Counting multiplications only.** A 2.25-fold cut in multiplications is not a 2.25-fold speed-up. Transforms,
+  additions and memory traffic take part of the saving, and the remainder depends on the hardware.
+- **Silent loss of accuracy.** Winograd and FFT results differ from the direct sum by rounding. The differences are
+  small in float32 for small tiles and can matter in low precision; compare against a direct reference when switching
+  algorithms.
+- **Nondeterminism.** Autotuning can choose a different algorithm on another machine or batch size, so results differ in
+  the last bits between runs. Fix the algorithm when bitwise reproducibility matters.
+- **Workspace.** im2col and FFT need large buffers. A layer that fits in memory with the direct sum can run out of
+  memory with a faster algorithm; libraries fall back when the workspace limit is reached.

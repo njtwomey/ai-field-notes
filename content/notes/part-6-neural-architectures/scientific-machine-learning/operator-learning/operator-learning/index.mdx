@@ -1,0 +1,178 @@
+---
+title: 'Operator learning'
+kind: concept
+summary: 'Operator learning fits a map between function spaces, such as an initial condition to the solution of a PDE, from many solved instances, so a new instance costs one forward pass. Chen and Chen proved that networks can approximate continuous nonlinear operators.'
+tags: [scientific-machine-learning, deep-learning, differential-equations, worked-example]
+aliases: ['neural operator learning', 'learning solution operators', 'universal approximation of operators', 'neural operator', 'solution operator', 'discretisation invariance']
+requires: [multilayer-perceptron, partial-differential-equations]
+related: [deeponet, fourier-neural-operator, physics-informed-neural-operator, graph-and-mesh-neural-operators, physics-informed-neural-networks, surrogate-models-and-emulators, heat-equation, universal-approximation-theorem, inductive-bias, machine-learning-weather-forecasting]
+references: [chen1995operators, lu2021deeponet, li2021fno, kovachki2023neuraloperator, kovachki2021fnouniversal, li2020gno, lu2022fairoperators, takamoto2022pdebench, azizzadenesheli2024neuraloperators]
+status: draft
+updated: 2026-10-17
+---
+
+import { HeatOperatorFits } from './HeatOperatorFits'
+
+<Definition>
+An **operator** $\Gcal$ maps a function to a function, for example an initial temperature profile $a(x)$ to the profile
+$u(x) = \Gcal(a)(x)$ at a later time. **Operator learning** fits a parametric approximation $\Gcal_{\thetavec}$ to an
+unknown or expensive operator $\Gcal$ from $N$ pairs $(a_i, \Gcal(a_i))$, $i = 1, \dots, N$, with the inputs $a_i$
+drawn from a distribution $\mu$ over functions. The parameters minimise the expected relative error
+$\expect_{a \sim \mu}\norm{\Gcal_{\thetavec}(a) - \Gcal(a)}/\norm{\Gcal(a)}$, estimated on the pairs. A **neural
+operator** is a network built so that its parameters do not depend on how the functions are discretised
+<Cite id="kovachki2023neuraloperator" />.
+</Definition>
+
+## Intuition
+
+A numerical solver for a <NoteLink to="partial-differential-equations">partial differential equation</NoteLink> (PDE)
+starts from scratch on every new instance. A weather service that runs the same equations every six hours with a new
+initial state, or an engineer who evaluates thousands of wing shapes under the same flow equations, pays the full cost
+of the solver each time. The instances differ only in their input function: an initial condition, a coefficient field,
+a forcing term or a boundary shape. The map from that input to the solution is the same every time. Operator learning
+learns this map once, from instances that a solver has already computed, and then answers a new instance with one
+forward pass of a network.
+
+A <NoteLink to="physics-informed-neural-networks">physics-informed neural network</NoteLink> learns one solution
+$u(x, t)$ for one instance. An operator network learns the whole family of solutions at once: its input is the
+instance, not a coordinate. The first is a fast way to solve one problem; the second is a fast replacement for a solver.
+
+The input and output are functions, so they have infinitely many degrees of freedom. In practice a function arrives
+as its values on a grid or at scattered points. A <NoteLink to="multilayer-perceptron">multilayer perceptron</NoteLink>
+can read $n$ grid values and write $n$ grid values, but then its weights are tied to that grid: it cannot read a
+function sampled at $2n$ points, and it has to learn from data that nearby grid values belong to one smooth function.
+Neural operators put the function structure into the architecture. DeepONet reads the input at fixed sensors but
+returns a function of a continuous query point. The Fourier neural operator acts on Fourier coefficients, which mean
+the same thing at every resolution.
+
+## Details
+
+**The learning problem.** Let $\Acal$ and $\Ucal$ be spaces of functions on a domain $D \subset \reals^d$, for example
+square-integrable functions on $[0, 1]$. The target is an operator $\Gcal : \Acal \to \Ucal$. The training set is
+$\set{(a_i, u_i)}_{i=1}^N$ with $a_i \sim \mu$ and $u_i = \Gcal(a_i)$, each observed on a discretisation of $D$: a
+grid, a mesh or a point cloud. The loss is usually the relative $L^2$ error,
+
+$$
+L(\thetavec) = \frac{1}{N}\sum_{i=1}^N \frac{\norm{\Gcal_{\thetavec}(a_i) - u_i}_{L^2}}{\norm{u_i}_{L^2}},
+$$
+
+with the norms approximated by sums over the discretisation. The relative error weights instances equally whatever
+their magnitude.
+
+**Universal approximation of operators.** Chen and Chen proved in 1995 that operators can be approximated by networks
+of a specific two-part form <Cite id="chen1995operators" />. Let $\sigma$ be a continuous non-polynomial activation,
+$K_1$ a compact set of input functions and $K_2$ a compact set of query points. For every continuous nonlinear operator
+$\Gcal$ on $K_1$ and every $\varepsilon > 0$ there exist sensor points $x_1, \dots, x_m$, an integer $p$ and network
+weights such that
+
+$$
+\abs{\Gcal(a)(y) - \sum_{k=1}^{p} b_k\paren{a(x_1), \dots, a(x_m)}\, t_k(y)} < \varepsilon
+\quad\text{for all } a \in K_1,\ y \in K_2,
+$$
+
+where each $b_k$ is a one-hidden-layer network of the $m$ sensor values and each $t_k$ is $\sigma(\wvec_k^\tr\yvec +
+\zeta_k)$. The theorem is the operator version of the
+<NoteLink to="universal-approximation-theorem">universal approximation theorem</NoteLink>. It says that $m$ samples of
+the input and $p$ basis functions of the output suffice for any accuracy; it says nothing about how large $m$ and $p$
+must be or how to find the weights. <NoteLink to="deeponet">DeepONet</NoteLink> is this form with deep networks for the
+$b_k$ and $t_k$ <Cite id="lu2021deeponet" />. The <NoteLink to="fourier-neural-operator">Fourier neural
+operator</NoteLink> is also universal <Cite id="kovachki2021fnouniversal" />.
+
+**Discretisation invariance.** A neural operator is a map between functions, so the same parameters must apply to any
+discretisation of the input and give the output at any set of points. Kovachki et al. make this the defining property:
+as the discretisation is refined, the network's outputs converge to those of one operator between function spaces
+<Cite id="kovachki2023neuraloperator" />. The property allows training on coarse, cheap data and evaluation on a finer
+grid, and it lets data from different solvers and resolutions be pooled.
+
+**The layer.** Most neural operators stack layers of the form
+
+$$
+v_{\ell+1}(x) = \sigma\paren{W v_\ell(x) + \int_D \kappa_{\ell}(x, y)\, v_\ell(y)\, dy + b(x)},
+$$
+
+where $v_\ell(x) \in \reals^{c}$ is a vector of $c$ channels at each point, $W$ is a $c \times c$ matrix applied at
+every point and $\kappa_\ell(x, y)$ is a learned $c \times c$ kernel. The integral is the part that couples distant
+points. Each family approximates it in its own way: the Fourier neural operator assumes $\kappa(x, y) = \kappa(x - y)$
+and evaluates the integral as a product in Fourier space; the graph neural operator sums over a point's neighbours
+<Cite id="li2020gno" /> (<NoteLink to="graph-and-mesh-neural-operators">graph and mesh neural operators</NoteLink>);
+DeepONet replaces the stack by one low-rank expansion.
+
+**Structure and data.** An operator family that matches the symmetries of the true operator needs fewer solved pairs.
+The figure fits two <NoteLink to="linear-models">linear models</NoteLink> to solved pairs of the
+<NoteLink to="heat-equation">heat equation</NoteLink> on a periodic interval. The dense model is a general $n \times n$
+matrix on grid values. The Fourier model multiplies each Fourier mode by one number, so it can represent exactly the
+linear operators that commute with shifts. The heat operator commutes with shifts, so the restricted family loses
+nothing and its error is lower at every training-set size.
+
+<HeatOperatorFits />
+
+At noise $\sigma = 0.01$ in the figure's default draw, the Fourier multiplier reaches 1.0% test error from 8 pairs; the
+dense map is at 5.0% with 8 pairs and still at 1.5% with 128. With noise-free data the multiplier is exact from one
+pair, because one generic input excites every mode, while the dense map needs about as many independent inputs as the
+inputs have effective dimensions. The same principle, an <NoteLink to="inductive-bias">inductive bias</NoteLink> that
+matches the operator, explains why Fourier and graph layers beat grid-based networks on PDE data.
+
+## Worked example
+
+Take the heat equation $u_t = D u_{xx}$ on the periodic interval $[0, 1)$ with $D = 0.1$, and the operator $\Gcal$
+from $u(\cdot, 0) = a$ to $u(\cdot, 0.1)$.
+
+1. **The exact operator.** Write $a(x) = \sum_k \hat a_k e^{i 2\pi k x}$. Each Fourier mode solves the equation on its
+   own: $e^{i2\pi kx}$ has $u_{xx} = -(2\pi k)^2 u$, so its coefficient decays by $m_k = e^{-D(2\pi k)^2 t}$. With
+   $t = 0.1$, $m_1 = e^{-0.395} = 0.674$, $m_2 = e^{-1.579} = 0.206$ and $m_3 = e^{-3.553} = 0.029$. The operator is
+   linear and diagonal in the Fourier basis.
+2. **One instance.** For $a(x) = \sin 2\pi x + \tfrac12\sin 4\pi x$, the output is
+   $\Gcal(a)(x) = 0.674\sin 2\pi x + 0.103\sin 4\pi x$. At $x = 1/8$, $a = 0.707 + 0.5 = 1.207$ and
+   $\Gcal(a) = 0.477 + 0.103 = 0.580$.
+3. **On a grid of $n = 4$ points** $x_j = j/4$, the operator is a $4 \times 4$ matrix $\Gmat$ with entries
+   $G_{jl} = c(j - l)$, a circular convolution. The kernel is the inverse transform of the multipliers,
+   $c(d) = \tfrac14\paren{1 + 2m_1\cos(\pi d/2) + m_2\cos(\pi d)}$, which gives $c(0) = 0.639$,
+   $c(\pm 1) = 0.198$ and $c(2) = -0.035$. Each row sums to 1, because the heat equation conserves the mean.
+4. **Check.** The grid values of $\sin 2\pi x$ are $(0, 1, 0, -1)$. Row $j = 1$ of $\Gmat$ applied to them gives
+   $c(0) \cdot 1 + c(2) \cdot (-1) = 0.639 + 0.035 = 0.674$, which is $m_1 \sin(2\pi/4)$, as step 1 predicts.
+5. **Counting unknowns.** A dense linear model has $n^2 = 16$ unknowns and needs 4 linearly independent input vectors
+   to determine them. The convolution has 3 unknowns, $m_0, m_1, m_2$, and one input with nonzero coefficients at all
+   three frequencies determines them. On a grid of $n$ points the counts are $n^2$ and $n/2 + 1$.
+
+## Practice
+
+Neural operators are trained on datasets produced by classical solvers: PDEBench collects such datasets for about a
+dozen equations <Cite id="takamoto2022pdebench" />. The usual inputs are initial conditions, coefficient fields,
+forcing terms or geometries; the outputs are the solution at a later time or a steady state. Time-dependent problems
+are learned either as a map from the state at $t$ to the state at $t + \Delta t$, rolled out autoregressively, or as a
+map from the initial state to the whole space-time solution.
+
+The choice of family follows the geometry. On periodic or rectangular grids the Fourier neural operator and its
+variants are the default. On irregular meshes and point clouds, graph and transformer-based operators are used. Where
+the outputs are needed at arbitrary query points, or the inputs come from scattered sensors, DeepONet's branch and trunk
+form fits. A comparison on 16 benchmarks found DeepONet and the Fourier neural operator similar on simple problems and
+the Fourier operator more sensitive to complex geometries and noisy inputs <Cite id="lu2022fairoperators" />. The
+reported gains are speed: a trained operator answers in milliseconds where a solver takes seconds to hours
+<Cite id="li2021fno" />. Applications include <NoteLink to="machine-learning-weather-forecasting">weather
+forecasting</NoteLink> and <NoteLink to="surrogate-models-and-emulators">surrogates</NoteLink> for design loops
+<Cite id="azizzadenesheli2024neuraloperators" />. When solved pairs are scarce, the
+<NoteLink to="physics-informed-neural-operator">physics-informed neural operator</NoteLink> adds the equation's
+residual to the loss.
+
+## Assumptions
+
+- The input functions at test time come from the same distribution $\mu$ as the training inputs. An operator trained
+  on smooth initial conditions has no information about its response to rough ones.
+- A solver, or measurements, can produce enough solved pairs. Typical training sets have $10^3$ to $10^4$ pairs.
+- The operator is continuous on the inputs of interest: small changes of the input give small changes of the output.
+  Chaotic dynamics over long horizons violate this, and only statistics of the output can then be learned.
+- The discretisations of the training data resolve the features of the solution.
+
+## Pitfalls
+
+- **Grid-tied baselines.** A network on grid values that matches a neural operator at the training resolution can fail
+  at any other resolution. Testing at the training resolution only hides this.
+- **Errors measured on the training distribution only.** Test inputs drawn from the same prior show interpolation
+  error. Rougher inputs, other parameter ranges or longer horizons show how far the operator extrapolates, which is
+  usually much less.
+- **Autoregressive drift.** A one-step operator applied repeatedly feeds its own errors back as inputs it never saw in
+  training, and the rollout can leave the data distribution within a few dozen steps.
+- **Speed claims without the data cost.** The training set took $N$ solver runs. Operator learning pays off only when
+  the trained model answers many more than $N$ instances, or answers them where the solver cannot run.
+- **No error control.** Unlike a solver with a step size, a trained operator has no built-in error estimate; its error
+  on a new input is known only after comparing with a reference solution.

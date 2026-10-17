@@ -1,0 +1,137 @@
+---
+title: 'Graph and mesh neural operators'
+kind: concept
+summary: 'On irregular meshes a neural operator passes messages between mesh nodes: the graph neural operator integrates a learned kernel over neighbours, and MeshGraphNets encode a mesh, run learned message passing and decode the next state of a simulation.'
+tags: [scientific-machine-learning, graph-neural-networks, worked-example]
+aliases: ['graph neural operator', 'GNO', 'graph kernel network', 'MeshGraphNets', 'learned mesh simulation', 'message passing PDE solver', 'encode-process-decode']
+requires: [fourier-neural-operator, message-passing-neural-network]
+related: [machine-learning-weather-forecasting, euclidean-equivariant-graph-network, operator-learning, heat-equation, graph-convolutional-network, transformer, surrogate-models-and-emulators]
+references: [li2020gno, pfaff2021meshgraphnets, sanchezgonzalez2020simulate, brandstetter2022mppde, li2023gino, wu2024transolver, lam2023graphcast, kovachki2023neuraloperator, leveque2007]
+status: draft
+updated: 2026-10-17
+---
+
+import { MeshHeatMessages } from './MeshHeatMessages'
+
+<Definition>
+A **graph neural operator** (<Gloss name="gno" />) acts on a function sampled at the nodes of an irregular mesh or point
+cloud. Each layer updates the channel vector $v(x_i) \in \reals^c$ at node $x_i$ by
+
+$$
+v_{\ell+1}(x_i) = \sigma\paren{W v_\ell(x_i) + \frac{1}{\abs{\Ncal(i)}}\sum_{j \in \Ncal(i)}
+\kappa_{\phivec}\paren{x_i, x_j, a(x_i), a(x_j)}\, v_\ell(x_j)},
+$$
+
+where $\Ncal(i)$ are the nodes within a fixed radius $r$ of $x_i$, $a$ is the input function and $\kappa_{\phivec}$ is
+a network that outputs a $c \times c$ matrix. The sum is a Monte Carlo estimate of the integral
+$\int_{B(x_i, r)} \kappa(x_i, y)\, v_\ell(y)\, dy$ <Cite id="li2020gno" />. **MeshGraphNets** are learned simulators of
+the same family: an encoder maps the mesh's nodes and edges to vectors, a processor runs several rounds of
+<NoteLink to="message-passing-neural-network">message passing</NoteLink> with relative positions as edge features, and
+a decoder outputs the change of the state over one time step <Cite id="pfaff2021meshgraphnets" />.
+</Definition>
+
+## Intuition
+
+Engineering simulations rarely run on uniform grids. A finite-element model of a wing puts small elements near the
+leading edge and large ones far away; a cloth simulation follows the cloth as it folds. The
+<NoteLink to="fourier-neural-operator">Fourier neural operator</NoteLink> needs a uniform grid for its
+<Gloss name="fft" />, so these problems need a different way to compute the integral in a
+<NoteLink to="operator-learning">neural operator</NoteLink> layer.
+
+A mesh is already a graph: its nodes are the sample points and its edges join neighbours. A numerical solver on the mesh
+updates each node from its neighbours' values, weighted by the geometry of the edges between them.
+<Gloss name="gnn">Message passing</Gloss> does the same with learned functions. A message from node $j$ to node $i$
+depends on both nodes' values and on the vector $x_j - x_i$ between them, so the learned update knows how far away each
+neighbour is and in which direction.
+
+The edge geometry is what lets one set of weights work on different meshes. A function that reads relative positions
+can turn into the right weights for a long edge and for a short one. A message function that ignores the edges would
+treat a node's two neighbours alike even when one is ten times further away, and its update would change meaning
+whenever the mesh changed.
+
+<MeshHeatMessages />
+
+The figure writes the <NoteLink to="heat-equation">heat equation</NoteLink> on a 12-node irregular mesh as message
+passing, with messages $w_{ij}(u_j - u_i)$. The geometric weights $w_{ij} = 2/\paren{h_{ij}(h_- + h_+)}$ are those of
+the second difference on a non-uniform grid <Cite id="leveque2007" />; on the default mesh at $t = 0.1$ their largest
+nodal error is 0.016. Uniform weights $1/\bar h^2$, which ignore the edge lengths, give 0.088 on the same mesh and the
+same error as the geometric weights on a uniform mesh. A learned mesh operator has to discover weights like the
+geometric ones from the edge features it is given.
+
+## Details
+
+**The graph neural operator.** The kernel $\kappa_{\phivec}$ is shared by every pair of nodes and takes their
+coordinates and input values. The radius $r$ is fixed in physical units, so when the mesh is refined each node has more
+neighbours and the average over them approximates the same integral more accurately. The same parameters therefore
+apply at every resolution, the property neural operators require <Cite id="kovachki2023neuraloperator" />. A layer
+costs $O(n\bar k)$ for $n$ nodes with $\bar k$ neighbours each. To limit it, Li et al. trained on random subsets of the
+nodes and evaluated on a partition of the full mesh into subsets <Cite id="li2020gno" />.
+
+**MeshGraphNets.** The input graph has the mesh's edges and, for systems whose geometry moves, extra edges between nodes
+that are close in space but not joined in the mesh, such as two parts of a folded cloth. Mesh edges carry the relative
+displacement in the mesh's rest coordinates and its length; both kinds carry the relative displacement in world space
+and its length. Positions enter only as differences, which makes the model equivariant to translations. The processor
+applies 15 message passing blocks with <NoteLink to="residual-connections">residual connections</NoteLink>, and the
+decoder outputs a time derivative of each node's state, integrated by one forward-Euler step
+<Cite id="pfaff2021meshgraphnets" />. Noise is added to the input states during training, so the model learns to correct
+the kind of error it will make on its own rollouts. The graph network simulator for particle systems, by
+Sanchez-Gonzalez et al., is the same design on particles joined by radius edges
+<Cite id="sanchezgonzalez2020simulate" />.
+
+**Classical schemes as message passing.** A <Gloss name="finite-difference">finite-difference</Gloss> stencil, a
+finite-volume flux update and a WENO reconstruction are all weighted aggregations over neighbouring cells. Brandstetter,
+Worrall and Welling showed that message passing networks can represent them, and trained message passing
+<Gloss name="pde" /> solvers that predict several time steps per call and are also trained on inputs produced by their
+own predictions (the pushforward trick), which stabilises long rollouts <Cite id="brandstetter2022mppde" />.
+
+**Long-range coupling.** Each round of message passing moves information one edge. On a fine mesh, a disturbance has
+to cross many edges to reach the other side of the domain, which needs many rounds or coarser auxiliary graphs.
+GraphCast forecasts the weather by message passing on a multi-mesh, a hierarchy of refined icosahedral meshes whose
+long edges carry information around the globe in a few rounds <Cite id="lam2023graphcast" />
+(<NoteLink to="machine-learning-weather-forecasting">machine learning weather forecasting</NoteLink>).
+
+**Practice in 2024–2026.** Two hybrids are common for large irregular problems. The geometry-informed neural operator
+(GINO) uses a graph neural operator to map the mesh onto a regular latent grid, a Fourier neural operator on the grid,
+and a second graph operator back to the query points <Cite id="li2023gino" />. Transolver groups mesh points with
+similar learned physical states into a small number of slices and applies attention between the slices, at a cost
+linear in the number of points <Cite id="wu2024transolver" />.
+
+## Worked example
+
+The heat equation $u_t = u_{xx}$ on the mesh $x = (0, 0.2, 0.5, 1)$ with values $u = (0, 1, 2, 0)$; the ends are held
+at 0, and the update at an interior node $i$ is $u_i \leftarrow u_i + \Delta t \sum_j w_{ij}(u_j - u_i)$.
+
+1. **Node $x_1 = 0.2$.** Its edges have lengths $h_- = 0.2$ to the left and $h_+ = 0.3$ to the right, so
+   $h_- + h_+ = 0.5$. The geometric weights are $w_{10} = 2/(0.2 \times 0.5) = 20$ and
+   $w_{12} = 2/(0.3 \times 0.5) = 13.33$.
+2. **Its messages.** From the left: $20 \times (0 - 1) = -20$. From the right: $13.33 \times (2 - 1) = 13.33$. The
+   aggregate is $-6.67$.
+3. **Check.** The parabola through $(0, 0)$, $(0.2, 1)$ and $(0.5, 2)$ is $u = 5.67x - 3.33x^2$, whose second
+   derivative is $-6.67$. The three-point formula on a non-uniform mesh is exact for parabolas.
+4. **Node $x_2 = 0.5$.** $h_- = 0.3$, $h_+ = 0.5$, so $w_{21} = 2/(0.3 \times 0.8) = 8.33$ and
+   $w_{23} = 2/(0.5 \times 0.8) = 5$. The messages are $8.33 \times (1 - 2) = -8.33$ and $5 \times (0 - 2) = -10$; the
+   aggregate is $-18.33$.
+5. **Uniform weights.** The mean edge length is $\bar h = 1/3$, so $w = 1/\bar h^2 = 9$ for every edge. Node 1 then
+   gets $9 \times (-1) + 9 \times 1 = 0$ instead of $-6.67$, and node 2 gets $9 \times (-1) + 9 \times (-2) = -27$
+   instead of $-18.33$. A message function that does not see the edge lengths is wrong at both nodes.
+6. **One step** with $\Delta t = 0.01$ and the geometric weights gives $u_1 = 1 - 0.067 = 0.933$ and
+   $u_2 = 2 - 0.183 = 1.817$.
+
+## Assumptions
+
+- The mesh resolves the solution, and its edges connect the nodes whose interaction the operator must represent.
+- The training meshes resemble the test meshes in element size and quality, unless the edge features let the model
+  correct for the difference.
+- For one-step simulators, the dynamics are Markovian in the node states the model receives.
+
+## Pitfalls
+
+- **Edge features without geometry.** A message function given only node values cannot distinguish a short edge from a
+  long one, and its updates are wrong on any mesh that is not uniform.
+- **Rollout drift.** A one-step model applied thousands of times compounds its errors and moves off the training
+  distribution; training noise and multi-step training are the usual counters.
+- **Too few rounds.** With fewer rounds of message passing than the number of edges a signal must cross per time step,
+  the model cannot represent fast or global coupling.
+- **Neighbourhood cost.** A fixed physical radius on a refined mesh gives more neighbours per node. In two dimensions,
+  refining by a factor $s$ multiplies the nodes and the neighbours per node by $s^2$ each, and the cost of a layer by
+  $s^4$.

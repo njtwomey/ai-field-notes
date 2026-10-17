@@ -1,0 +1,173 @@
+---
+title: Self-training
+kind: technique
+summary: 'Self-training fits a model on the labelled data, labels the unlabelled points it predicts most confidently with its own predictions (pseudo-labels), refits on both and repeats. It works when confident predictions are mostly right, and amplifies its own mistakes when they are not.'
+tags: [semi-supervised, classification, worked-example]
+aliases: [self-labelling, self-learning, self-training wrapper]
+requires: [logistic-regression]
+related:
+  [
+    pseudo-labelling,
+    co-training,
+    noisy-student,
+    entropy-minimisation,
+    semi-supervised-assumptions,
+    label-propagation,
+    learning-with-noisy-labels,
+  ]
+references: [scudder1965, yarowsky1995, lee2013pseudo, blum1998, xie2020, sohn2020, wei2021selftraining, vanengelen2020survey, chapelle2006]
+status: draft
+updated: 2026-10-17
+---
+
+import { SelfTrainingLoop } from './SelfTrainingLoop'
+import { SelfTrainingRounds } from './SelfTrainingRounds'
+
+<Definition>
+**Self-training** turns a supervised learner into a semi-supervised one. Train a model on the labelled set. Predict
+every unlabelled point, and add those whose predicted class probability exceeds a threshold $\tau$ to the training
+set, labelled with the predicted class (a **pseudo-label**). Retrain on the enlarged set and repeat until no new points
+qualify or a fixed number of rounds has passed <Cite id="scudder1965" />.
+</Definition>
+
+## Problem
+
+Labels cost money or expert time; unlabelled inputs are often free. A model trained on a few labels has a poorly
+placed boundary. If the classes form separated clusters, the unlabelled points show where the clusters are, and a
+boundary through the gap between them would be better. Self-training uses the model's own predictions to reach that
+boundary with any classifier that outputs confidences.
+
+Self-training is a **wrapper method**: it never changes the learner, only the data the learner is fitted on
+<Cite id="vanengelen2020survey" />. The same loop therefore serves a logistic regression, a
+<NoteLink to="decision-tree">decision tree</NoteLink>, a naive Bayes text classifier or a deep network. Scudder analysed
+it in 1965 as an "adaptive pattern-recognition machine" that trains on its own decisions <Cite id="scudder1965" />.
+Every method in this chapter that labels unlabelled data with a model's predictions keeps the loop and changes one part
+of it: which points are labelled, by which model, and with what noise.
+
+## Mechanism
+
+### The loop
+
+Let $\Dcal_L = \set{(\xvec_i, y_i)}_{i=1}^{\ell}$ be the $\ell$ labelled pairs, with classes
+$y_i \in \set{1, \dots, K}$, and $\Dcal_U = \set{\xvec_u}$ the unlabelled inputs. A probabilistic classifier gives
+$\hat p(y \mid \xvec) \in [0, 1]$ for each class.
+
+1. Fit the model to $\Dcal_L$.
+2. For each unlabelled point $\xvec_u$, compute $\hat p(y \mid \xvec_u)$, its most probable class
+   $\hat y_u = \argmax_y \hat p(y \mid \xvec_u)$ and its confidence $c_u = \max_y \hat p(y \mid \xvec_u)$.
+3. Add the pairs $(\xvec_u, \hat y_u)$ with $c_u \ge \tau$ to the training set.
+4. Refit and return to step 2. Pseudo-labels are usually recomputed each round, so a point can change class or drop
+   out. Stop when the set of pseudo-labels no longer changes, or after a fixed number of rounds.
+
+<SelfTrainingLoop />
+
+The threshold $\tau \in [1/K, 1]$ controls a trade-off. A high $\tau$ adds few points, but their pseudo-labels are
+nearly all right. A low $\tau$ adds many points, including wrong ones. A variant without a threshold adds a fixed
+number of the most confident points of each class per round, which also controls the class balance of the additions.
+
+### Why it moves the boundary
+
+A point far from the current boundary gets a confident prediction. Under the cluster assumption, points far from the
+boundary on one side are mostly of that side's class, so the pseudo-labels are mostly correct (see
+<NoteLink to="semi-supervised-assumptions">semi-supervised assumptions</NoteLink>). Adding them makes the training set
+cover the clusters, and the refitted boundary moves away from the dense regions into the gap.
+
+Training on hard pseudo-labels also minimises the uncertainty of the predictions on unlabelled data. With the
+<NoteLink to="cross-entropy-and-perplexity">cross-entropy loss</NoteLink>, an unlabelled point contributes
+$-\log\hat p(\hat y_u \mid \xvec_u) = -\log\max_y\hat p(y \mid \xvec_u)$, which is smallest when the model is confident
+about that point. The objective therefore prefers boundaries that pass where few unlabelled points lie, since those
+leave fewer points near probability $1/K$. <NoteLink to="entropy-minimisation">Entropy minimisation</NoteLink> adds the
+same preference to the loss directly, as a penalty on the entropy of the unlabelled predictions.
+
+Wei, Shen, Chen and Ma give conditions under which this argument holds for deep networks
+<Cite id="wei2021selftraining" />. Two are needed: the neighbourhood of a small set of points of one class must contain
+a much larger share of that class (expansion), and neighbourhoods of different classes must barely overlap
+(separation). Under both, a student fitted to a teacher's pseudo-labels with a consistency penalty corrects most of the
+teacher's errors.
+
+## Worked example
+
+Unlabelled data: 1000 points drawn from two equally likely classes, $x \mid y = 0 \sim \Gauss(-2, 1)$ and
+$x \mid y = 1 \sim \Gauss(2, 1)$. The Bayes boundary is $x = 0$. Only two points are labelled, $x = -0.5$ in class 0 and
+$x = 2.5$ in class 1. A <NoteLink to="logistic-regression">logistic regression</NoteLink>
+$\hat p(y = 1 \mid x) = \sigma(wx + b)$, with an $L_2$ penalty $\tfrac12 w^2$ on the weight (scikit-learn's default),
+fitted to these two points has $w = 0.742$ and $b = -0.742$. Its boundary $x = -b/w$ is their midpoint, $x = 1.0$, and
+it classifies the unlabelled points with accuracy $0.935$.
+
+**Round 0.** With $\tau = 0.9$ a point qualifies when $\abs{wx + b} \ge \log 9 = 2.197$, that is when
+$\abs{x - 1} \ge 2.197 / 0.742 = 2.96$: $x \le -1.96$ or $x \ge 3.96$. About half of class 0 lies below $-1.96$, since
+its mean is $-2$. Only about $2.5\%$ of class 1 lies above $3.96$, 1.96 standard deviations above its mean. In this
+sample 254 points clear the threshold as class 0 and only 6 as class 1, and all 260 pseudo-labels are correct.
+
+**Later rounds.** The figure below runs the loop on this sample (data seed 4):
+
+| round | boundary | accuracy on unlabelled | pseudo-labelled points (class 0 / 1) |
+| ----- | -------- | ---------------------- | ------------------------------------ |
+| 0     | 1.000    | 0.935                  | 260 (254 / 6)                        |
+| 1     | 1.739    | 0.794                  | 581 (515 / 66)                       |
+| 3     | 1.549    | 0.838                  | 763 (552 / 211)                      |
+| 9     | 0.565    | 0.966                  | 926 (501 / 425)                      |
+| 19    | 0.121    | 0.989                  | 941 (475 / 466)                      |
+
+In round 1 the boundary moves the wrong way, from 1.0 to 1.739. The 254 class-0 pseudo-labels outnumber the 6 of class
+1, so the refit gives class 0 more of the line, and the slope rises from $0.742$ to $1.594$. A steeper model is more
+confident, so more of the class-1 cluster clears the threshold in each later round. The two classes' pseudo-labels
+balance out, the boundary moves into the gap, and the set of pseudo-labels stops changing at round 19 with the boundary
+at $0.121$. The final accuracy, $0.989$, matches the <NoteLink to="bayes-theorem">Bayes rule</NoteLink> on this sample
+($0.988$).
+
+<SelfTrainingRounds />
+
+## Variants
+
+Each variant changes one part of the loop and has its own note.
+
+- **Pseudo-labelling.** A network trains on its own thresholded hard predictions inside one training run, with
+  pseudo-labels recomputed every minibatch and the unlabelled loss weighted by a ramp-up schedule
+  <Cite id="lee2013pseudo" />. See <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink>.
+- **Yarowsky's algorithm.** For word-sense disambiguation, Yarowsky started from a few seed collocations per sense,
+  labelled the contexts they matched, learnt new collocations from those contexts and repeated, using the constraint
+  that a word keeps one sense per discourse to add and correct labels <Cite id="yarowsky1995" />.
+- **Co-training.** Two classifiers on two views of each input label confident points for each other rather than for
+  themselves <Cite id="blum1998" />. See <NoteLink to="co-training">co-training</NoteLink>, and
+  <NoteLink to="tri-training-and-disagreement-methods">tri-training and disagreement methods</NoteLink> for versions
+  without views.
+- **Noisy Student.** The model that learns from the pseudo-labels is a separate, equal or larger student trained with
+  dropout and strong augmentation, and it becomes the next teacher <Cite id="xie2020" />. See
+  <NoteLink to="noisy-student">Noisy Student</NoteLink>.
+- **FixMatch.** The pseudo-label comes from a weakly augmented view of an image and trains the prediction on a strongly
+  augmented view of the same image <Cite id="sohn2020" />. See <NoteLink to="fixmatch">FixMatch</NoteLink>.
+
+## Cost
+
+Each round refits the model, so self-training costs a few times the supervised training, plus one prediction pass over
+the unlabelled data per round. The worked example fits the model 20 times, in rounds 0 to 19. Online variants such as
+pseudo-labelling and FixMatch fold the labelling into each minibatch and cost roughly one extra forward pass per
+unlabelled example per step.
+
+## Trade-offs
+
+- **Threshold.** A high $\tau$ admits few, mostly correct pseudo-labels and can stall when no point qualifies. A low
+  $\tau$ admits many, including wrong ones. Recomputing pseudo-labels each round lets early mistakes drop out;
+  keeping them once given (as Yarowsky and Blum and Mitchell did) makes the run cheaper but irreversible.
+- **Calibration.** The threshold is reliable only if the model's confidences are calibrated. An overconfident model,
+  such as <NoteLink to="naive-bayes">naive Bayes</NoteLink> or an unregularised network, admits many wrong
+  pseudo-labels. <NoteLink to="classifier-calibration">Calibration</NoteLink> on held-out labels makes $\tau$ mean what
+  it says.
+- **Class balance.** Confident predictions are not balanced across classes, as the worked example shows. Capping the
+  number of pseudo-labels per class keeps the enlarged training set close to the true class proportions.
+
+## Pitfalls
+
+- **Confirmation bias.** A wrong pseudo-label is trained on as if it were true, which makes the model more confident
+  in the same mistake. Errors near the boundary are self-reinforcing. The
+  <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink> note shows the effect and the remedies.
+- **The cluster assumption.** If classes overlap heavily or the boundary runs through a dense region, the unlabelled
+  data carry little information about the boundary, and self-training can do worse than using the labels alone
+  <Cite id="chapelle2006" />. See <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised learning
+  fails</NoteLink>.
+- **A weak start.** A first model that is wrong on a whole cluster labels that cluster wrongly with high confidence, and
+  no later round corrects it. Self-training refines a roughly right model; it does not rescue a wrong one.
+- **Evaluation.** A tuned supervised baseline on the same labels, and a validation set no larger than the labelled set,
+  are needed to tell a real gain from a tuning artefact (see
+  <NoteLink to="evaluating-semi-supervised-learning">evaluating semi-supervised learning</NoteLink>).

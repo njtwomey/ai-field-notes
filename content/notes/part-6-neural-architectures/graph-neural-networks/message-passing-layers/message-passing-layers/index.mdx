@@ -1,0 +1,92 @@
+---
+title: 'Message-passing layers'
+kind: overview
+summary: 'Layers that update each node from its neighbours: the message-passing framework of messages, aggregation and update, graph convolution with symmetric normalisation, attention over neighbours, sampled aggregation in GraphSAGE, and gated or edge-conditioned updates.'
+tags: [graph-neural-networks, deep-learning, overview]
+aliases: []
+requires: [graphs-as-neural-network-inputs]
+related:
+  [
+    graphsage,
+    foundations-of-graph-neural-networks,
+    expressiveness-of-graph-neural-networks,
+    depth-and-long-range-information-in-graph-networks,
+  ]
+references: [gilmer2017, battaglia2018, bronstein2021]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+A <Gloss name="gnn">message-passing</Gloss> layer maps a vector per node of a graph to a new vector per node. Each node
+computes a message from every neighbour, combines the messages with an aggregator that ignores their order, and updates
+its own vector from the result. The layers in this chapter differ in how a message is weighted, how the messages are
+combined and how the update is computed.
+</Definition>
+
+## What it is for
+
+Graph-structured data has no grid and no ordering of nodes: molecules, citation and social networks, road maps, meshes,
+knowledge graphs. A network that reads such data must give the same answer however the nodes are numbered, and must
+handle nodes with any number of neighbours. A message-passing layer meets both requirements by construction. Stacked two
+to six deep, such layers produce node vectors for node classification, pairs of them for
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink>, and a pooled vector for
+graph-level prediction such as a molecular property.
+
+## Main ideas
+
+**One framework.** A <NoteLink to="message-passing-neural-network">message passing neural network</NoteLink> computes,
+in each round, $\mvec_v = \bigoplus_{w \in \Ncal(v)} M(\hvec_v, \hvec_w, \evec_{vw})$ and
+$\hvec_v' = U(\hvec_v, \mvec_v)$, where $\bigoplus$ is a sum, mean or maximum. Locality and
+<NoteLink to="convolutional-layer">weight sharing</NoteLink> carry over from convolution, and the order-free aggregator
+makes every layer equivariant to relabelling the nodes <Cite id="gilmer2017" />. $K$ rounds let information travel $K$
+hops. The choice of aggregator decides what a node can tell about its neighbourhood: a sum counts neighbours, a mean
+sees their proportions, a maximum sees only the extreme.
+
+**Fixed weights from the structure.** The <NoteLink to="graph-convolutional-network">graph convolutional
+network</NoteLink> weights neighbour $w$ of $v$ by $1/\sqrt{\tilde d_v \tilde d_w}$, the degrees counting self-loops, so
+a layer is $\sigma(\hat\Amat \Hmat \Wmat)$. The rule is the first-order case of the polynomial spectral filters of
+<NoteLink to="spectral-graph-convolution">spectral graph convolution</NoteLink>, with a renormalisation that keeps the
+propagation matrix's eigenvalues in $(-1, 1]$. It is cheap, strong on graphs whose neighbours share labels, and smooths
+features when stacked deeply.
+
+**Weights learned from the features.** The <NoteLink to="graph-attention-network">graph attention network</NoteLink>
+replaces the degree weights by a softmax over each neighbourhood of scores computed from both endpoints, with several
+heads. The original score ranks every node's neighbours in the same order, which is static attention; GATv2 moves the
+nonlinearity so the ranking can depend on the receiving node.
+
+**Sampled neighbourhoods.** <NoteLink to="graphsage">GraphSAGE</NoteLink> concatenates a node's own vector with an
+aggregate of a fixed-size sample of its neighbours. Sampling bounds the cost of a minibatch on graphs with millions of
+nodes, and the learned functions embed nodes unseen in training. The note sits in the recommender-systems chapter, where
+its descendant PinSAGE is used.
+
+**Messages shaped by edges, updates with gates.** <NoteLink to="gated-and-edge-conditioned-message-passing">Gated and
+edge-conditioned message passing</NoteLink> generates the message matrix from the edge's features, such as bond type and
+distance, and updates each node with a <Gloss name="gru" /> cell or an edge gate. Edge conditioning lets the same
+neighbour send different messages along different bonds. Gating keeps states bounded over many rounds.
+
+## How the notes fit together
+
+Start with the message passing neural network: it defines the framework, works an example by hand and compares the
+aggregators. The graph convolutional network and the graph attention network are the two most used instances, and can
+be read in either order; the convolution note also needs the spectral filters of the foundations chapter. The gated and
+edge-conditioned note builds on the framework and on the gated recurrent unit. GraphSAGE can be read after the framework
+note.
+
+The neighbouring chapters take the layers further. <NoteLink to="foundations-of-graph-neural-networks">Foundations of
+graph neural networks</NoteLink> gives the inputs, the Laplacian and spectral filtering.
+<NoteLink to="expressiveness-of-graph-neural-networks">Expressiveness of graph neural networks</NoteLink> asks which
+graphs these layers can tell apart, and introduces the <NoteLink to="graph-isomorphism-network">graph isomorphism
+network</NoteLink>. <NoteLink to="depth-and-long-range-information-in-graph-networks">Depth and long-range information
+in graph networks</NoteLink> explains why stacking many layers stops helping.
+
+## Prerequisites and next steps
+
+Read <NoteLink to="graphs-as-neural-network-inputs">graphs as neural network inputs</NoteLink> first, for node features,
+adjacency matrices and permutation equivariance; <NoteLink to="multilayer-perceptron">multilayer perceptrons</NoteLink>
+and <NoteLink to="backpropagation">backpropagation</NoteLink> are assumed. The layers here are the local half of a
+<NoteLink to="graph-transformer">graph transformer</NoteLink>, the backbone of
+<NoteLink to="molecular-property-prediction-with-graph-networks">molecular property prediction</NoteLink>, and a special
+case of the symmetry-respecting layers of <NoteLink to="geometric-deep-learning">geometric deep learning</NoteLink>
+<Cite id="bronstein2021" />. Battaglia et al. give a general form in which edges and the whole graph also carry updated
+vectors <Cite id="battaglia2018" />.

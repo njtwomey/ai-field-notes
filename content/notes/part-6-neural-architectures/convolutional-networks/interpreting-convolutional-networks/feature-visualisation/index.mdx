@@ -1,0 +1,203 @@
+---
+title: 'Feature visualisation'
+kind: technique
+summary: 'First-layer filters of image networks resemble Gabor edges and colour blobs. Deeper units are shown by their top-activating patches or by activation maximisation: gradient ascent on the input, with regularisers such as jitter and blur, to find an image that excites the unit.'
+tags: [convolutional-networks, computer-vision, deep-learning, interpretability, worked-example]
+aliases: ['activation maximisation', 'activation maximization', 'deep dream', 'top-activating patches', 'filter visualisation']
+requires: [convolutional-layer]
+related: [class-activation-mapping, shape-and-texture-bias, feature-attribution-methods, concept-based-explanations, adversarial-examples, receptive-field-and-dilated-convolution, sparse-autoencoders-for-interpretability, evaluating-explanations]
+references: [krizhevsky2012, zeiler2014, erhan2009, simonyan2014, yosinski2015, mahendran2015, olah2017, mordvintsev2015, bau2017, borowski2021, geirhos2024]
+status: draft
+updated: 2026-10-17
+---
+
+import { FeatureVisualisation } from './FeatureVisualisation'
+
+<Definition>
+Feature visualisation shows what a unit of a trained network responds to. A unit is one value inside the network: a
+position of a feature map, a whole channel, or a class score. The first layer is shown directly, since its filters are
+images. Deeper units are shown by the inputs from a dataset that activate them most, or by activation maximisation:
+gradient ascent on the input image, with regularisers that keep the image natural, to find an input that makes the
+unit large.
+</Definition>
+
+## Problem
+
+A trained convolutional network stores what it has learned in millions of weights. The weights of one deep unit do not
+say what the unit detects, because the unit reads the outputs of earlier units, not pixels. Accuracy on a test set says
+how well the network classifies, not which patterns it uses. Feature visualisation answers a narrower question: which
+input patterns drive a chosen unit. The answers show the hierarchy that a convolutional network builds, from edges and
+colour blobs in the first layer to textures, parts and objects in deeper layers <Cite id="zeiler2014" />.
+
+Feature visualisation describes units. It differs from <NoteLink to="feature-attribution-methods">feature
+attribution</NoteLink>, which explains one prediction by scoring the pixels of one input, and from
+<NoteLink to="class-activation-mapping">class activation mapping</NoteLink>, which shows where in one input a class was
+found.
+
+## Mechanism
+
+### First-layer filters
+
+A first-layer unit computes $w^\top x + b$ on a $k \times k \times C$ patch $x$ of the input, with kernel $w$ of the
+same shape (see the <NoteLink to="convolutional-layer">convolutional layer</NoteLink>). Among patches of a fixed norm
+$\norm{x} = \rho$, the Cauchy–Schwarz inequality $w^\top x \le \norm{w}\norm{x}$ is an equality only for
+$x = \rho\, w / \norm{w}$. So the patch that excites a first-layer unit most is its kernel, rescaled, and drawing the
+kernel as a small image is an exact visualisation of the unit <Cite id="erhan2009" />.
+<NoteLink to="classic-convolutional-network-architectures">AlexNet</NoteLink>'s 96 first-layer kernels of
+$11 \times 11 \times 3$ were oriented edges at several frequencies, Gabor-like patterns and colour blobs
+<Cite id="krizhevsky2012" />. Most image networks trained on natural images learn similar first layers.
+
+The argument stops at the first layer. A second-layer unit is a nonlinear function of the input, through
+<Gloss name="relu" plural /> and pooling, so no single kernel describes it.
+
+### Top-activating patches
+
+The second method searches a dataset. Run the network on many images, record a channel's values at every position, and
+keep the images where the channel is largest. A unit at one position of a feature map sees only its
+<Gloss name="receptive-field" />, so the useful picture is the patch of the input inside that field. Zeiler and Fergus
+collected the top nine patches for units in each layer of an <Gloss name="imagenet" /> network: second-layer units
+responded to corners and colour conjunctions, third-layer units to textures and repeated patterns, and fourth- and
+fifth-layer units to object parts and whole objects, such as dog faces and wheels <Cite id="zeiler2014" />. Network
+dissection makes the search quantitative: it scores how well each unit's high-activation region overlaps human labels
+for objects, parts, scenes, materials, textures and colours <Cite id="bau2017" />.
+
+Top-activating patches show real inputs, so they never invent a pattern. They show only what the dataset contains, and
+the top patches of one unit often share several features (a colour, a texture and an object at once) without saying
+which one the unit uses.
+
+### Activation maximisation
+
+The third method synthesises the input. Let $f(x)$ be the value of the chosen unit as a function of the input image
+$x \in \reals^{C \times H \times W}$. Activation maximisation solves
+
+$$
+x^\star = \argmax_{x} \; f(x) - \lambda\, R(x)
+$$
+
+by gradient ascent from a random or grey image <Cite id="erhan2009" />. The regulariser $R$ keeps $x$ image-like, and
+$\lambda \ge 0$ sets its weight. Each step computes $\nabla_x f$ by backpropagation, with the weights held fixed, and
+moves the image along it:
+
+$$
+x_{t+1} = x_t + \eta \left( \nabla_x f(x_t) - \lambda\, \nabla_x R(x_t) \right),
+$$
+
+with step size $\eta > 0$. Many implementations divide the step by the root mean square of the gradient, so that
+$\eta$ is in units of pixel values whatever the scale of the unit. Simonyan, Vedaldi and Zisserman applied the method to
+the class scores of an ImageNet network, before the softmax, with $R(x) = \norm{x}^2$ <Cite id="simonyan2014" />. The
+score before the softmax is used because the softmax probability can rise by lowering the other classes' scores.
+
+Without a regulariser, the ascent produces high-frequency noise that excites the unit strongly and looks like nothing.
+These images are close relatives of <NoteLink to="adversarial-examples">adversarial examples</NoteLink>: small,
+unnatural changes to which the network is sensitive <Cite id="olah2017" />. The regularisers in common use each remove
+one kind of artefact:
+
+- **L2 decay**, $R(x) = \norm{x}^2$, keeps pixel values small, so only patterns that pay for their energy survive
+  <Cite id="simonyan2014" />.
+- **Frequency penalties** suppress noise between neighbouring pixels: a total-variation term
+  $\sum_{i,j} \abs{x_{i+1,j} - x_{i,j}} + \abs{x_{i,j+1} - x_{i,j}}$ <Cite id="mahendran2015" />, or a Gaussian blur of
+  $x$ every few steps <Cite id="yosinski2015" />.
+- **Transformation robustness**, or jitter, shifts, rotates or rescales the image at random before each gradient
+  step. A pattern that excites the unit only at one exact pixel offset does not survive <Cite id="olah2017" />.
+- **Learned priors** search the latent space of a generative model instead of pixel space, which gives photographic
+  images at the price of mixing the prior's preferences into the picture <Cite id="olah2017" />.
+
+The unit can be a single position of a channel (a neuron), the mean of a channel over all positions, or a class score. A
+neuron's image fills only its <NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink>. A
+channel or class score that is averaged over positions rewards its pattern everywhere at once, so its image repeats a
+motif across the frame. DeepDream applies the same ascent to a whole layer of a photograph's activations, amplifying
+whatever patterns the layer already sees in the photograph <Cite id="mordvintsev2015" />.
+
+A unit can respond to several distinct patterns. One ascent finds one of them. Olah, Mordvintsev and Schubert add a
+diversity term that pushes a batch of images apart, measured by the Gram matrices of their activations, to show several
+facets of one unit <Cite id="olah2017" />.
+
+## Worked example
+
+**A linear unit by gradient ascent.** Take a first-layer unit with the $3 \times 3$ vertical-edge kernel and no bias:
+
+$$
+w = \begin{bmatrix} -1 & 0 & 1 \\ -1 & 0 & 1 \\ -1 & 0 & 1 \end{bmatrix}, \qquad f(x) = \sum_{u,v} w_{uv}\, x_{uv}.
+$$
+
+With L2 decay of weight $\lambda = 1$, the objective is $f(x) - \norm{x}^2$, with gradient $w - 2x$. Plain ascent with
+step $\eta = 0.25$ from $x_0 = 0$ gives
+
+$$
+x_{t+1} = x_t + 0.25\,(w - 2 x_t) = 0.5\, x_t + 0.25\, w.
+$$
+
+The iterates are $x_1 = 0.25\, w$, $x_2 = 0.375\, w$ and $x_3 = 0.4375\, w$; in general
+$x_t = 0.5\,(1 - 0.5^t)\, w$. Every iterate is a multiple of $w$, and the limit is $x^\star = w / (2\lambda) = 0.5\, w$:
+a dark left column at $-0.5$, a zero middle column and a bright right column at $0.5$. At $x^\star$ the unit's value
+is $0.5 \norm{w}^2 = 0.5 \cdot 6 = 3$ and the penalty is $\norm{x^\star}^2 = 0.25 \cdot 6 = 1.5$. The visualisation is
+the kernel, as the Cauchy–Schwarz argument predicts.
+
+**Top-activating patch.** Slide the same kernel, without padding, over the $5 \times 5$ image
+
+$$
+x = \begin{bmatrix} 0 & 0 & 0 & 1 & 1 \\ 0 & 0 & 1 & 1 & 1 \\ 0 & 1 & 1 & 1 & 0 \\ 0 & 0 & 1 & 1 & 0 \\ 0 & 0 & 0 & 1 & 0 \end{bmatrix}.
+$$
+
+Each output is the sum of the window's right column minus the sum of its left column. The nine outputs are
+
+$$
+y = \begin{bmatrix} 2 & 2 & 0 \\ 3 & 2 & -2 \\ 2 & 2 & -2 \end{bmatrix}.
+$$
+
+For example, the window at row 1, column 0 covers rows 1 to 3 and columns 0 to 2. Its left column is $(0, 0, 0)$ and
+its right column is $(1, 1, 1)$, so $y_{1,0} = 3 - 0 = 3$, the largest value. The top-activating patch is that window,
+
+$$
+\begin{bmatrix} 0 & 0 & 1 \\ 0 & 1 & 1 \\ 0 & 0 & 1 \end{bmatrix},
+$$
+
+dark on the left and bright on the right, like $w$. Its cosine similarity with $w$ is
+$w^\top x / (\norm{w}\norm{x}) = 3 / (\sqrt{6} \cdot 2) \approx 0.61$. The patch also contains a bright centre pixel
+that the kernel ignores, since $w$ is zero there. A reader of the patch alone cannot tell whether the unit cares about
+that pixel. The synthesised image, $0.5\, w$, answers it: the unit ignores the middle column.
+
+<FeatureVisualisation />
+
+**A small trained network.** The figure trains a network of two $3 \times 3$ convolutions with six and eight channels, a
+$2 \times 2$ max pool, <NoteLink to="pooling-and-strides">global average pooling</NoteLink> and a linear layer on
+$16 \times 16$ images of discs, squares and crosses. It reaches about 99% accuracy on new images after 120
+<NoteLink to="adam">Adam</NoteLink> steps. Its first-layer filters are small edge and blob detectors. The ascent for a
+conv2 unit at the centre of the map fills only that unit's $8 \times 8$ receptive field. The ascent for a class score
+repeats its motif over the whole image, because global average pooling makes the class score a mean over positions.
+
+## Cost
+
+One ascent step costs one forward and one backward pass of the network up to the unit, about three
+<NoteLink to="multilayer-perceptron">forward passes</NoteLink>. A visualisation takes hundreds to a few thousand steps.
+A set of visualisations for every channel of a large network therefore costs as much as running the network on a few
+million images. Top-activating patches need one forward pass over the dataset, with each unit's values recorded, and a
+sort per unit.
+
+## Trade-offs
+
+- **Synthetic against natural.** Activation maximisation can isolate a single pattern that the dataset never shows
+  alone. Top-activating patches show only real inputs. In a psychophysics study, people predicted which of two images
+  activates a unit more often when shown natural top-activating images (92% correct) than when shown synthetic
+  visualisations (82%), against 50% by chance <Cite id="borowski2021" />.
+- **Regularisation strength.** Strong priors give recognisable, photograph-like images that may show the prior more
+  than the unit. Weak priors give faithful but noisy images.
+- **Neuron, channel or class.** A neuron shows a local pattern in one receptive field. A channel or class shows the
+  same pattern tiled, because of weight sharing and pooling.
+
+## Pitfalls
+
+- **Visualisations can mislead.** Geirhos and colleagues built networks whose feature visualisations show arbitrary
+  chosen patterns while their behaviour on natural images is unchanged. They also found that, in ordinary networks,
+  synthetic visualisations are processed very differently from natural images, and they prove that feature
+  visualisation can reliably describe only a narrow class of functions <Cite id="geirhos2024" />.
+- **One image per unit hides polysemantic units.** A unit that responds to several unrelated patterns appears to
+  detect only the one that the ascent reached. Show several restarts, a diversity term, or top patches beside the
+  synthetic image.
+- **Units may not be the right description.** Directions in activation space can be more interpretable than single
+  units; see <NoteLink to="concept-based-explanations">concept-based explanations</NoteLink> and
+  <NoteLink to="sparse-autoencoders-for-interpretability">sparse autoencoders for interpretability</NoteLink>.
+- **Maximise the score, not the probability.** Ascent on the softmax probability can succeed by suppressing the other
+  classes, which shows what the class is not.
+- **Clip to the input range.** Pixel values outside the range the network was trained on can excite a unit through
+  patterns that never occur in data.

@@ -1,0 +1,203 @@
+---
+title: 'Graphs as neural network inputs'
+kind: concept
+summary: 'A graph enters a network as node features $\Xmat\in\reals^{n\times d}$, an adjacency matrix or edge list, and optional edge features. Tasks are node-, edge- or graph-level. Relabelling nodes permutes $\Xmat$ and $\Amat$, so layers must be permutation equivariant.'
+tags: [graph-neural-networks, deep-learning, graphs, worked-example]
+aliases: ['graph tasks', 'node classification', 'graph classification', 'permutation equivariance on graphs', 'graph batching']
+requires: [graph-and-network-data, multilayer-perceptron]
+related: [graph-features, graph-splits-and-sampling, symmetry-and-equivariance, message-passing-neural-network, deep-sets, graph-pooling-and-readout]
+references: [hamilton2020grl, battaglia2018, gilmer2017, maron2019, fey2019pyg, kipf2017, hu2020ogb, bronstein2021]
+status: draft
+updated: 2026-10-17
+---
+
+import { PermutationEquivariance } from './PermutationEquivariance'
+import { BlockDiagonalBatch } from './BlockDiagonalBatch'
+
+<Definition>
+A graph $G = (\Vcal, \Ecal)$ with $n = \abs{\Vcal}$ nodes enters a neural network as a node feature matrix
+$\Xmat \in \reals^{n \times d}$, whose row $i$ describes node $i$, together with its edges, stored as an adjacency
+matrix $\Amat \in \set{0, 1}^{n \times n}$ or as an edge list, and optionally an edge feature vector $\evec_{ij}$ per
+edge. The prediction is made per node, per edge or per graph. Numbering the nodes is arbitrary, so a layer must give the
+same answer, relabelled, under every numbering: it must be permutation equivariant.
+</Definition>
+
+## Intuition
+
+An image is a grid. Its pixels have a fixed order, every interior pixel has the same eight neighbours, and "the pixel
+above" means the same thing everywhere. A molecule, a road network or a citation network has none of this. Nodes have
+different numbers of neighbours, and nothing marks one node as "first". Any list of the nodes is one of $n!$ equally
+valid listings.
+
+A <Gloss name="mlp" /> needs a fixed-length input in a fixed order. Flattening $\Amat$ and $\Xmat$ into one vector gives
+it one, but the vector depends on the listing. Two listings of the same molecule become two unrelated inputs, and the
+network would have to learn from data that all $n!$ of them mean the same thing. A graph network builds that fact into
+its layers instead. Each node is processed by the same function of its own features and of the multiset of its
+neighbours' features, and no function reads a node's index.
+
+## What a graph input contains
+
+A graph example has up to four parts <Cite id="battaglia2018" />.
+
+- **Node features** $\Xmat \in \reals^{n \times d}$: atom types, user attributes, <NoteLink to="word-embeddings">word
+  embeddings</NoteLink> of a paper's abstract. When nodes carry no attributes, a constant feature, the degree, or a
+  one-hot index (in a fixed, transductive graph) is used; <NoteLink to="graph-features" /> lists structural features.
+- **Structure.** The adjacency matrix has $A_{ij} = 1$ when an edge joins $i$ and $j$. It takes $n^2$ entries, which is
+  wasteful because real graphs are sparse. An **edge list** stores the $m = \abs{\Ecal}$ edges as a $2 \times m$ array
+  of index pairs (the coordinate, or COO, format), and libraries store graphs this way <Cite id="fey2019pyg" />. An
+  undirected edge is stored in both directions, so messages can flow both ways.
+- **Edge features** $\evec_{ij} \in \reals^{d_e}$: bond types, distances, timestamps or relation types. They are stored
+  as an $m \times d_e$ matrix aligned with the edge list.
+- **Graph features** $\uvec$: a global attribute, such as the temperature of a simulated system.
+
+The sparse formats are the only practical ones at scale. Cora, a standard citation benchmark, has 2,708 nodes and 5,429
+edges <Cite id="kipf2017" />, so its adjacency matrix is 0.15% non-zero. The `ogbn-products` co-purchase graph has
+2,449,029 nodes and 61,859,140 edges <Cite id="hu2020ogb" />. Its dense adjacency matrix would hold $6.0 \times 10^{12}$
+entries, 24 TB in 32-bit floats, while its edge list fits in about 1 GB.
+
+## Tasks at three levels
+
+The output's shape follows the task <Cite id="hamilton2020grl" />.
+
+- **Node level**: a vector per node, $\Ymat \in \reals^{n \times c}$. Node classification labels papers by topic or
+  accounts as fraudulent. It is often **transductive**: one large graph, labels on some nodes, predictions on the rest.
+  <NoteLink to="graph-splits-and-sampling" /> covers what may be seen at training time.
+- **Edge level**: a score per node pair, usually computed from the two endpoint vectors. Link prediction recommends
+  friends or products and completes knowledge bases; see
+  <NoteLink to="link-prediction-with-graph-neural-networks" />.
+- **Graph level**: one vector per graph, $\yvec \in \reals^{c}$. Molecular property prediction maps each molecule to its
+  solubility or toxicity. The data set is a collection of separate graphs, and the model is **inductive**: it is
+  applied to graphs it has never seen. A readout pools the node vectors; see
+  <NoteLink to="graph-pooling-and-readout" />.
+
+A <NoteLink to="message-passing-neural-network">message passing network</NoteLink> serves all three. Its layers produce
+node vectors; a task head reads them per node, per pair or after pooling.
+
+## Permutation equivariance
+
+Relabelling the nodes by a permutation $\pi$ of $\set{1, \dots, n}$ is written with the permutation matrix
+$\Pmat \in \set{0, 1}^{n \times n}$, which has a single 1 in each row and column, $P_{i\pi(i)} = 1$. The relabelled
+graph has features $\Pmat\Xmat$, whose row $i$ is the old row $\pi(i)$, and adjacency matrix $\Pmat\Amat\Pmat^\tr$,
+whose entry $(i, j)$ is the old entry $(\pi(i), \pi(j))$. The two inputs describe the same graph.
+
+A layer $F$ that outputs one row per node is **permutation equivariant** if relabelling its input relabels its output in
+the same way:
+
+$$
+F(\Pmat\Xmat, \Pmat\Amat\Pmat^\tr) = \Pmat\, F(\Xmat, \Amat) \quad \text{for every permutation matrix } \Pmat.
+$$
+
+A graph-level function $R$ is **permutation invariant** if $R(\Pmat\Xmat, \Pmat\Amat\Pmat^\tr) = R(\Xmat, \Amat)$.
+These are the graph case of <NoteLink to="symmetry-and-equivariance">equivariance and invariance to a group</NoteLink>,
+here the symmetric group of all $n!$ permutations <Cite id="bronstein2021" />.
+
+The neighbourhood sum $F(\Xmat, \Amat) = (\Amat + \I)\Xmat\Wmat$, with a weight matrix $\Wmat \in \reals^{d \times d'}$
+shared by all nodes, is equivariant. Substitute the relabelled input and use $\Pmat^\tr\Pmat = \I$, which holds because
+a permutation matrix is orthogonal:
+
+$$
+(\Pmat\Amat\Pmat^\tr + \I)\Pmat\Xmat\Wmat = \Pmat\Amat\Pmat^\tr\Pmat\Xmat\Wmat + \Pmat\Xmat\Wmat
+= \Pmat(\Amat + \I)\Xmat\Wmat.
+$$
+
+The same argument covers any layer built from three ingredients: a function applied to each node row with shared
+weights, a product with $\Amat$ (or a normalised form of it), and elementwise nonlinearities. An elementwise function
+commutes with $\Pmat$ because it acts on each entry separately. Stacks of equivariant layers are equivariant. A sum,
+mean or maximum over the node rows is invariant, because $\ones^\tr\Pmat = \ones^\tr$. So an equivariant encoder
+followed by such a readout is an invariant graph-level model, the pattern of <NoteLink to="deep-sets" /> with message
+passing in front <Cite id="gilmer2017" />.
+
+Equivariance is a strong restriction. A general linear map from $\reals^{n \times n}$ to $\reals^{n \times n}$ has $n^4$
+parameters. For $n \ge 4$, the linear maps that are equivariant to all permutations form a space of dimension 15,
+whatever the value of $n$, and the invariant linear maps to $\reals$ a space of dimension 2 <Cite id="maron2019" />. A
+model that respects the symmetry spends none of its parameters or data on learning it.
+
+<PermutationEquivariance />
+
+## Batching graphs
+
+Graph-level data sets hold many small graphs of different sizes, which cannot be stacked into one tensor the way
+images are. The standard solution treats a batch of $B$ graphs as one graph with $B$ connected components
+<Cite id="fey2019pyg" />. The node features are concatenated row-wise, the edge lists are concatenated with each graph's
+indices shifted by the number of nodes before it, and the adjacency matrix becomes block diagonal:
+
+$$
+\Amat_{\text{batch}} = \begin{bmatrix} \Amat_1 & & \\ & \ddots & \\ & & \Amat_B \end{bmatrix}, \qquad
+\Xmat_{\text{batch}} = \begin{bmatrix} \Xmat_1 \\ \vdots \\ \Xmat_B \end{bmatrix}.
+$$
+
+No edge joins two graphs, so no message crosses from one to another, and every layer gives each node the output it
+would get if its graph were processed alone. A **batch vector** stores the graph index of each node, and the readout
+pools within each graph by a segment sum or mean. The batch costs memory proportional to its total number of nodes and
+edges, with no padding. Dense batching, which pads every graph to the largest $n$ and masks the padding, is used by
+models that need a dense $n \times n$ matrix per graph, such as some <NoteLink to="graph-transformer">graph
+transformers</NoteLink>.
+
+<BlockDiagonalBatch />
+
+## Worked example
+
+Take the graph of the figures: nodes 1, 2, 3 form a triangle, node 3 joins node 4, and node 4 has two further
+neighbours, 5 and 6. The edges are $1{-}2$, $1{-}3$, $2{-}3$, $3{-}4$, $4{-}5$ and $4{-}6$, so the degrees are
+$(2, 2, 3, 3, 1, 1)$. Each node has a 2-dimensional feature:
+
+$$
+\xvec_1 = (1, 0),\ \xvec_2 = (0, 1),\ \xvec_3 = (1, 1),\ \xvec_4 = (2, 0),\ \xvec_5 = (0, 2),\ \xvec_6 = (1, 0).
+$$
+
+**One layer.** Use the neighbourhood sum $\hvec_v = \xvec_v + \sum_{u \in \Ncal(v)} \xvec_u$, the rows of
+$(\Amat + \I)\Xmat$ with $\Wmat = \I$.
+
+- Node 1 adds its neighbours 2 and 3: $\hvec_1 = (1, 0) + (0, 1) + (1, 1) = (2, 2)$.
+- Node 2 adds 1 and 3: $\hvec_2 = (2, 2)$.
+- Node 3 adds 1, 2 and 4: $\hvec_3 = (1, 1) + (1, 0) + (0, 1) + (2, 0) = (4, 2)$.
+- Node 4 adds 3, 5 and 6: $\hvec_4 = (2, 0) + (1, 1) + (0, 2) + (1, 0) = (4, 3)$.
+- Node 5 adds 4: $\hvec_5 = (2, 2)$. Node 6 adds 4: $\hvec_6 = (3, 0)$.
+
+A sum readout gives the graph vector $(17, 11)$. As a check, node $v$ appears in its own sum and in each neighbour's, so
+the readout equals
+$\sum_v (1 + \deg v)\,\xvec_v = 3(1, 0) + 3(0, 1) + 4(1, 1) + 4(2, 0) + 2(0, 2) + 2(1, 0) = (17, 11)$.
+
+**Relabel.** List the nodes in the order $4, 1, 6, 2, 5, 3$: old node 4 becomes node 1, old node 1 becomes node 2, and
+so on. The new adjacency matrix differs: the new $A_{12}$ is the old $A_{41} = 0$, whereas the old $A_{12}$ was 1. The
+new node 1 still has the feature $(2, 0)$ and the neighbours with features $(1, 1)$, $(0, 2)$ and $(1, 0)$, so the layer
+gives it $(4, 3)$, the old $\hvec_4$. Every node gets its old vector at its new index, and the readout is still
+$(17, 11)$.
+
+**A position-based model fails.** Let a model output $A_{12}$, the entry "is node 1 joined to node 2". It is a valid
+function of the flattened adjacency matrix. It returns 1 for the first listing and 0 for the second, although the graph
+is the same.
+
+**How many listings.** The 6 nodes have $6! = 720$ orderings. Swapping nodes 1 and 2, or nodes 5 and 6, maps the graph
+to itself, so the graph has 4 automorphisms, and the 720 orderings give $720 / 4 = 180$ different adjacency matrices. An
+<Gloss name="mlp" /> on the flattened matrix would need to learn that all 180 inputs are one graph.
+
+**Batch.** A triangle (3 nodes) and a path (3 nodes) batched together give a 6-node graph with batch vector
+$(0, 0, 0, 1, 1, 1)$. The path's edges $1{-}2$ and $2{-}3$ become $4{-}5$ and $5{-}6$, and the top-right and bottom-left
+$3 \times 3$ blocks of the adjacency matrix are zero.
+
+## Assumptions
+
+- **The labelling carries no information.** Equivariance is right when the node order is arbitrary. When the order means
+  something, such as the positions of tokens in a sentence or of atoms along a polymer chain, it must be supplied as a
+  feature, as <NoteLink to="positional-and-structural-encodings">positional encodings</NoteLink> do.
+- **The given edges are the relevant ones.** The model only sees relations through $\Amat$. A graph built by a
+  similarity threshold (<NoteLink to="graph-construction" />) bakes that choice into every prediction.
+- **One node and edge type.** Typed nodes and edges need per-type weights; see
+  <NoteLink to="heterogeneous-graph-networks" />.
+
+## Pitfalls
+
+- **Index-dependent features break equivariance.** A one-hot node index, or a random feature drawn once per node, makes
+  the model depend on the labelling. One-hot indices are acceptable in a single fixed graph and fail on new graphs.
+- **Equivariance is not expressiveness.** An equivariant model maps isomorphic graphs to the same output, as it should,
+  but it may also map some non-isomorphic graphs to the same output. Message passing cannot separate a hexagon from two
+  triangles when all nodes have the same features; see <NoteLink to="weisfeiler-leman-test" />.
+- **Directed edges.** Storing only one direction of an undirected edge halves what each node receives. Libraries make
+  the edge list symmetric on loading; a hand-built edge list must be checked.
+- **Leakage through structure.** In a transductive node split, test nodes and their edges are present during training.
+  Edges in a link-prediction test set must be removed from the input graph, or the model reads the answer from $\Amat$.
+- **Dense adjacency at scale.** Building $\Amat$ as a dense matrix works for molecules and fails for graphs beyond a few
+  tens of thousands of nodes; use the edge list or a sparse matrix, and
+  <NoteLink to="neighbour-sampling-and-scalable-graph-networks">sampling</NoteLink> for graphs that do not fit in
+  memory.

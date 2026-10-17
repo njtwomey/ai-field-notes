@@ -1,0 +1,182 @@
+---
+title: 'Gated and edge-conditioned message passing'
+kind: concept
+summary: 'Gated graph networks update each node with a GRU cell fed by the aggregated messages, so many steps stay stable. Edge-conditioned convolution generates the message weight matrix from the edge''s features, as in the MPNN for molecules with bond types and distances.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases:
+  [
+    'gated graph neural network',
+    'GGNN',
+    'edge-conditioned convolution',
+    'ECC',
+    'edge network',
+    'gated graph convolutional network',
+    'GatedGCN',
+  ]
+requires: [message-passing-neural-network, gated-recurrent-unit]
+related:
+  [
+    graph-attention-network,
+    molecular-property-prediction-with-graph-networks,
+    heterogeneous-graph-networks,
+    machine-learned-interatomic-potentials,
+    graph-convolutional-network,
+  ]
+references: [li2016gated, simonovsky2017, gilmer2017, bresson2017, schutt2017, dwivedi2020benchmarking]
+status: draft
+updated: 2026-10-17
+---
+
+import { GatedEdgeUpdate } from './GatedEdgeUpdate'
+
+<Definition>
+Gated and edge-conditioned <Gloss name="gnn">message passing</Gloss> are two refinements of the
+<NoteLink to="message-passing-neural-network">message passing</NoteLink> step
+$\hvec_v^{(t+1)} = U(\hvec_v^{(t)}, \sum_{w \in \Ncal(v)} M(\hvec_v^{(t)}, \hvec_w^{(t)}, \evec_{vw}))$. A gated graph
+neural network takes $U$ to be a <Gloss name="gru" /> cell, with the node state as the cell's state and the aggregated
+message as its input <Cite id="li2016gated" />. An edge-conditioned layer takes the message to be
+$M = \Amat(\evec_{vw})\, \hvec_w$, where a learned function $\Amat$ maps the edge's feature vector $\evec_{vw}$ to a
+$d \times d$ weight matrix <Cite id="simonovsky2017" />.
+</Definition>
+
+## Intuition
+
+A plain message passing layer multiplies every neighbour's vector by the same weight matrix. In a molecule, a single
+bond, a double bond and an aromatic bond then carry the same message, and only the node features tell atoms apart. Edge
+conditioning lets the edge choose the matrix: a double bond can rotate, scale or mix the neighbour's features
+differently from a single bond, and a bond length of 1.2 Å differently from one of 1.5 Å.
+
+A plain layer also adds its message to the old state, or replaces the state with a nonlinearity of the sum. Run for many
+rounds with shared weights, that repeated map can grow or shrink the states geometrically, just as a plain
+<NoteLink to="recurrent-neural-network">recurrent network</NoteLink> does over many time steps. A gated update decides,
+per coordinate, how much of the old state to keep and how much to overwrite with the new information. The node state
+then behaves like the memory of a recurrent network that runs over rounds of message passing instead of over time.
+
+The two ideas are independent and combine well. The message passing network that Gilmer et al. found best on the QM9
+molecular properties uses both: an edge network for the messages and a GRU for the update <Cite id="gilmer2017" />.
+
+## Details
+
+**Gated graph neural network.** Li et al. run a fixed number $T$ of rounds with weights shared across rounds. Each edge
+type and direction has its own matrix, so the message into node $v$ is
+$\mvec_v^{(t)} = \sum_{w \in \Ncal(v)} \Amat_{\tau(v, w)} \hvec_w^{(t-1)}$, with $\tau(v, w)$ the type of the edge. The
+update is a GRU step with input $\mvec_v^{(t)}$ and state $\hvec_v^{(t-1)}$, in the convention of the GRU note:
+
+$$
+\begin{aligned}
+\zvec &= \sigma(\Wmat_z \mvec_v + \Umat_z \hvec_v + \bvec_z), &
+\rvec &= \sigma(\Wmat_r \mvec_v + \Umat_r \hvec_v + \bvec_r), \\
+\tilde\hvec &= \tanh\paren{\Wmat \mvec_v + \Umat(\rvec \odot \hvec_v) + \bvec}, &
+\hvec_v' &= \zvec \odot \hvec_v + (1 - \zvec) \odot \tilde\hvec.
+\end{aligned}
+$$
+
+Here $\sigma$ is the logistic sigmoid, $\odot$ the elementwise product, and $\zvec, \rvec \in (0, 1)^d$ the update and
+reset gates. The initial state is the node's input features padded with zeros to width $d$. Training backpropagates
+through all $T$ rounds, as <NoteLink to="backpropagation-through-time">backpropagation through time</NoteLink> does
+through a sequence <Cite id="li2016gated" />.
+
+The gate bounds the states. Each coordinate of $\hvec_v'$ is a convex combination of the old coordinate and a $\tanh$
+value in $(-1, 1)$, so if every coordinate of $\hvec_v^{(0)}$ lies in $[-1, 1]$, every later state does too, for any
+number of rounds and any weights. A gate near 1 also passes the gradient back through a round almost unchanged, which is
+the GRU's remedy for vanishing gradients.
+
+**Edge-conditioned convolution.** Simonovsky and Komodakis generate each layer's message matrix with a filter-generating
+network $F$, a small <Gloss name="mlp">multilayer perceptron</Gloss> from the edge feature vector
+$\evec_{wv} \in \reals^s$ to the entries of $\Thetamat_{wv} = F(\evec_{wv}) \in \reals^{d' \times d}$. The layer
+averages over the neighbourhood, and the neighbourhood $\Ncal(v)$ includes $v$ itself:
+
+$$
+\hvec_v' = \frac{1}{\abs{\Ncal(v)}} \sum_{w \in \Ncal(v)} F(\evec_{wv})\, \hvec_w + \bvec.
+$$
+
+An ordinary convolution is a special case. On a chain of pixels, label each edge by the one-hot offset between its
+endpoints and take $F$ linear; then $F$ returns one matrix per offset, which is a convolution kernel with one tap per
+offset <Cite id="simonovsky2017" />. With a continuous edge feature, such as the offset between two points of a point
+cloud, the matrix varies smoothly with the geometry.
+
+**Edge network in the MPNN.** Gilmer et al. use the same construction with <NoteLink to="graph-isomorphism-network">sum
+aggregation</NoteLink>: $M(\hvec_v, \hvec_w, \evec_{vw}) = \Amat(\evec_{vw})\, \hvec_w$, where a network maps the bond
+type and the interatomic distance to a $d \times d$ matrix, followed by a GRU update <Cite id="gilmer2017" />.
+Generating a full matrix per edge costs $O(d^2)$ memory per edge, so the state width stays small or the matrix is
+factored.
+
+**Edge gates.** A cheaper way to let an edge shape its message is a gate rather than a matrix. The gated
+<Gloss name="gcn">graph convolutional network</Gloss> computes a gate per edge and coordinate from both endpoints,
+$\etavec_{vw} = \sigma(\Pmat \hvec_v + \Qmat \hvec_w)$, and updates
+
+$$
+\hvec_v' = \hvec_v + \operatorname{ReLU}\paren{\Umat \hvec_v + \sum_{w \in \Ncal(v)} \etavec_{vw} \odot \Vmat \hvec_w},
+$$
+
+with a residual connection around the layer <Cite id="bresson2017" />. A gate is a soft, per-coordinate attention weight
+that is not normalised over the neighbourhood, so unlike <NoteLink to="graph-attention-network">graph
+attention</NoteLink> the layer can still count neighbours. The version used in benchmarks adds the edge feature inside
+the gate and updates edge features alongside node features <Cite id="dwivedi2020benchmarking" />.
+
+**Relatives.** A relational graph convolution, with one weight matrix per edge type, is an edge-conditioned layer whose
+filter network is linear in a one-hot edge type; see <NoteLink to="heterogeneous-graph-networks">heterogeneous graph
+networks</NoteLink>. SchNet generates a filter from the interatomic distance, expanded in radial basis functions, and
+multiplies it elementwise with the neighbour's features, a diagonal $\Amat(\evec)$ that is cheaper than a full matrix
+<Cite id="schutt2017" />. The equivariant networks of
+<NoteLink to="machine-learned-interatomic-potentials">machine-learned interatomic potentials</NoteLink> extend the idea
+to messages that rotate with the molecule.
+
+## Worked example
+
+Take a fragment O–C–N of three atoms, with C bonded to O and to N. Give the atoms two-dimensional states
+$\hvec_C = (1, 0)$, $\hvec_O = (0, 1)$ and $\hvec_N = (0.5, -0.5)$. Let the edge feature be the bond order $b$, and let
+the message matrix depend linearly on it, $\Amat(b) = \Thetamat_0 + b\, \Thetamat_1$, with
+
+$$
+\Thetamat_0 = \begin{bmatrix} 0.5 & 0 \\ 0 & 0.5 \end{bmatrix}, \quad
+\Thetamat_1 = \begin{bmatrix} 0 & -0.5 \\ 0.5 & 0 \end{bmatrix}, \quad
+\Amat(1) = \begin{bmatrix} 0.5 & -0.5 \\ 0.5 & 0.5 \end{bmatrix}, \quad
+\Amat(2) = \begin{bmatrix} 0.5 & -1 \\ 1 & 0.5 \end{bmatrix}.
+$$
+
+**Messages into C.** Make C=O a double bond and C–N a single bond.
+
+- From O over the double bond: $\Amat(2)\hvec_O = (0.5 \cdot 0 - 1 \cdot 1,\; 1 \cdot 0 + 0.5 \cdot 1) = (-1, 0.5)$.
+- From N over the single bond: $\Amat(1)\hvec_N = (0.25 + 0.25,\; 0.25 - 0.25) = (0.5, 0)$.
+- Sum: $\mvec_C = (-0.5, 0.5)$.
+
+If C–O were a single bond, the message from O would be $\Amat(1)\hvec_O = (-0.5, 0.5)$ and $\mvec_C = (0, 0.5)$. The
+bond order changed the message from the same neighbour state.
+
+**Gated update of C.** Use a GRU whose weight matrices are all the identity and whose biases are zero, so every gate
+acts coordinate by coordinate.
+
+1. Update gate: $\zvec = \sigma(\mvec_C + \hvec_C) = \sigma(0.5, 0.5) = (0.622, 0.622)$.
+2. Reset gate: $\rvec = \sigma(\mvec_C + \hvec_C) = (0.622, 0.622)$, the same here because the two gates have the same
+   weights.
+3. Candidate: $\tilde\hvec = \tanh(\mvec_C + \rvec \odot \hvec_C) = \tanh(-0.5 + 0.622,\; 0.5 + 0) = (0.122, 0.462)$.
+4. New state: $\hvec_C' = \zvec \odot \hvec_C + (1 - \zvec) \odot \tilde\hvec = (0.622 + 0.378 \cdot 0.122,\;
+   0.378 \cdot 0.462) = (0.668, 0.174)$.
+
+The gate kept 62% of the old state and took 38% of the candidate. The ungated update $\hvec_C + \mvec_C$ gives
+$(0.5, 0.5)$ in this round. Run for ten rounds with the same matrices, the ungated states of all three atoms reach
+entries of several hundred, while the gated states stay inside $[-1, 1]^2$, as the bound above guarantees. The figure
+runs both updates through the engine's message passing and GRU cell.
+
+<GatedEdgeUpdate />
+
+## Assumptions
+
+- The edge features carry information about how a neighbour's state should be transformed, such as bond type, distance
+  or relation type. With uninformative edge features, an edge-conditioned layer reduces to a plain layer with one
+  shared matrix.
+- For a gated graph network, the same update applied for $T$ rounds is appropriate: the task needs information from up
+  to $T$ hops, with no change of function between hops.
+
+## Pitfalls
+
+- **Memory per edge.** A full $d \times d$ matrix per edge costs $\abs{\Ecal} d^2$ numbers per layer. For large graphs
+  or wide states, use edge gates, a diagonal filter as in SchNet, or a few shared basis matrices.
+- **Gating does not cure oversmoothing.** A gate keeps states bounded and gradients alive over many rounds. It does not
+  stop neighbouring states from converging when the task does not need long-range information; see
+  <NoteLink to="oversmoothing">oversmoothing</NoteLink>.
+- **Rounds are not layers.** A gated graph network shares weights across its $T$ rounds, so more rounds add reach but no
+  parameters. Distinct weights per round, as in most modern stacks, add capacity at the cost of more parameters.
+- **Continuous features need an expansion.** Feeding a raw distance into a small filter network gives filters that vary
+  slowly with distance. Expanding it in radial basis functions first lets the filter change sharply at bond lengths.

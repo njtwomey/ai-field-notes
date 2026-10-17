@@ -1,0 +1,199 @@
+---
+title: 'Video and three-dimensional convolution'
+kind: concept
+summary: 'A 3-D kernel spans time as well as space, so its cost grows by the temporal kernel size $k_t$. C3D uses full 3-D kernels, I3D inflates pretrained 2-D kernels, $(2{+}1)$-D factorises into spatial then temporal convolution, and two-stream networks add optical flow.'
+tags: [convolutional-networks, computer-vision, deep-learning, worked-example]
+aliases: ['3D convolution', 'C3D', 'I3D', 'inflated 3D convolution', '(2+1)D convolution', 'two-stream network']
+requires: [convolutional-layer]
+related: [one-dimensional-convolutional-networks, depthwise-and-grouped-convolution, motion-representations, clip-sampling, video-datasets, vision-transformer, video-diffusion-models, efficient-convolutional-networks]
+references: [ji2013, karpathy2014video, simonyan2014twostream, tran2015c3d, carreira2017, tran2018r21d, xie2018s3d, tran2019csn, feichtenhofer2019, feichtenhofer2020x3d, adelson1985, bertasius2021timesformer, arnab2021vivit, tong2022videomae]
+status: draft
+updated: 2026-10-17
+---
+
+import { MotionKernels } from './MotionKernels'
+import { VideoConvolutionCost } from './VideoConvolutionCost'
+
+<Definition>
+A three-dimensional <NoteLink to="convolutional-layer">convolutional layer</NoteLink> maps a clip with $C$ channels, $T$
+frames and $H \times W$ pixels, an array of shape $[C, T, H, W]$, to a clip with $C'$ channels. Each output value is a
+bias plus the weighted sum of a $k_t \times k \times k$ window of every input channel, spanning $k_t$ frames and
+$k \times k$ pixels, with weights shared across all positions in space and time. The layer has $k_t k^2 C C'$ weights
+and costs $k_t$ times as much as a two-dimensional layer applied to every frame. Video networks use full 3-D kernels
+(C3D), 3-D kernels inflated from a pretrained image network (I3D), a spatial convolution followed by a temporal one
+($(2{+}1)$-D), or two 2-D streams on frames and optical flow.
+</Definition>
+
+## Intuition
+
+A video is a stack of images, and an image network applied to each frame recognises what is in the frame. Many actions
+cannot be told apart from single frames. Opening a door and closing it pass through the same frames in opposite orders;
+a person standing up and sitting down do the same. The difference is motion, and motion lives in how pixels change from
+frame to frame.
+
+In a space-time volume a moving edge is a slanted surface. A still vertical bar traces a vertical stripe in the slice
+through one row over time, and a bar moving right by one pixel per frame traces a stripe tilted by one pixel per frame.
+Detecting motion is therefore detecting orientation in space and time <Cite id="adelson1985" />, and a kernel that spans
+several frames can do it. A $k_t \times k \times k$ kernel whose taps follow a tilted line responds to motion at that
+speed and direction, just as a 2-D kernel whose taps follow a line responds to edges at that angle.
+
+Three families of design follow from that. Give the network motion explicitly, as optical flow, and keep 2-D kernels:
+two-stream networks. Let the kernels span time: 3-D convolution. Or split each 3-D kernel into a spatial and a temporal
+part to save computation: $(2{+}1)$-D and channel-separated convolution.
+
+## Details
+
+### The layer in full
+
+Write the input as $x_{c, \tau, r, q}$ for channel $c$, frame $\tau$, row $r$ and column $q$. With zero padding and
+strides $s_t$ in time and $s$ in space, output channel $c'$ at frame $i$, row $j$ and column $l$ is
+
+$$
+y_{c', i, j, l} = b_{c'} + \sum_{c=1}^{C} \sum_{a=0}^{k_t - 1} \sum_{u=0}^{k-1} \sum_{v=0}^{k-1}
+w_{c', c, a, u, v}\; x_{c,\, s_t i - p_t + a,\, sj - p + u,\, sl - p + v}.
+$$
+
+Libraries store a mini-batch as $[N, C, T, H, W]$ and the weights as $[C', C, k_t, k, k]$. The output size follows the
+usual formula separately along each of the three axes. The layer has $k_t k^2 C C' + C'$ parameters, and an output of
+shape $[C', T', H', W']$ costs
+
+$$
+k_t\, k^2\, C\, C'\, T' H' W'
+$$
+
+multiply-accumulates per clip. Relative to a $1 \times k \times k$ layer on every frame, the 3-D layer multiplies both
+the weights and the computation by $k_t$. Relative to one image, the clip multiplies the computation by $T'$. Both
+factors make video networks expensive: a 16-frame clip through a $3 \times 3 \times 3$ layer costs 48 times the same
+layer on one frame.
+
+<MotionKernels />
+
+### Early designs and two-stream networks
+
+Ji et al. built one of the first 3-D <NoteLink to="convolutional-networks">convolutional networks</NoteLink> for action
+recognition, on short stacks of frames from surveillance video <Cite id="ji2013" />. Karpathy et al. trained networks on
+a million sports videos and compared ways to fuse time: one frame, frames stacked as channels in the first layer, two
+distant frames fused late, and slow fusion of neighbouring frames through several layers. Slow fusion was best, but only
+slightly better than the single-frame network <Cite id="karpathy2014video" />: the networks learned little motion.
+
+Two-stream networks gave motion to the network directly <Cite id="simonyan2014twostream" />. A spatial stream, an image
+network, sees one frame. A temporal stream sees the <NoteLink to="motion-representations">optical flow</NoteLink> of ten
+consecutive frames, the horizontal and vertical displacement of every pixel stacked as 20 input channels. The two
+streams' class scores are combined, by averaging or by a linear classifier. The temporal stream alone was more accurate
+than the spatial stream on the action datasets of the time, which showed how much the task depends on motion. The cost
+is the optical flow, computed by a separate algorithm before the network runs.
+
+### C3D: full 3-D kernels
+
+C3D applies $3 \times 3 \times 3$ kernels in every layer to clips of 16 frames at $112 \times 112$ pixels, with eight
+convolutional layers and five pooling layers <Cite id="tran2015c3d" />. Among homogeneous temporal kernel sizes, 3 was
+the best. Its features, fed to a linear classifier, transferred to several video tasks. C3D was trained from scratch on
+video. The authors of I3D argued that such networks were held back by the small labelled video datasets of the time,
+while image networks could start from <Gloss name="imagenet" /> <Cite id="carreira2017" />.
+
+### I3D: inflating a pretrained image network
+
+I3D starts from a 2-D image network and inflates every $k \times k$ kernel into a $k \times k \times k$ kernel by
+repeating it $k$ times along time and dividing by $k$ <Cite id="carreira2017" />. Inflation preserves the image
+network's function on a still video. Let $\tilde w_{a, u, v} = w_{u, v}/k_t$ for $a = 0, \dots, k_t - 1$, and let every
+frame of the clip equal one image $x$. Then
+
+$$
+\sum_{a=0}^{k_t - 1} \sum_{u, v} \tilde w_{a, u, v}\, x_{\tau + a,\, j + u,\, l + v}
+= \sum_{a=0}^{k_t - 1} \frac{1}{k_t} \sum_{u, v} w_{u, v}\, x_{j + u,\, l + v}
+= \sum_{u, v} w_{u, v}\, x_{j + u,\, l + v},
+$$
+
+the 2-D layer's output on the image. Pooling and nonlinearities act on each position, so the whole inflated network
+reproduces the image network on such a clip. Training on video then changes the kernels along time and learns motion
+from a starting point that already recognises objects. Carreira and Zisserman also introduced the Kinetics dataset; see
+<NoteLink to="video-datasets">video datasets</NoteLink>. Their best model combined an inflated RGB network with an
+inflated optical-flow network, two streams of 3-D convolutions.
+
+### (2+1)-D and channel-separated convolution
+
+A $(2{+}1)$-D block replaces a $k_t \times k \times k$ convolution from $C$ to $C'$ channels with a
+$1 \times k \times k$ spatial convolution to $M$ channels, a nonlinearity, and a $k_t \times 1 \times 1$
+<NoteLink to="one-dimensional-convolutional-networks">temporal convolution</NoteLink> to $C'$ channels
+<Cite id="tran2018r21d" />. The block has $k^2 C M + k_t M C'$ weights. Tran et al. chose
+
+$$
+M = \left\lfloor \frac{k_t k^2 C C'}{k^2 C + k_t C'} \right\rfloor,
+$$
+
+so that the block has about as many weights as the 3-D layer it replaces. The factorisation keeps the parameter count
+and doubles the number of nonlinearities. It also made training easier: R(2+1)D networks reached lower training error
+than 3-D networks of the same depth and size. S3D found that 3-D or separable temporal convolutions help most in the
+upper layers, and that the lower layers can stay 2-D at little loss in accuracy <Cite id="xie2018s3d" />.
+
+A channel-separated layer goes further and factorises across channels: a depthwise $k_t \times k \times k$
+convolution, one kernel per channel, followed by a $1 \times 1 \times 1$ convolution that mixes channels, as in
+<NoteLink to="depthwise-and-grouped-convolution">depthwise separable convolution</NoteLink> for images
+<Cite id="tran2019csn" />. X3D builds efficient video networks from such layers by expanding a small 2-D network one
+axis at a time, frames, frame rate, resolution, width or depth, keeping whichever step buys the most accuracy per unit
+of computation <Cite id="feichtenhofer2020x3d" />. SlowFast runs two pathways: a slow one at a low frame rate with many
+channels for appearance, and a fast one at 8 times the frame rate with an eighth of the channels for motion, joined by
+<NoteLink to="feature-pyramid-network">lateral connections</NoteLink> <Cite id="feichtenhofer2019" />.
+
+<VideoConvolutionCost />
+
+### Practice
+
+Since about 2021 the most accurate video recognition models are transformers that attend over space-time patches.
+TimeSformer alternates attention over time and over space in each block <Cite id="bertasius2021timesformer" />, ViViT
+factorises space and time in several ways <Cite id="arnab2021vivit" />, and VideoMAE pretrains such models by masking 90
+to 95% of space-time patches and reconstructing them <Cite id="tong2022videomae" />. The tubelet embedding of ViViT and
+VideoMAE, which cuts the clip into blocks of a few frames by $16 \times 16$ pixels, is itself a 3-D convolution with a
+stride equal to its kernel. 3-D and $(2{+}1)$-D convolutional networks remain in use where computation is tight, such as
+X3D-style models on devices, and as the backbone of many action-detection and video-segmentation systems.
+<NoteLink to="video-diffusion-models">Video diffusion models</NoteLink> compress clips with
+<NoteLink to="autoencoder">autoencoders</NoteLink> over space and time.
+
+How frames are sampled from a long video matters as much as the layer type; see
+<NoteLink to="clip-sampling">clip and frame sampling</NoteLink>.
+
+## Worked example
+
+Take a 16-frame clip at $112 \times 112$ pixels, the input size of C3D, and count with same padding and stride 1.
+
+1. **First layer.** C3D's first layer maps $C = 3$ colour channels to $C' = 64$ with $3 \times 3 \times 3$ kernels.
+   It has $3 \cdot 9 \cdot 3 \cdot 64 = 5{,}184$ weights and 64 biases, 5,248 parameters. The output has shape
+   $[64, 16, 112, 112]$, $1.28 \times 10^7$ values, and each costs $3 \cdot 9 \cdot 3 = 81$ multiply-accumulates. The
+   layer costs $81 \cdot 64 \cdot 16 \cdot 112^2 = 1.04 \times 10^9$ multiply-accumulates per clip.
+2. **A middle layer, 3-D.** After a $2 \times 2$ spatial pooling the clip is $16 \times 56 \times 56$. A
+   $3 \times 3 \times 3$ layer from 64 to 128 channels has $27 \cdot 64 \cdot 128 = 221{,}184$ weights, 221,312
+   parameters with biases, and costs $221{,}184 \cdot 16 \cdot 56^2 = 1.11 \times 10^{10}$ multiply-accumulates.
+3. **The same layer per frame.** A $1 \times 3 \times 3$ kernel has $9 \cdot 64 \cdot 128 = 73{,}728$ weights and costs
+   $3.70 \times 10^9$ multiply-accumulates: a third of the 3-D layer, because $k_t = 3$.
+4. **(2+1)-D.** The matched width is $M = \lfloor 3 \cdot 9 \cdot 64 \cdot 128 / (9 \cdot 64 + 3 \cdot 128) \rfloor =
+   \lfloor 221{,}184 / 960 \rfloor = 230$. The spatial part has $9 \cdot 64 \cdot 230 = 132{,}480$ weights and the
+   temporal part $3 \cdot 230 \cdot 128 = 88{,}320$, 220,800 in all, within 0.2% of the 3-D layer. The cost is
+   $220{,}800 \cdot 16 \cdot 56^2 = 1.11 \times 10^{10}$ multiply-accumulates, the same as the 3-D layer, with a
+   <Gloss name="relu" /> between the two parts.
+5. **Channel-separated.** The depthwise $3 \times 3 \times 3$ part has $27 \cdot 64 = 1{,}728$ weights and the
+   $1 \times 1 \times 1$ part $64 \cdot 128 = 8{,}192$. Together they cost $9{,}920 \cdot 16 \cdot 56^2 = 4.98 \times
+   10^8$ multiply-accumulates, 4.5% of the 3-D layer.
+6. **Memory.** The middle layer's output holds $128 \cdot 16 \cdot 56^2 = 6.4 \times 10^6$ values per clip. Training
+   stores such activations for every layer, so batch sizes for video are far smaller than for images.
+
+## Assumptions
+
+- The frames are equally spaced in time. A temporal kernel tap means a fixed lag only at a fixed frame rate; clips
+  sampled at another stride see motion at another speed.
+- Motion is local. A $k_t \times k \times k$ kernel sees displacements of at most about $k$ pixels over $k_t$ frames;
+  faster motion needs pooling, strides or a lower frame rate to fit in the kernel.
+- Statistics are the same at every position in space and time, as for any convolution.
+
+## Pitfalls
+
+- **Temporal kernels that are too short for the frame rate.** At 30 frames per second, a stack of $3 \times 3 \times 3$
+  layers with no temporal pooling covers a fraction of a second. Long actions need temporal downsampling or sampling
+  frames further apart.
+- **Background bias.** Many actions are recognisable from the scene alone: a swimming pool implies swimming. A network
+  can score well on such datasets with almost no motion modelling. Datasets built so that motion matters, such as
+  Something-Something, test it.
+- **Cost of optical flow.** Two-stream accuracy depends on flow computed by a separate, often slow, algorithm. The flow
+  must be computed again at test time.
+- **Memory.** Activations grow with $T$. Halving the frames or the resolution is often the only way to fit a batch.
+- **Inflation at the borders.** An inflated kernel reproduces the image network only away from the first and last
+  frames, where zero padding enters the temporal window.

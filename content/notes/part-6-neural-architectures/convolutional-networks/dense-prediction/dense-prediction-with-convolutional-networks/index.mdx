@@ -1,0 +1,81 @@
+---
+title: 'Dense prediction with convolutional networks'
+kind: overview
+summary: 'Architectures that predict per pixel or per anchor instead of per image: fully convolutional networks and U-Net encoder-decoders, atrous pyramid decoders, feature pyramid networks across scales, and dense detection heads with anchors and box offsets.'
+tags: [convolutional-networks, computer-vision, deep-learning, overview]
+aliases: []
+requires: [convolutional-layer]
+related: [semantic-segmentation, object-detection, instance-and-panoptic-segmentation, convolutional-networks]
+references: [long2015, lin2017fpn, szeliski2022]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+Dense prediction is the family of tasks in which a network outputs a value at every position of a grid rather than
+one value per image: a class per pixel in semantic segmentation, a box and a class per anchor or cell in object
+detection, a depth or a flow vector per pixel. The architectures for it keep the spatial layout of a convolutional
+backbone through to the output, and add parts that recover resolution, gather context at several scales and turn
+feature maps into per-position predictions.
+</Definition>
+
+## What it is for
+
+A classification network reduces an image to one vector of class scores and throws position away at the end. Many
+vision tasks need the position: which pixels are road, where each car is, how far each pixel lies from the camera.
+Dense prediction architectures reuse the classifier's convolutional layers, which already compute a feature vector at
+every position, and replace the head. They underlie <NoteLink to="semantic-segmentation" />,
+<NoteLink to="object-detection" />, <NoteLink to="instance-and-panoptic-segmentation" /> and, through the U-Net, the
+denoising networks of <NoteLink to="diffusion-models" />. This chapter covers the building blocks; the task notes in
+Part VII cover datasets, losses and evaluation.
+
+## Main ideas
+
+**Keep the grid.** A fully connected layer applied at every position is a convolution, so a classifier rewritten with
+convolutions only accepts any input size and outputs a score map <Cite id="long2015" />. The map is coarse, at the
+backbone's output stride, usually 32, and thin structures can vanish from it. See
+<NoteLink to="fully-convolutional-network-and-u-net" />.
+
+**Recover resolution with skips.** Upsampling by a <NoteLink to="transposed-convolution" /> or by interpolation
+restores the size but not the detail. Encoder-decoder networks bring the fine encoder maps back in at each resolution:
+U-Net concatenates them, FCN-8s adds score maps from earlier layers, and DeepLabv3+ joins one stride-4 map. See
+<NoteLink to="fully-convolutional-network-and-u-net" /> and <NoteLink to="segmentation-decoders" />.
+
+**Gather context without losing resolution.** Atrous (dilated) convolutions grow the receptive field while the map
+stays large, so the encoder can stop at output stride 16 or 8. Context modules then look at several scales at once:
+parallel atrous rates (ASPP) or pooling over grids of several sizes (PSPNet). See
+<NoteLink to="receptive-field-and-dilated-convolution" /> and <NoteLink to="segmentation-decoders" />.
+
+**Give every scale strong features.** A feature pyramid network sends semantics from the coarsest backbone map down to
+the fine ones by a top-down path with lateral $1 \times 1$ connections, and every level gets the same width so one head
+serves all of them <Cite id="lin2017fpn" />. Each object is handled on the level where it spans a few cells. See
+<NoteLink to="feature-pyramid-network" />.
+
+**Turn a fixed tensor into a variable set.** A detection head makes a fixed number of guesses per cell, anchors with
+offsets or points with distances to the box edges, and training decides which guesses are responsible for which
+object. Non-maximum suppression, or one-to-one assignment, removes the duplicates. See
+<NoteLink to="detection-heads-and-anchors" />.
+
+## How the notes fit together
+
+- Start with <NoteLink to="fully-convolutional-network-and-u-net" />: it introduces score maps, output stride and
+  skip connections, which every later note uses.
+- <NoteLink to="segmentation-decoders" /> builds on it with atrous convolution and context modules for per-pixel
+  labels.
+- <NoteLink to="feature-pyramid-network" /> takes the skip idea to multi-scale detection, and
+  <NoteLink to="detection-heads-and-anchors" /> puts the per-cell predictor on top of the pyramid.
+- The building blocks come from <NoteLink to="building-blocks-of-convolutional-networks" />: the
+  <NoteLink to="one-by-one-convolution" />, the <NoteLink to="transposed-convolution" /> and
+  <NoteLink to="receptive-field-and-dilated-convolution" />. The backbones come from
+  <NoteLink to="convolutional-network-architectures" />, above all the <NoteLink to="residual-network" />.
+
+## Prerequisites and next steps
+
+A reader needs the <NoteLink to="convolutional-layer" />, its output-size arithmetic, and
+<NoteLink to="pooling-and-strides" />. The task notes in <NoteLink to="computer-vision">computer vision</NoteLink> apply
+these blocks and measure them: <NoteLink to="semantic-segmentation" /> with mean IoU, <NoteLink to="object-detection" />
+with <NoteLink to="mean-average-precision-for-detection" />, and <NoteLink to="instance-and-panoptic-segmentation" />.
+Vision transformers replace the convolutional backbone but keep most of these parts: pyramids, decoders and dense heads
+run on transformer feature maps as well; see <NoteLink to="vision-transformer" /> and
+<NoteLink to="convolution-versus-attention-in-vision" />. A general account of recognition tasks and their history is in
+Szeliski's textbook <Cite id="szeliski2022" />.

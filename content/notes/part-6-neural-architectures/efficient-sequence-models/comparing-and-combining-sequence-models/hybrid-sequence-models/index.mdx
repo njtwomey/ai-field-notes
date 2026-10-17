@@ -1,0 +1,244 @@
+---
+title: Hybrid sequence models
+kind: concept
+summary: 'A hybrid sequence model mixes a few attention layers into a stack of recurrent, state-space or linear-attention layers. The recurrent layers keep memory per token constant and the attention layers restore exact recall. Ratios run from 1:1 (Samba) to 1:7 (Jamba, MiniMax-01).'
+tags: [deep-learning, sequence-models, transformer, state-space-models, language-models, long-context, worked-example]
+aliases:
+  [
+    hybrid transformer-SSM,
+    attention-SSM hybrid,
+    Jamba,
+    hybrid Mamba-attention model,
+    interleaved attention layers,
+    Zamba,
+    Samba,
+    Hymba,
+    Nemotron-H,
+    MiniMax-01,
+    Kimi Linear,
+    Qwen3-Next,
+    hybrid-head model,
+  ]
+requires: [mamba, transformer]
+related:
+  [
+    key-value-cache,
+    mixture-of-experts,
+    long-range-and-recall-benchmarks,
+    gated-linear-recurrence,
+    delta-rule-and-test-time-training,
+    sliding-window-and-sparse-attention,
+    linear-attention,
+    rwkv-and-retentive-networks,
+    mamba-2-and-state-space-duality,
+    efficient-attention,
+  ]
+references:
+  [
+    lieber2024,
+    de2024griffin,
+    glorioso2024zamba,
+    ren2025samba,
+    dong2024hymba,
+    waleffe2024,
+    nvidia2025nemotronh,
+    minimax2025,
+    qwen2025next,
+    kimi2025linear,
+    gemmateam2025,
+    gu2023mamba,
+    dao2024,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { HybridLayerPatterns } from './HybridLayerPatterns'
+
+<Definition>
+A **hybrid sequence model** is a deep network whose token-mixing layers are of two kinds: self-attention layers, which
+compare every token with every earlier token, and layers with a fixed-size state, such as
+<NoteLink to="mamba">Mamba</NoteLink>, a <NoteLink to="gated-linear-recurrence">gated linear recurrence</NoteLink> or
+<NoteLink to="linear-attention">linear attention</NoteLink>. The two kinds are combined in a fixed pattern, most often
+by interleaving whole layers in a fixed ratio. Each token mixer is followed by a feed-forward or
+<NoteLink to="mixture-of-experts">mixture-of-experts</NoteLink> sublayer, as in a
+<NoteLink to="transformer">transformer</NoteLink> <Cite id="lieber2024" />.
+</Definition>
+
+## Intuition
+
+Attention and recurrent layers fail in opposite ways. Attention keeps every earlier token in its
+<NoteLink to="key-value-cache">key-value (KV) cache</NoteLink>, so it can retrieve any of them exactly, but the cache
+and the cost grow with the context. A state-space layer compresses the whole past into a fixed-size state, so each token
+costs the same whatever the context, but details that were not kept in the state are gone. The
+<NoteLink to="long-range-and-recall-benchmarks">recall benchmarks</NoteLink> measure the second failure: a fixed-size
+state answers associative-recall queries well only while the number of stored pairs is small against the state.
+
+Most token mixing in a <Gloss name="language-model">language model</Gloss> is local or summarising, which a recurrent
+layer does well. A minority of operations need exact lookup: copying a name from far back, or matching the pattern of a
+few-shot prompt. A few attention layers are enough to supply these, and the rest of the network can be cheaper. The
+design question is then how few attention layers suffice, where they go, and whether they need to see the whole
+context.
+
+## Details
+
+### Three ways to combine the layers
+
+- **Interleaved layers.** Whole layers alternate in a repeating pattern: Jamba, Griffin, Samba, Nemotron-H, MiniMax-01,
+  Qwen3-Next and Kimi Linear. This is the common design. Each layer runs one kind of kernel, and the attention layers
+  are spread through the depth.
+- **Parallel heads.** Each layer runs <NoteLink to="multi-head-attention">attention heads</NoteLink> and state-space
+  heads side by side on the same input and averages their normalised outputs: Hymba <Cite id="dong2024hymba" />. Every
+  layer then has both exact recall and a summary.
+- **A shared attention block.** One attention block, with one set of weights, is called at several depths of a Mamba
+  stack: Zamba <Cite id="glorioso2024zamba" />. The calls share parameters but each keeps its own KV cache.
+
+### Jamba
+
+Jamba groups layers into blocks of 8, with one attention layer and seven Mamba layers per block, a ratio of 1:7
+<Cite id="lieber2024" />. Every second layer replaces its <Gloss name="mlp" /> with a
+<NoteLink to="mixture-of-experts">mixture of experts</NoteLink> of 16 experts, of which the top 2 are used per token.
+The released model has 4 blocks (32 layers), 52B parameters, 12B of them active per token, supports a context of 256K
+tokens and fits on one 80 GB <Gloss name="gpu" />.
+
+**KV cache.** Only attention layers keep a KV cache. With one attention layer in eight, Jamba's cache is one eighth of
+that of a transformer with the same number of layers and heads. At 256K tokens in 16-bit precision, Jamba's cache takes
+4 GB, against 32 GB for Mixtral 8x7B and 128 GB for Llama-2 70B <Cite id="lieber2024" />.
+
+**Throughput.** At a context of 128K tokens Jamba processes 3 times as many tokens per second as Mixtral 8x7B
+<Cite id="lieber2024" />. The Mamba layers do the bulk of the mixing at linear cost.
+
+**Positions.** Jamba's attention layers use no explicit <NoteLink to="positional-encoding">positional
+encoding</NoteLink>. The Mamba layers see tokens in order, so they supply position information to the layers above them.
+Results with and without rotary embeddings were similar <Cite id="lieber2024" />.
+
+### What the attention layers provide
+
+Lieber et al. compared pure attention, pure Mamba and hybrid models of the same size. At 7B parameters the hybrid
+reached a lower training loss than either pure model. The pure Mamba model did worse on tasks that depend on
+<Gloss name="icl">in-context learning</Gloss>, such as following the output format shown in a few-shot prompt: on IMDB
+sentiment classification it often answered "Very Good" instead of the required "Positive" or "Negative", and scored 48.8
+against 84.1 for attention and 90.9 for the hybrid. The authors attribute the gap to
+<NoteLink to="induction-heads-and-circuits">induction heads</NoteLink>, attention patterns that find an earlier
+occurrence of the current token and copy what followed it, and show one in the hybrid's attention layers
+<Cite id="lieber2024" />.
+
+A controlled study at 8B parameters reached the same conclusion <Cite id="waleffe2024" />. Pure Mamba and
+<NoteLink to="mamba-2-and-state-space-duality">Mamba-2</NoteLink> models matched a transformer trained on the same data,
+up to 3.5T tokens, on many tasks but fell behind on five-shot <Gloss name="mmlu" />, on phone-book lookup and on
+long-context reasoning. A hybrid of about 43% Mamba-2 layers, 7% attention layers and 50% MLP layers beat the
+transformer on all 12 standard tasks evaluated, by 2.65 points on average, and was predicted to generate up to 8 times
+faster.
+
+### Published layer patterns
+
+The figure draws the stack and one stretch of each model.
+
+<HybridLayerPatterns />
+
+- **Griffin and Hawk.** Hawk stacks <NoteLink to="residual-network">residual blocks</NoteLink> whose token mixer is the
+  RG-LRU of the <NoteLink to="gated-linear-recurrence">gated linear recurrence</NoteLink> note. Griffin repeats two
+  RG-LRU blocks and one block of local <Gloss name="mqa">multi-query attention</Gloss> with a window of 1,024 tokens
+  <Cite id="de2024griffin" />. The attention is local, so the whole model's memory is bounded. On a phone-book lookup
+  task Griffin retrieved perfectly up to the length of its window and Hawk failed as the book grew. Griffin matched
+  Llama-2 with over 6 times fewer training tokens.
+- **Zamba.** A 7B model with a Mamba backbone and one shared block of attention and MLP, called every 6 Mamba blocks (13
+  calls in 76 layers). The input embeddings are concatenated to the <NoteLink to="residual-connections">residual
+  stream</NoteLink> at every call, and each call has its own linear map back into the stream
+  <Cite id="glorioso2024zamba" />. Sharing the weights cuts parameters; the KV cache still grows with every call.
+- **Samba.** The unit is Mamba, MLP, <NoteLink to="sliding-window-and-sparse-attention">sliding-window
+  attention</NoteLink>, MLP, so half the token mixers are attention, each with a window of 2,048 tokens. The 3.8B model
+  has 64 layers. Trained on sequences of 4K tokens, Samba retrieved passkeys perfectly up to 256K tokens after brief
+  fine-tuning <Cite id="ren2025samba" />. No layer attends beyond 2,048 tokens: the Mamba layers carry information
+  across windows.
+- **Hymba.** Every one of its 32 layers runs attention heads and SSM heads in parallel. Only layers 1, 16 and 32 use
+  global attention; the rest use sliding windows. Adjacent layers share one KV cache, and 128 learned meta tokens are
+  prepended to every input. The 1.5B model reports a cache 11.67 times smaller and 3.49 times the throughput of
+  Llama-3.2-3B with higher average accuracy <Cite id="dong2024hymba" />.
+- **Nemotron-H.** About 8% of the layers are attention, spread evenly; the rest split equally between Mamba-2 and FFN
+  layers. The 8B model has 52 layers: 24 Mamba-2, 4 attention and 24 FFN; the 56B model has 118 layers with 10
+  attention layers. The first layer is Mamba-2, and every attention layer is followed by an FFN layer. The models
+  infer up to 3 times faster than transformers of similar size and accuracy <Cite id="nvidia2025nemotronh" />.
+
+### Linear and full attention mixes
+
+The recurrent layers of a hybrid can be linear-attention layers instead of state-space layers, which makes the model a
+mix of two kinds of attention.
+
+- **MiniMax-01** places one softmax-attention layer after every 7 lightning-attention layers, an I/O-aware form of
+  linear attention, for 80 layers in total. The model has 456B parameters, 45.9B active, and trains on contexts of up to
+  1M tokens <Cite id="minimax2025" />.
+- **Qwen3-Next** repeats 3 <NoteLink to="delta-rule-and-test-time-training">Gated DeltaNet</NoteLink> layers and 1
+  gated attention layer 12 times, for 48 layers, each followed by a mixture of experts <Cite id="qwen2025next" />.
+- **Kimi Linear** repeats 3 layers of Kimi Delta Attention, a gated delta rule, and 1 layer of
+  <NoteLink to="multi-head-latent-attention">multi-head latent attention</NoteLink>. The latent-attention layers use
+  <Gloss name="nope">no positional encoding</Gloss>, which leaves position to the recurrent layers as in Jamba. Against
+  full latent attention trained the same way, it reports up to 75% less KV cache and up to 6 times the decoding
+  throughput at a 1M-token context <Cite id="kimi2025linear" />.
+
+The same idea appears inside transformers as a mix of sliding-window and global attention. Gemma 2 alternates the two
+1:1 with a window of 4,096 tokens; Gemma 3 uses 5 local layers per global layer with a window of 1,024 tokens, to keep
+the KV cache small at long contexts <Cite id="gemmateam2025" />.
+
+### Design choices
+
+- **Ratio.** Fewer attention layers give a smaller cache and higher throughput; too few lose recall. Jamba found 1:3
+  and 1:7 similar in quality and chose 1:7 for efficiency <Cite id="lieber2024" />. Nemotron-H and the 8B study settle
+  near 7 to 8% attention layers; the delta-rule hybrids use 1 in 4.
+- **Placement.** Attention layers are spread through the depth, not grouped, so that every stage of processing can
+  reach any earlier token. Nemotron-H keeps the first layer recurrent; Hymba puts its global layers at the first, middle
+  and last positions.
+- **Global or windowed attention.** Windowed attention bounds the cache, at the cost of exact recall beyond the window:
+  Griffin's phone-book accuracy fell at its window length. A few global layers among windowed ones keep long-range
+  lookup at a fraction of the cost.
+- **Kind of recurrent layer.** Mamba, Mamba-2, RG-LRU, lightning attention and gated delta rules have all been used.
+  The 2025 models with a 1:3 ratio use gated delta rules, which edit one association of the state at a time instead of
+  only decaying it. Mamba-2's duality with masked attention makes the two kinds of layer share much of their
+  implementation <Cite id="dao2024" />.
+- **Positions.** With recurrent layers below them, attention layers can drop positional encodings (Jamba, Kimi Linear).
+
+## Worked example
+
+Take a decoder of 32 token-mixing layers with 8 key-value heads of width 128, at a context of $L = 131{,}072$ tokens
+(128K) in 16-bit precision. Each attention layer stores a key and a value per head per token:
+
+$$
+2 \times 8 \times 128 \times 2\ \text{bytes} = 4{,}096\ \text{bytes per token per layer}.
+$$
+
+1. **All attention.** $32 \times 131{,}072 \times 4{,}096$ bytes $= 2^{34}$ bytes $= 16$ GiB.
+2. **Jamba's ratio, 1:7.** 4 of the 32 layers are attention: $4/32$ of the cache, 2 GiB.
+3. **Qwen3-Next's ratio, 1:3.** 8 attention layers: 4 GiB.
+4. **Samba's pattern.** 16 layers of sliding-window attention with a window of 2,048 tokens each keep at most 2,048
+   tokens: $16 \times 2{,}048 \times 4{,}096$ bytes $= 128$ MiB, whatever the context beyond 2,048.
+5. **Hymba's pattern.** 3 global layers and 29 windowed layers with a window of 1,024 tokens:
+   $(3 \times 131{,}072 + 29 \times 1{,}024) \times 4{,}096$ bytes $\approx 1.61$ GiB, about 10% of step 1 before Hymba
+   shares caches between adjacent layers.
+
+The recurrent layers add a state whose size does not depend on $L$. A Mamba layer of inner width $4{,}096 \times 2$ with
+state size 16 holds $8{,}192 \times 16 = 131{,}072$ numbers, 256 KiB in 16-bit precision: per layer, the cache of 64
+tokens of one attention layer. Steps 2 and 3 scale with $L$ like a transformer, at a smaller slope; step 4 stops growing
+at the window, which is why window hybrids are the cheapest at very long contexts and also the ones that cannot look a
+token up exactly beyond the window.
+
+## Assumptions
+
+- **Most mixing is compressible.** The design assumes that a few exact-recall layers suffice and the rest of the
+  network can work from a compressed state.
+- **Memory is the bottleneck.** The savings matter when the KV cache or long-context attention limits
+  <NoteLink to="minibatching-and-batch-size">batch size</NoteLink> or context length. At short contexts a hybrid runs at
+  about the speed of a transformer.
+- **Ratios transfer.** Published ratios were tuned at one scale and data mix; the 8B study and Jamba's ablations are the
+  main evidence that one attention layer per 6 or 7 recurrent layers keeps quality.
+
+## Pitfalls
+
+- **Cache still grows.** Global attention layers keep a cache that is smaller but still linear in context length. At
+  very long contexts it dominates again.
+- **Windows hide recall failures.** A model whose attention is all windowed passes short-context benchmarks and
+  passkey tests, which a recurrent state can carry, and fails exact lookup of many facts beyond the window.
+- **Two kinds of kernels.** Training and serving need efficient implementations of both layer types, and the two have
+  different parallelisation and caching schemes. Prefix caching and <NoteLink to="speculative-decoding">speculative
+  decoding</NoteLink> must save and restore recurrent states as well as KV caches.
+- **Comparisons at unequal budgets.** Hybrids are often compared with transformers trained on fewer tokens or with a
+  different data mix; the controlled 8B study is the cleaner comparison <Cite id="waleffe2024" />.

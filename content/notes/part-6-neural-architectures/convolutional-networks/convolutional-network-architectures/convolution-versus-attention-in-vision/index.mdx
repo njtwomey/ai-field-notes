@@ -1,0 +1,169 @@
+---
+title: 'Convolution versus attention in vision'
+kind: concept
+summary: 'Convolutional networks build in locality and translation equivariance; vision transformers learn them from data and overtake convolution only with large datasets or pretraining. Windowed attention (Swin), hybrids (CoAtNet) and MLP-Mixer sit between the two.'
+tags: [convolutional-networks, attention, computer-vision, deep-learning, worked-example]
+aliases: ['inductive bias of convolution', 'CNN versus ViT', 'CoAtNet']
+requires: [modern-convolutional-networks, vision-transformer]
+related:
+  [
+    resnet-vs-vision-transformer,
+    mlp-mixer,
+    symmetry-and-equivariance,
+    receptive-field-and-dilated-convolution,
+    multi-head-attention,
+    efficient-attention,
+  ]
+references:
+  [dosovitskiy2021, cordonnier2020, raghu2021vit, dai2021coatnet, liu2021swin, tolstikhin2021mixer, liu2022, smith2023convnets]
+status: draft
+updated: 2026-10-17
+---
+
+import { MixingCost } from './MixingCost'
+
+<Definition>
+A convolutional layer and a self-attention layer are two ways to mix information across the positions of an image. A
+$k \times k$ convolution computes each output from a fixed $k \times k$ neighbourhood with weights that depend only on
+the relative offset. Self-attention over image patches computes each output from all positions with weights that depend
+on the content of the query and the keys. The comparison between them is a comparison of
+<NoteLink to="inductive-bias">inductive biases</NoteLink>: built-in locality and translation equivariance against
+input-dependent, global mixing learned from data <Cite id="dosovitskiy2021" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="convolutional-layer">convolution</NoteLink> assumes two things about images. Nearby pixels matter most
+(locality), and a pattern means the same wherever it appears (translation equivariance through shared weights). Both are
+nearly true for natural images, so a convolutional network does not need to learn them, and it learns from fewer
+examples. The cost is that a unit sees only its neighbourhood, and the weights cannot adapt to the image: the same
+$3 \times 3$ filter applies to a cat's eye and to the sky.
+
+A <NoteLink to="vision-transformer">vision transformer</NoteLink> keeps almost none of this. Every patch can attend to
+every other from the first layer, and how much it attends depends on what the two patches contain. Locality has to be
+learned from data. With little data the transformer learns it poorly; with enough data it learns it, and its flexibility
+pays off <Cite id="dosovitskiy2021" />.
+
+The two are closer than they look. A <NoteLink to="depthwise-and-grouped-convolution">depthwise convolution</NoteLink>
+mixes each channel across positions with fixed weights; attention mixes all channels across positions with weights
+computed from the input. A transformer's <Gloss name="mlp" /> and a $1 \times 1$ convolution are the same operation.
+<NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> exploits this mapping to build a convolutional network
+shaped like a transformer <Cite id="liu2022" />.
+
+## Details
+
+### Two mixing rules
+
+Index positions on the grid by $i$ and $j$, and let $\xvec_j \in \reals^d$ be the features at position $j$.
+
+- **Convolution.** $\yvec_i = \sum_{j \in \mathcal{N}_k(i)} \Wmat_{j - i}\, \xvec_j$, with one $d \times d$ matrix per
+  offset $j - i$ in the $k \times k$ neighbourhood $\mathcal{N}_k(i)$. The weights depend on the offset only.
+- **Self-attention.** $\yvec_i = \sum_{j} a_{ij}\, \Wmat_V \xvec_j$, with
+  $a_{ij} = \operatorname{softmax}_j(\xvec_i^\top \Wmat_Q^\top \Wmat_K \xvec_j / \sqrt{d})$ summed over all positions.
+  The weights depend on the content and sum to 1 over $j$.
+
+CoAtNet writes the two together as <NoteLink to="relative-position-representations">relative attention</NoteLink>,
+$a_{ij} = \operatorname{softmax}_j(\xvec_i^\top \xvec_j + w_{i - j})$: the content term is attention, the offset term
+$w_{i - j}$ is a convolution kernel, and the layer can lean on either <Cite id="dai2021coatnet" />.
+
+### Attention can express convolution
+
+Cordonnier et al. prove that a multi-head self-attention layer with $N_h$ heads and a relative positional encoding can
+express any convolution with a $\sqrt{N_h} \times \sqrt{N_h}$ kernel <Cite id="cordonnier2020" />. Each head attends to
+one fixed offset, and the output projection gives each offset its own weights. Nine heads can therefore act as a
+$3 \times 3$ convolution. They also find that trained attention layers in early layers often learn such grid-like
+patterns. Attention is the more general layer; convolution is a constrained special case that does not have to be
+learned.
+
+### What vision transformers learn
+
+Raghu et al. compare the representations of ViTs and <Gloss name="resnet" plural /> <Cite id="raghu2021vit" />. Even in
+the lowest layers, ViT has a mix of heads that attend locally and heads that attend globally, whereas a convolutional
+network is local there by construction. Trained with less data, the lower layers of ViT do not learn to attend locally,
+and performance suffers; local information in early layers matters. ViT representations are also more uniform across
+layers, carried by strong <NoteLink to="residual-connections">residual connections</NoteLink>. The data story in numbers
+is in the <NoteLink to="resnet-vs-vision-transformer">ResNet and ViT case study</NoteLink>: ViT falls behind ResNets
+when pretrained on <Gloss name="imagenet" /> alone and overtakes them with hundreds of millions of images
+<Cite id="dosovitskiy2021" />.
+
+### Cost
+
+On an $n \times n$ grid of $N = n^2$ tokens with $d$ channels, a $k \times k$ convolution from $d$ to $d$ channels costs
+$k^2 d^2 N$ multiply-adds. Global self-attention costs $4 d^2 N$ for the query, key, value and output projections plus
+$2 N^2 d$ for the scores $\Qmat \Kmat^\top$ and the weighted sum of the values. Attention is cheaper than the
+convolution while
+
+$$
+4 d^2 N + 2 N^2 d < k^2 d^2 N \iff N < \frac{(k^2 - 4)\, d}{2},
+$$
+
+so for $k = 3$, below $N = 2.5 d$ tokens. Above it, the $N^2$ term dominates, and doubling the image side multiplies the
+cost by about 16. Convolution cost grows with $N$ only.
+
+<NoteLink to="sliding-window-and-sparse-attention">Windowed attention</NoteLink> restricts each token to a $w \times w$
+window, which turns $2N^2 d$ into $2 N w^2 d$, linear in $N$. Swin alternates regular and shifted windows so that
+information crosses window borders, and merges patches between stages to build a convolution-like pyramid
+<Cite id="liu2021swin" />. It is attention with convolution's locality and cost profile put back.
+
+<MixingCost />
+
+### Between the two
+
+- **Swin** (windows, shifts, a stage hierarchy) <Cite id="liu2021swin" />.
+- **Hybrids.** CoAtNet stacks convolution stages first and attention stages last; among its variants, two convolutional
+  stages followed by two transformer stages (C-C-T-T) gave the best balance of generalisation and capacity. Its
+  convolutional stages use MBConv blocks <Cite id="dai2021coatnet" />. Convolution generalises better from limited data;
+  attention has more capacity for large data.
+- **MLP-Mixer** replaces attention by an MLP across the patch axis, with weights that depend on position but not on
+  content, and an MLP across channels <Cite id="tolstikhin2021mixer" />; see <NoteLink to="mlp-mixer" />.
+- **ConvNeXt** stays fully convolutional and adopts the transformer's block shape and training recipe
+  <Cite id="liu2022" />.
+
+## Worked example
+
+Take a $14 \times 14$ grid of tokens, $N = 196$, with $d = 384$ channels: ViT-S/16 on a $224 \times 224$ image, or the
+third stage of a hierarchical network. Count multiply-adds per image for one spatial-mixing layer.
+
+1. **$3 \times 3$ convolution.** $9 \cdot 384^2 \cdot 196 = 260.1$ million multiply-adds, with
+   $9 \cdot 384^2 = 1{,}327{,}104$ weights.
+2. **Global self-attention, projections.** $4 \cdot 384^2 \cdot 196 = 115.6$ million, with $4 \cdot 384^2 = 589{,}824$
+   weights.
+3. **Global self-attention, scores and weighted sum.** $2 \cdot 196^2 \cdot 384 = 29.5$ million.
+4. **Compare.** Attention costs $145.1$ million, 56% of the convolution, and has 44% of its weights, while every output
+   sees all 196 tokens instead of 9.
+
+The crossover sits at $N = 2.5 \cdot 384 = 960$ tokens, a grid of about $31 \times 31$. At the first stage of a
+hierarchical network the grid is $56 \times 56$ ($N = 3{,}136$) with $d = 96$. There a $3 \times 3$ convolution costs
+$260$ million multiply-adds, global attention $115.6 + 2 \cdot 3{,}136^2 \cdot 96 / 10^6 = 2{,}004$ million, and
+$7 \times 7$ windowed attention $115.6 + 29.5 = 145.1$ million. Global attention is unaffordable at high resolution,
+which is why hierarchical transformers use windows and why convolution remains the default for the first stages.
+
+The receptive field tells the other half. After one layer, the convolution's output sees 3 tokens per side; after
+$L$ stride-1 layers it sees $1 + 2L$, so 7 layers are needed to span the $14 \times 14$ grid. Attention spans it in
+one.
+
+## Assumptions
+
+- The comparison holds the training recipe, data and compute fixed. Under equal compute at large scale,
+  convolutional networks match vision transformers <Cite id="smith2023convnets" />, so many reported gaps measure
+  recipe and scale more than architecture.
+- The cost model counts multiply-adds of the mixing layer only. Memory for the $N \times N$ attention matrix, and the
+  efficiency of attention kernels on a given device, change the picture in practice; see
+  <NoteLink to="efficient-attention">efficient attention</NoteLink>.
+- Images are natural images on a regular grid. For data whose relevant structure is not local, the locality prior
+  helps less.
+
+## Pitfalls
+
+- **Small data.** Trained from scratch on ImageNet-1k, ViT-L/16 was less accurate than ResNets of similar size
+  <Cite id="dosovitskiy2021" />, and smaller datasets widen the gap. Use a convolutional or hybrid model, or start from
+  pretrained weights.
+- **High resolution.** Global attention's $N^2$ term makes detection and segmentation inputs expensive. Use windows, a
+  hierarchy or convolutional early stages.
+- **Equivariance is approximate on both sides.** Strides and pooling break a convolutional network's exact translation
+  equivariance. A ViT with <NoteLink to="learned-absolute-position-embeddings">absolute position embeddings</NoteLink>
+  is not built to be equivariant to any shift, and its patch grid cuts objects differently after a shift smaller than a
+  patch; any equivariance it has is learned. See <NoteLink to="symmetry-and-equivariance">symmetry and
+  equivariance</NoteLink>.
+- **One axis is not the whole choice.** Deployment matters: convolutions are well supported on phones and embedded
+  accelerators, while attention-heavy models depend on attention kernels being fast on the target hardware.

@@ -1,0 +1,190 @@
+---
+title: 'Semi-supervised assumptions'
+kind: concept
+summary: 'Unlabelled points change a prediction only if the input density $p(\xvec)$ carries information about $p(y \mid \xvec)$. The smoothness, cluster, low-density separation and manifold assumptions each state such a link, and each has data sets where it holds and where it fails.'
+tags: [semi-supervised, classification, worked-example]
+aliases: ['cluster assumption', 'smoothness assumption', 'low-density assumption', 'manifold assumption']
+requires: [classification]
+related:
+  [
+    when-unlabelled-data-helps,
+    transductive-and-inductive-learning,
+    low-density-separation,
+    manifold-hypothesis-and-intrinsic-dimension,
+    label-propagation,
+    self-training,
+    generative-semi-supervised-learning,
+    when-semi-supervised-learning-fails,
+  ]
+references: [chapelle2006, vanengelen2020survey, mey2019improvability, scholkopf2012causal, castelli1995exponential, zhu2003, belkin2006manifold, nadler2009infinite]
+status: draft
+updated: 2026-10-17
+---
+
+import { AssumptionMethods } from './AssumptionMethods'
+
+<Definition>
+A **semi-supervised assumption** is a stated link between the distribution of the inputs, $p(\xvec)$, and the
+conditional distribution of the labels, $p(y \mid \xvec)$. Unlabelled inputs carry information about $p(\xvec)$ only,
+so they can improve a classifier only through such a link. The four standard links are the **smoothness assumption**
+(close points in a dense region share a label), the **cluster assumption** (points in one cluster share a label), the
+**low-density separation assumption** (the decision boundary crosses regions where $p(\xvec)$ is small) and the
+**manifold assumption** (the inputs lie near a low-dimensional manifold, along which the label varies smoothly)
+<Cite id="chapelle2006" />.
+</Definition>
+
+## Intuition
+
+A semi-supervised learner receives $\ell$ labelled pairs $(\xvec_i, y_i)$ and $u$ unlabelled inputs $\xvec_j$, with
+$u$ usually much larger than $\ell$. The labels say how $y$ depends on $\xvec$ at a few places. The unlabelled inputs
+say where the data lie: where $p(\xvec)$ is high, where it is low, and what shape the dense regions have. The
+unlabelled inputs say nothing about the labels on their own. They help only if the shape of $p(\xvec)$ constrains where
+the class boundary can go.
+
+Each assumption is one such constraint. Picture two dense blobs of points separated by an empty corridor, with one
+labelled point in each blob. A supervised rule places the boundary somewhere between the two labelled points, with no
+reason to prefer one place over another. Under the cluster assumption the whole of each blob takes its labelled point's
+class, so the boundary goes into the corridor. The unlabelled points did the work: they showed where the blobs and the
+corridor are.
+
+The same unlabelled points mislead when the assumption is false. If the true boundary cuts one blob in half, any method
+that keeps blobs together labels half that blob wrongly, and more unlabelled data make it more confident in the
+mistake. No assumption holds for every data set, so choosing a semi-supervised method means choosing an assumption.
+
+## Details
+
+### Why an assumption is needed
+
+Suppose the data come from a model with two parameters: $\muvec$ fixes the input density $p(\xvec \mid \muvec)$ and
+$\thetavec$ fixes the <NoteLink to="data-programming">label model</NoteLink> $p(y \mid \xvec, \thetavec)$. Suppose
+further that $\muvec$ and $\thetavec$ are independent a priori, $p(\muvec, \thetavec) = p(\muvec)\,p(\thetavec)$. Given
+labelled pairs $\Dcal_L$ and unlabelled inputs $\Dcal_U$, the posterior over $\thetavec$ is
+
+$$
+p(\thetavec \mid \Dcal_L, \Dcal_U)
+\propto p(\thetavec) \prod_{i \in L} p(y_i \mid \xvec_i, \thetavec)
+\int p(\muvec) \prod_{j \in L \cup U} p(\xvec_j \mid \muvec)\, d\muvec .
+$$
+
+The integral over $\muvec$ does not contain $\thetavec$, so it is a constant and drops out on normalisation. The
+posterior is $p(\thetavec \mid \Dcal_L)$: the unlabelled inputs change nothing <Cite id="mey2019improvability" />.
+Every semi-supervised method therefore assumes, explicitly or through its design, that $\muvec$ and $\thetavec$ are
+dependent: that the input density tells something about the labels.
+
+A generative model makes the dependence explicit. If $p(\xvec) = \sum_y p(y)\,p(\xvec \mid y)$ is a mixture with one
+component per class, the same parameters fix both $p(\xvec)$ and $p(y \mid \xvec)$. Castelli and Cover showed that when
+such a mixture is identifiable, the unlabelled data determine the components, and the labels need only say which
+component is which class <Cite id="castelli1995exponential" />. Schölkopf and coauthors connect the dependence to causal
+direction: when the label causes the input (a digit class causes its image), $p(\xvec)$ is a mixture over classes and
+carries information about $p(y \mid \xvec)$; when the input causes the label, the two can be independent mechanisms, and
+unlabelled data are expected to help less <Cite id="scholkopf2012causal" />.
+
+### The four assumptions
+
+Let $f(\xvec) = P(y = 1 \mid \xvec)$ for two classes, and write the boundary as the set where $f(\xvec) = 1/2$.
+
+- **Smoothness.** If two inputs $\xvec_1$ and $\xvec_2$ lie close together in a high-density region, their labels
+  should agree. The qualifier "in a high-density region" separates this from the smoothness that every supervised
+  method assumes: $f$ may change quickly where $p(\xvec)$ is small, and must change slowly where $p(\xvec)$ is large.
+  Graph methods encode it as a penalty $\sum_{ij} W_{ij}(f_i - f_j)^2$ over a graph whose edges $W_{ij}$ join nearby
+  inputs; dense regions have many strong edges, so disagreement there is expensive <Cite id="zhu2003" />.
+- **Cluster.** If inputs belong to the same cluster, they are likely of the same class. A cluster here is a connected
+  region of high density, of any shape. The assumption does not say that each class is one cluster: a class may span
+  several clusters, but a cluster should not span several classes.
+- **Low-density separation.** The decision boundary should lie in a region of low density. This is the cluster
+  assumption restated in terms of the boundary: if clusters are pure, a boundary that avoids cutting them passes
+  between them, where $p(\xvec)$ is small. Methods that use it penalise unlabelled points near the boundary, either by
+  a margin (the <NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink>) or by
+  the entropy of the predictions (<NoteLink to="entropy-minimisation">entropy minimisation</NoteLink>).
+- **Manifold.** High-dimensional inputs lie near a manifold of much lower dimension, and $f$ varies smoothly along the
+  manifold. Distances that matter are measured along the manifold, not straight through the ambient space, so two points
+  on adjacent turns of a spiral are far apart even when they are close in the plane.
+  <NoteLink to="manifold-regularisation">Manifold regularisation</NoteLink> penalises
+  $\int \norm{\nabla_{\Mcal} f}^2 \, dp(\xvec)$, the gradient of $f$ along the manifold $\Mcal$, estimated with a graph
+  Laplacian built from the unlabelled data <Cite id="belkin2006manifold" />.
+
+The four are not independent. Smoothness along paths through dense regions implies the cluster assumption, and the
+cluster assumption implies low-density separation. Van Engelen and Hoos treat smoothness, low-density separation and
+the manifold assumption as the basic three and the cluster assumption as a generalisation of all of them
+<Cite id="vanengelen2020survey" />.
+
+### Which methods use which
+
+| method family                                                       | assumption it rests on                          |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| generative mixtures, cluster-then-label                             | cluster, with clusters of the model's shape     |
+| self-training, entropy minimisation, transductive SVMs              | low-density separation                          |
+| label propagation, manifold regularisation                          | smoothness along a graph, manifold              |
+| consistency regularisation                                          | smoothness within an augmentation neighbourhood |
+
+<NoteLink to="generative-semi-supervised-learning">Generative semi-supervised learning</NoteLink>,
+<NoteLink to="self-training">self-training</NoteLink>, <NoteLink to="label-propagation">label propagation</NoteLink> and
+<NoteLink to="consistency-regularisation">consistency regularisation</NoteLink> each have their own chapter.
+
+Deep semi-supervised methods in use since 2020, such as <NoteLink to="fixmatch">FixMatch</NoteLink>, combine
+low-density separation (confident pseudo-labels) with smoothness, where "close" means "related by a data
+augmentation" rather than close in pixel space. The augmentations encode the analyst's knowledge of which changes
+preserve the class.
+
+## Worked example
+
+Ten points lie on a line. Seven form a dense run, $0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4$; three form a second run,
+$3.4, 3.8, 4.2$. The gap between the runs, $1.0$ wide, is the only spacing larger than $0.4$. Two points are labelled:
+$x = 0.0$ in class 0 and $x = 4.2$ in class 1. Eight points are unlabelled. Classify $x$ as class 1 when $x > t$ for a
+threshold $t$.
+
+**Case 1: the classes are the runs.** Class 0 is the first run and class 1 the second.
+
+1. *No assumption.* The nearest-labelled-point rule puts $t$ midway between the labels, $t = 2.1$. The point at
+   $2.4$ is classed 1 and is wrong. Accuracy on the unlabelled points: $7/8$.
+2. *Low-density separation.* Put $t$ in the widest gap between consecutive points that lies between the labels. The
+   gaps are $0.4$ everywhere except $2.4$ to $3.4$, so $t = 2.9$. All eight are right: $8/8$.
+3. *Smoothness on a graph.* Join points less than $0.5$ apart with weight 1. The graph has two components, the two
+   runs, each holding one labelled point. In a component with one labelled node, the harmonic solution of
+   <NoteLink to="label-propagation">label propagation</NoteLink> gives every node that node's label, since a constant
+   is the only function equal to the average of its neighbours everywhere with one fixed value. All eight are right:
+   $8/8$.
+
+**Case 2: the boundary cuts the dense run.** The same ten inputs, but class 1 is every $x \ge 1.2$. The labels at
+$0.0$ and $4.2$ are unchanged, so every method returns the same threshold as before.
+
+1. *No assumption*, $t = 2.1$: the points $1.2, 1.6, 2.0$ are wrong. Accuracy $5/8$.
+2. *Low-density separation*, $t = 2.9$: the points $1.2, 1.6, 2.0, 2.4$ are wrong. Accuracy $4/8$.
+3. *Smoothness on a graph*: the first run is one component and takes class 0, so the same four points are wrong.
+   Accuracy $4/8$.
+
+The inputs and the labelled points are identical in both cases. The unlabelled data push every method to the same
+boundary, at the gap. That boundary is right when the classes follow the gap and wrong when they do not, and in case
+2 the semi-supervised methods do worse than ignoring the unlabelled points.
+
+<AssumptionMethods />
+
+## Assumptions
+
+- **The labelled and unlabelled inputs come from the same distribution.** The unlabelled sample is used as a picture
+  of $p(\xvec)$. Unlabelled data from other classes, other sources or a shifted distribution draw a different picture
+  (see <NoteLink to="open-set-semi-supervised-learning">open-set semi-supervised learning</NoteLink>).
+- **The assumption matches the data.** Each method is consistent with its own assumption and biased otherwise. The
+  figure shows the Gaussian mixture labelling blobs well and moons badly, because its clusters must be ellipses.
+- **The geometry is the right one.** Densities, clusters and manifolds are defined by a distance. Raw pixel distances
+  rarely reflect class structure in images; a learned representation or a set of augmentations often does, which is
+  why modern methods start from <NoteLink to="self-supervised-pretraining-for-semi-supervised-learning">self-supervised
+  pretraining</NoteLink>.
+
+## Pitfalls
+
+- **Unlabelled data can hurt.** When the assumption fails, the semi-supervised estimate converges to the wrong
+  boundary as $u$ grows, while a supervised estimate keeps improving with more labels. A misspecified generative model
+  is the classic case <Cite id="chapelle2006" />; see <NoteLink to="when-semi-supervised-learning-fails">when
+  semi-supervised learning fails</NoteLink>.
+- **Overlapping classes.** If $p(y \mid \xvec)$ is far from 0 and 1 across a dense region, there is no low-density
+  gap to find, and the methods of the figure all lose accuracy as the noise rises.
+- **Clusters of the wrong shape.** The cluster assumption is about connected dense regions; a model whose clusters are
+  Gaussians or centroids imposes its own shape on top, which fails on moons, circles and spirals.
+- **Graph scale.** Smoothness and manifold methods depend on the graph's kernel width and neighbour count. Too wide
+  a kernel joins separate clusters; too narrow a kernel disconnects one cluster into labelless pieces. With very
+  many unlabelled points in two or more dimensions, the plain graph penalty also degenerates to a nearly constant
+  function with spikes at the labelled points <Cite id="nadler2009infinite" />.
+- **Evaluating the assumption.** No test on the unlabelled data alone can confirm an assumption about labels. The
+  practical check is a held-out labelled set and a tuned supervised baseline (see
+  <NoteLink to="evaluating-semi-supervised-learning">evaluating semi-supervised learning</NoteLink>).

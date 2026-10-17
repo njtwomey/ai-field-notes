@@ -1,0 +1,158 @@
+---
+title: 'Depthwise and grouped convolution'
+kind: concept
+summary: 'Grouped convolution splits $C$ channels into $g$ groups with separate kernels, dividing weights and FLOPs by $g$. Depthwise convolution is $g=C$. Depthwise then $1\times1$ (separable) costs $k^2C+CC''$ per pixel instead of $k^2CC''$.'
+tags: [convolutional-networks, deep-learning, worked-example]
+aliases: ['grouped convolution', 'depthwise convolution', 'depthwise separable convolution', 'separable convolution', 'channel groups']
+requires: [one-by-one-convolution]
+related: [efficient-convolutional-networks, modern-convolutional-networks, convolutional-layer, inception-networks]
+references: [krizhevsky2012, xie2017resnext, howard2017mobilenets, sandler2018mobilenetv2, chollet2017xception, zhang2018shufflenet, liu2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { GroupedConvolution } from './GroupedConvolution'
+
+<Definition>
+A **grouped convolution** with $g$ groups splits the $C$ input channels and the $C'$ output channels of a
+<NoteLink to="convolutional-layer">convolutional layer</NoteLink> into $g$ consecutive blocks of $C/g$ and $C'/g$
+channels. Output block $b$ is a standard convolution of input block $b$ alone, so the layer holds $k^2 C C'/g$ weights.
+A **depthwise convolution** is the case $g = C$: each channel is filtered by its own $k \times k$ kernel, and no
+channels are mixed. A **depthwise separable convolution** is a depthwise convolution followed by a
+<NoteLink to="one-by-one-convolution">$1 \times 1$ convolution</NoteLink> that mixes the channels.
+</Definition>
+
+## Intuition
+
+A standard $k \times k$ layer does two jobs at once. It combines neighbouring pixels, and it combines channels: every
+output channel has a $k \times k$ kernel on every input channel. On wide feature maps the second job dominates the cost,
+because it multiplies the kernel area by the product $CC'$ of the channel counts.
+
+Grouped convolution cuts the channel job into independent pieces. With $g = 4$ groups of a 256-channel layer, each block
+of 64 output channels reads only its own 64 input channels. The layer is four smaller layers side by side, and it costs
+a quarter as much. Depthwise convolution goes to the end: every channel is filtered alone, and the layer does only the
+spatial job. A separable convolution then gives the channel job to a $1 \times 1$ layer. The two jobs are paid for
+separately, $k^2 C$ for the spatial filtering and $CC'$ for the channel mixing, instead of their product.
+
+<GroupedConvolution />
+
+## Details
+
+### Definition with indices
+
+Write $C_g = C/g$ and $C'_g = C'/g$. Output channel $c'$ lies in block $b(c') = \lfloor c'/C'_g \rfloor$ and reads the
+input channels $bC_g, \dots, (b + 1)C_g - 1$ of that block. With stride 1 and zero padding $p$, as in the convolutional
+layer,
+
+$$
+y_{c', i, j} = b_{c'} + \sum_{c''=0}^{C_g - 1} \sum_{u, v} w_{c', c'', u, v}\; x_{b(c')C_g + c'',\, i - p + u,\, j - p + v}.
+$$
+
+The weight tensor has shape $[C', C/g, k, k]$, which is the shape libraries store.
+
+**Block-diagonal view.** Lay out a full kernel tensor of shape $[C', C, k, k]$ and set to zero every kernel $w_{c', c}$
+whose input channel is outside the block of $c'$. Seen as a $C' \times C$ matrix of $k \times k$ kernels, the result is
+block diagonal with $g$ blocks. A full convolution with this kernel computes exactly the grouped convolution. The figure
+checks this on a random input. Grouping is therefore a constraint on a standard layer, not a new operation: it removes
+$1 - 1/g$ of the channel connections.
+
+### Cost
+
+Per output position the layer performs $k^2 C C'/g$ multiply-accumulates, and in total $k^2 C C' H'W'/g$. Both weights
+and compute fall by the factor $g$.
+
+A depthwise layer with $C' = C$ has $k^2 C$ weights. Some layers give each channel $m$ kernels, a channel multiplier,
+for $C' = mC$ outputs and $mk^2C$ weights. A depthwise separable layer from $C$ to $C'$ channels costs
+
+$$
+k^2 C + C C' \qquad \text{against} \qquad k^2 C C'
+$$
+
+weights, and the same expressions times $H'W'$ in multiply-accumulates. The ratio is
+
+$$
+\frac{k^2 C + C C'}{k^2 C C'} = \frac{1}{C'} + \frac{1}{k^2}.
+$$
+
+For $k = 3$ and a wide layer, $1/C'$ is small and the saving approaches $k^2 = 9$. Howard et al. report 8 to 9 times
+less computation for MobileNet's $3 \times 3$ layers <Cite id="howard2017mobilenets" />.
+
+### Separable as a factorised kernel
+
+The separable layer computes $z_{c'} = \sum_c p_{c', c}\, (d_c \star x_c)$, with $d_c$ the depthwise kernel of channel
+$c$ and $p_{c', c}$ the pointwise weights. Convolution is linear, so this equals a standard layer with kernels
+
+$$
+w_{c', c, u, v} = p_{c', c}\; d_{c, u, v}.
+$$
+
+Every kernel acting on input channel $c$ is a scaled copy of one spatial pattern $d_c$. A standard layer can use a
+different pattern for every pair $(c', c)$. The separable layer assumes that spatial structure and cross-channel
+structure can be learned apart. Chollet built the Xception network on that hypothesis, replacing every
+<NoteLink to="inception-networks">Inception module</NoteLink> by depthwise separable convolutions
+<Cite id="chollet2017xception" />.
+
+### History and practice
+
+- **<NoteLink to="classic-convolutional-network-architectures">AlexNet</NoteLink>** split most of its layers into two
+  groups so that each half ran on its own <Gloss name="gpu" />, a hardware constraint rather than a design choice
+  <Cite id="krizhevsky2012" />.
+- **ResNeXt** replaced the $3 \times 3$ layer of each <Gloss name="resnet" /> bottleneck by a grouped layer with 32
+  groups and widened the block to keep the cost. At equal cost, more groups gave higher accuracy than more depth or
+  width <Cite id="xie2017resnext" />.
+- **MobileNet** is built from depthwise separable layers <Cite id="howard2017mobilenets" />. MobileNetV2 wraps the
+  depthwise layer between a $1 \times 1$ expansion and a $1 \times 1$ projection <Cite id="sandler2018mobilenetv2" />;
+  see <NoteLink to="efficient-convolutional-networks">efficient convolutional networks</NoteLink>.
+- **ConvNeXt** uses a $7 \times 7$ depthwise layer as the spatial mixer of every block, with $1 \times 1$ layers doing
+  all channel mixing, the same division of labour as attention and the feed-forward block of a transformer
+  <Cite id="liu2022" />; see <NoteLink to="modern-convolutional-networks">modern convolutional networks</NoteLink>.
+
+Grouped layers stacked directly on grouped layers never exchange information between groups. Networks restore the flow
+with a $1 \times 1$ layer after the grouped one, or by permuting channels between groups, the channel shuffle of
+ShuffleNet <Cite id="zhang2018shufflenet" />.
+
+## Worked example
+
+**Cost.** Take a MobileNet-style layer with $C = C' = 256$, $k = 3$ and a $14 \times 14$ map, without biases.
+
+1. **Standard.** $9 \cdot 256 \cdot 256 = 589{,}824$ weights, and $589{,}824 \cdot 196 = 1.16 \times 10^8$
+   multiply-accumulates.
+2. **Grouped, $g = 32$.** $589{,}824 / 32 = 18{,}432$ weights, each group a $3 \times 3$ layer from 8 to 8 channels.
+3. **Depthwise.** $9 \cdot 256 = 2{,}304$ weights, one $3 \times 3$ kernel per channel.
+4. **Pointwise.** $256 \cdot 256 = 65{,}536$ weights.
+5. **Separable total.** $2{,}304 + 65{,}536 = 67{,}840$ weights, and $67{,}840 \cdot 196 = 1.33 \times 10^7$
+   multiply-accumulates.
+
+The ratio is $589{,}824 / 67{,}840 = 8.69$, which matches $1/(1/256 + 1/9) = 8.69$. The pointwise layer holds 97% of the
+separable layer's weights, so the $1 \times 1$ layer is now the expensive part.
+
+**Mechanism.** Take two input channels of length 4, $x_1 = (1, 2, 3, 4)$ and $x_2 = (4, 0, 4, 0)$, and two-tap
+depthwise kernels $d_1 = (1, -1)$ and $d_2 = (0.5, 0.5)$, cross-correlated without padding.
+
+- Channel 1 takes differences of neighbours: $(1 - 2,\ 2 - 3,\ 3 - 4) = (-1, -1, -1)$.
+- Channel 2 takes averages of neighbours: $(2, 2, 2)$.
+
+Neither output knows about the other channel. A pointwise layer with
+$\Pmat = \begin{bmatrix} 1 & 1 \\ 1 & -1 \end{bmatrix}$ mixes them at each position: the first output is $-1 + 2 = 1$
+and the second is $-1 - 2 = -3$ at every position. The equivalent standard layer has kernels
+$w_{c', c} = p_{c', c}\, d_c$: output 1 uses $(1, -1)$ on channel 1 and $(0.5, 0.5)$ on channel 2, and output 2 uses
+$(1, -1)$ and $(-0.5, -0.5)$. Applied directly, the first output is $(1 - 2) + 0.5(4 + 0) = 1$ at position 0, the same
+number.
+
+## Assumptions
+
+- Spatial patterns and channel combinations can be learned separately, or within groups, without losing much. The
+  factorised kernel $p_{c', c}\, d_c$ cannot express a layer that needs a different spatial pattern for every channel
+  pair.
+- Information that must cross groups has another route, a $1 \times 1$ layer or a shuffle.
+
+## Pitfalls
+
+- **<Gloss name="flop" plural /> are not speed.** A depthwise layer performs $k^2$ multiply-accumulates per value it
+  reads, so it is limited by memory bandwidth, not arithmetic. On GPUs a separable layer runs much less than 9 times
+  faster than the standard layer it replaces, and wide grouped layers can be slower per FLOP than dense ones.
+- **Divisibility.** Both channel counts must be divisible by $g$. Libraries raise an error otherwise.
+- **Isolated groups.** Two grouped layers in a row with the same grouping are $g$ separate networks. Without a mixing
+  layer between them the groups never share information.
+- **Normalisation per group.** Depthwise layers have few weights per channel and their outputs vary widely in scale
+  between channels. A normalisation layer usually follows each one.

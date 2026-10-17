@@ -1,0 +1,68 @@
+import { useContext, useEffect, useState, type ReactNode } from 'react'
+import { FrameContext } from 'aifn-render'
+
+/** Plots inside a Figure take the frame's height; this gives the plots inside it a fixed height instead. */
+export function FixedHeight({ height, children }: { height: number; children: ReactNode }) {
+  const frame = useContext(FrameContext)
+  return <FrameContext.Provider value={{ ...frame, height }}>{children}</FrameContext.Provider>
+}
+
+/** Milliseconds of work per slice, so the page stays responsive while a run fills in. */
+const SLICE = 25
+/** Checkpoints per slice at most. */
+const MAX_PER_SLICE = 50
+
+/**
+ * Runs a generator of checkpoints in short slices between frames and returns the checkpoints so far, keyed to the
+ * setup that started it: a new setup restarts the run. A slice takes at most `SLICE` ms or `MAX_PER_SLICE` checkpoints,
+ * whichever comes first, so it ends even where the clock does not advance during a task. A generator that throws ends
+ * the run, and the error is returned (and logged) instead of leaving the figure waiting.
+ */
+export function useSlicedRun<S, C>(setup: S, run: (setup: S) => Generator<C>) {
+  const [state, setState] = useState<{ setup: S; checkpoints: C[]; done: boolean; error: string | null }>({
+    setup,
+    checkpoints: [],
+    done: false,
+    error: null,
+  })
+  useEffect(() => {
+    const it = run(setup)
+    const checkpoints: C[] = []
+    let timer = 0
+    const slice = () => {
+      const start = performance.now()
+      let done = false
+      let error: string | null = null
+      try {
+        for (let k = 0; k < MAX_PER_SLICE && performance.now() - start < SLICE; k++) {
+          const next = it.next()
+          if (next.done) {
+            done = true
+            break
+          }
+          checkpoints.push(next.value)
+        }
+      } catch (e) {
+        console.error(e)
+        error = e instanceof Error ? e.message : String(e)
+        done = true
+      }
+      setState({ setup, checkpoints: [...checkpoints], done, error })
+      if (!done) timer = window.setTimeout(slice, 0)
+    }
+    timer = window.setTimeout(slice, 0)
+    return () => window.clearTimeout(timer)
+  }, [setup, run])
+  return state.setup === setup ? state : { setup, checkpoints: [] as C[], done: false, error: null }
+}
+
+/** A player's position, back at 0 whenever the setup changes. */
+export function usePlayerPosition<S>(setup: S): [number, (at: number) => void] {
+  const [pos, setPos] = useState({ setup, at: 0 })
+  return [pos.setup === setup ? pos.at : 0, (at: number) => setPos({ setup, at })]
+}
+
+/** A periodic curve closed at x = 1 by repeating its first value. */
+export function closePeriodic(x: readonly number[], y: readonly number[]): { x: number[]; y: number[] } {
+  return { x: [...x, 1], y: [...y, y[0]] }
+}

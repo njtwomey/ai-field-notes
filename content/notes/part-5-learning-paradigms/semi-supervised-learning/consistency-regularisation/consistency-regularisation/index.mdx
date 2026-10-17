@@ -1,0 +1,226 @@
+---
+title: 'Consistency regularisation'
+kind: concept
+summary: 'Consistency regularisation penalises the change in a model''s prediction on an unlabelled input when the input or the network is perturbed. The Pi-model compares two stochastic forward passes; temporal ensembling compares each prediction with a running average of past predictions.'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['Pi-model', 'Π-model', 'temporal ensembling', 'consistency loss', 'consistency training', 'self-ensembling']
+requires: [data-augmentation, semi-supervised-assumptions]
+related:
+  [
+    mean-teacher,
+    virtual-adversarial-training,
+    unsupervised-data-augmentation,
+    mixmatch,
+    fixmatch,
+    pseudo-labelling,
+    entropy-minimisation,
+    augmentation-principles,
+    self-distillation-and-dino,
+  ]
+references:
+  [
+    bachman2014pseudoensembles,
+    sajjadi2016stochastic,
+    laine2017temporal,
+    tarvainen2017meanteacher,
+    sohn2020,
+    oliver2018realistic,
+    wang2022usb,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { ConsistencyBoundary } from './ConsistencyBoundary'
+
+<Definition>
+**Consistency regularisation** adds to the supervised loss a term that penalises how much a model's prediction on an
+unlabelled input changes when the input or the network is perturbed. The perturbation is a label-preserving change such
+as noise, a <NoteLink to="augmentation-principles">data augmentation</NoteLink> or dropout. The **Π-model** compares the
+predictions from two independently perturbed forward passes of the same input; **temporal ensembling** compares one
+perturbed prediction with an <Gloss name="ema">exponential moving average</Gloss> of the same input's earlier
+predictions <Cite id="laine2017temporal" />.
+</Definition>
+
+## Intuition
+
+A classifier trained on a handful of labels can place its boundary anywhere that separates those labels. Most such
+boundaries cut through regions where unlabelled inputs are dense. A boundary that passes close to an input makes the
+prediction for that input sensitive: a small change to the input moves the predicted class probability a long way.
+Consistency regularisation asks the prediction at every unlabelled input to stay put under small perturbations. The
+only way to satisfy that request at every input is to keep the boundary away from all of them, in the gaps between
+clusters. This is the smoothness and cluster assumption of <NoteLink to="semi-supervised-assumptions">semi-supervised
+learning</NoteLink> written as a loss.
+
+The unlabelled inputs carry no class information on their own. The labelled loss decides which side of a gap each
+cluster belongs to; the consistency term decides where in the gap the boundary runs. The term never needs a label, so
+every unlabelled input contributes.
+
+The idea appeared as pseudo-ensembles, which ask a network and its dropout-perturbed copies to agree
+<Cite id="bachman2014pseudoensembles" />, and as a transformation-stability loss over repeated random augmentations
+<Cite id="sajjadi2016stochastic" />. Laine and Aila named the two-pass version the Π-model and introduced temporal
+ensembling <Cite id="laine2017temporal" />. Every method of this chapter keeps the same template and changes one
+part of it: where the target comes from, which perturbation is applied, or which inputs count.
+
+<ConsistencyBoundary />
+
+## Details
+
+### The objective
+
+Let $\Dcal_L = \{(\xvec_i, y_i)\}_{i=1}^{n_L}$ be the labelled set, with inputs $\xvec_i \in \reals^d$ and classes
+$y_i \in \{1, \dots, K\}$, and let $\Dcal_U = \{\xvec_u\}_{u=1}^{n_U}$ be the unlabelled inputs. A network with
+parameters $\thetavec$ maps an input to a probability vector $f_{\thetavec}(\xvec) \in [0, 1]^K$ through a softmax. A
+perturbation is a random map $\xvec \mapsto \tilde\xvec$ drawn afresh at every use: Gaussian noise, an
+<NoteLink to="data-augmentation">augmentation</NoteLink> such as a crop or flip, or a dropout mask inside the network.
+Every consistency method minimises
+
+$$
+\Lcal(\thetavec) = \frac{1}{n_L} \sum_{i=1}^{n_L} -\log f_{\thetavec}(\tilde\xvec_i)_{y_i}
++ \lambda(t)\, \frac{1}{n_U} \sum_{u=1}^{n_U} D\big(\hat\yvec_u,\, f_{\thetavec}(\tilde\xvec_u)\big),
+$$
+
+where $\hat\yvec_u \in [0, 1]^K$ is a target distribution for input $\xvec_u$, $D$ is a distance between probability
+vectors, and $\lambda(t) \ge 0$ is the weight of the unsupervised term at training step $t$. The methods differ in
+three choices.
+
+| method | target $\hat\yvec_u$ | perturbation | $D$ |
+| --- | --- | --- | --- |
+| Π-model | $f_{\thetavec}(\tilde\xvec_u')$, a second perturbed pass | noise, augmentation, dropout | squared error |
+| temporal ensembling | running average of past $f_{\thetavec}(\tilde\xvec_u)$ | the same | squared error |
+| <NoteLink to="mean-teacher">mean teacher</NoteLink> | $f_{\thetavec'}(\tilde\xvec_u')$ with averaged weights $\thetavec'$ | the same | squared error |
+| <NoteLink to="virtual-adversarial-training">virtual adversarial training</NoteLink> | $f_{\thetavec}(\xvec_u)$, unperturbed | the most damaging small shift | KL divergence |
+| <NoteLink to="unsupervised-data-augmentation">UDA</NoteLink> | sharpened $f_{\thetavec}(\xvec_u)$ | strong augmentation | KL divergence |
+| <NoteLink to="fixmatch">FixMatch</NoteLink> | one-hot arg max of a weak view, if confident | strong augmentation | cross-entropy |
+
+In the Π-model, $D(\pvec, \qvec) = \frac{1}{K}\norm{\pvec - \qvec}^2$, and the gradient flows through both passes.
+Laine and Aila found the squared error slightly better than cross-entropy for this term
+<Cite id="laine2017temporal" />. The squared error is bounded, so one confidently wrong target costs at most
+$2/K$, while a cross-entropy against a confident wrong target grows without limit.
+
+### What the penalty measures
+
+For Gaussian input noise the Π-model penalty has a closed form to first order. Let $\tilde\xvec = \xvec +
+\epsilonvec$ and $\tilde\xvec' = \xvec + \epsilonvec'$ with $\epsilonvec, \epsilonvec' \sim \Gauss(\zeros,
+\sigma^2\Imat)$ independent, and let $\Jmat(\xvec) \in \reals^{K \times d}$ be the Jacobian of $f_{\thetavec}$ at
+$\xvec$. A first-order Taylor expansion gives $f_{\thetavec}(\xvec + \epsilonvec) \approx f_{\thetavec}(\xvec) +
+\Jmat\epsilonvec$, so the difference of the two passes is $\Jmat(\epsilonvec - \epsilonvec')$. The vector
+$\deltavec = \epsilonvec - \epsilonvec'$ is Gaussian with covariance $2\sigma^2\Imat$. Then
+
+$$
+\expect\norm{f_{\thetavec}(\tilde\xvec) - f_{\thetavec}(\tilde\xvec')}^2
+\approx \expect\big[\deltavec^\top \Jmat^\top \Jmat \deltavec\big]
+= \trace\big(\Jmat^\top\Jmat\, \expect[\deltavec\deltavec^\top]\big)
+= 2\sigma^2 \norm{\Jmat(\xvec)}_F^2 .
+$$
+
+The second step writes a scalar as its own trace and moves the expectation inside; the third uses
+$\expect[\deltavec\deltavec^\top] = 2\sigma^2\Imat$. The Π-model with small noise therefore penalises the squared
+Frobenius norm of the network's Jacobian at the unlabelled inputs. The Jacobian is large near a decision boundary,
+where the predicted probabilities change fastest, and small far from it. Minimising its norm at every unlabelled
+input pushes the boundary into regions with few unlabelled inputs, the <NoteLink
+to="low-density-separation">low-density separation</NoteLink> that <NoteLink
+to="entropy-minimisation">entropy minimisation</NoteLink> reaches by a different loss.
+
+The approximation holds while $\sigma$ is small against the distance over which the prediction curves. With larger
+noise the penalty compares predictions at points far apart, and it starts to average the prediction across the gap
+between classes. Augmentations are not Gaussian, and the same argument then reads as a penalty on the derivative of the
+prediction along the directions the augmentation moves the input.
+
+### Temporal ensembling
+
+The Π-model's target is a single noisy forward pass. Temporal ensembling replaces it with an average over training.
+For each unlabelled input it keeps a vector $\mvec_u \in \reals^K$, initialised to zero. After each epoch, in which the
+input's perturbed prediction was $\zvec_u = f_{\thetavec}(\tilde\xvec_u)$, the average is updated:
+
+$$
+\mvec_u \leftarrow \alpha \mvec_u + (1 - \alpha)\, \zvec_u, \qquad \hat\yvec_u = \frac{\mvec_u}{1 - \alpha^{t}},
+$$
+
+with momentum $\alpha \in [0, 1)$ ($\alpha = 0.6$ in the paper) and $t$ the number of updates so far. The division
+corrects the start-up bias: if every $\zvec_u$ equalled a constant $\bar\zvec$, then after $t$ updates $\mvec_u =
+(1 - \alpha)\sum_{s=0}^{t-1}\alpha^s\bar\zvec = (1 - \alpha^t)\bar\zvec$, and the corrected target is $\bar\zvec$.
+The target is a constant in the loss, so each input needs one forward pass per step instead of two. Its cost is
+memory, $n_U \times K$ numbers, and staleness: the target moves once per epoch, which is slow on a large unlabelled
+set. <NoteLink to="mean-teacher">Mean teacher</NoteLink> removes both by averaging weights instead of predictions
+<Cite id="tarvainen2017meanteacher" />.
+
+### The weight schedule
+
+A constant output satisfies the consistency term exactly, since it has zero Jacobian everywhere. Early in training,
+when the predictions are poor, a large $\lambda$ can pull the network towards such a degenerate solution before the
+labelled loss has fixed the classes. Laine and Aila ramp the weight up from zero along $\lambda(t) = \lambda_{\max}
+\exp(-5(1 - t/R)^2)$ over the first $R$ steps, $R$ being 80 epochs in their runs, and report that a fast ramp-up gets
+stuck in a degenerate solution <Cite id="laine2017temporal" />.
+
+## Worked example
+
+One input dimension, two classes, a logistic model $p(x) = 1/(1 + e^{-a(x - c)})$ for the probability of class 2,
+with steepness $a = 4$ and boundary $c$. The output vector is $(1 - p, p)$. Three unlabelled inputs sit at $x = -1$,
+$x = -0.2$ and $x = 1$. The noise has $\sigma = 0.1$. The question is which boundary position the consistency term
+prefers, with the steepness held fixed.
+
+**Step 1: the per-input penalty.** With two classes the output vector changes by $(-\Delta p, \Delta p)$, so
+$\frac{1}{K}\norm{\cdot}^2 = (\Delta p)^2$. The first-order result gives an expected penalty of $2\sigma^2 p'(x)^2$,
+with slope $p'(x) = a\,p(x)(1 - p(x))$.
+
+**Step 2: boundary at $c = 0$.** At $x = -0.2$: $p = 1/(1 + e^{0.8}) = 0.310$, $p' = 4 \times 0.310 \times 0.690 =
+0.856$, penalty $2 \times 0.01 \times 0.856^2 = 0.0146$. At $x = \pm 1$: $p = 0.018$ or $0.982$, $p' = 0.071$,
+penalty $1.0 \times 10^{-4}$ each. Total $0.0148$.
+
+**Step 3: boundary at $c = 0.6$.** At $x = -0.2$: $p = 0.039$, $p' = 0.151$, penalty $4.5 \times 10^{-4}$. At
+$x = 1$: $p = 0.832$, $p' = 0.559$, penalty $0.0063$. At $x = -1$: under $10^{-6}$. Total $0.0067$.
+
+**Step 4: boundary at $c = 0.4$.** Both $x = -0.2$ and $x = 1$ are $0.6$ away: $p = 0.083$ and $0.917$, $p' =
+0.305$, penalty $0.0019$ each. Total $0.0037$, the minimum over $c$. The midpoint of the widest gap between
+unlabelled inputs wins.
+
+**Step 5: the approximation.** Averaging the exact squared difference over the two Gaussian draws gives totals of
+$0.0144$, $0.0071$ and $0.0043$ for $c = 0$, $0.6$ and $0.4$. The first-order values are within 15%, and the ordering
+is the same.
+
+The figure runs the same mechanism on two moons with eight labels. The labelled-only network places a boundary that
+fits the eight labels and cuts across both moons; the consistency term moves it into the gap. On the default data
+seed the accuracy on the 192 unlabelled points rises from 84.4% (labels only) to above 99% after 600 steps with the
+Π-model at $\sigma = 0.1$ and $\lambda = 10$.
+
+## Assumptions
+
+- **Smoothness and clusters.** The penalty helps only if points of one class form dense regions separated by sparse
+  ones. With heavily overlapping classes there is no gap to move the boundary into, and the term only flattens the
+  prediction.
+- **Label-preserving perturbations.** A perturbation that can change the true class teaches the network to ignore
+  real evidence. Gaussian noise must be small against the gap between classes; an augmentation must keep the class
+  (a horizontal flip preserves most object classes, not digits such as 6 and 9).
+- **Shared classes.** The unlabelled set should hold the classes of the labelled set. Unlabelled inputs from other
+  classes pull the boundary towards them, and Oliver et al. measured accuracy falling as the share of such inputs
+  grew <Cite id="oliver2018realistic" />.
+
+## Pitfalls
+
+- **A weak baseline.** Gains are often reported against a supervised baseline that was tuned less carefully than the
+  semi-supervised method. A strong supervised baseline with the same augmentation and regularisation closes much of
+  the reported gap <Cite id="oliver2018realistic" />.
+- **Too fast a ramp-up.** A large consistency weight at the start of training can lock the network into a constant
+  or near-constant output <Cite id="laine2017temporal" />.
+- **Noise of the wrong scale.** In the figure, at $\sigma = 0.4$ the jittered copies of points on one moon land on the
+  other. After 600 steps the accuracy on the unlabelled points is 68.2%, 93.8% and 90.6% on data seeds 1 to 3,
+  against 91.1%, 99.5% and 91.1% at $\sigma = 0.1$; on seed 1 it falls below the labelled-only network's 77.6%.
+- **Validation on a large labelled set.** Tuning $\lambda$, $\sigma$ and the ramp-up on a validation set with many
+  more labels than the training set is a form of supervision the method does not account for
+  <Cite id="oliver2018realistic" />.
+
+## In practice
+
+Current semi-supervised image and text classifiers apply consistency through a confidence-thresholded pseudo-label from
+a weakly augmented view, as <NoteLink to="fixmatch">FixMatch</NoteLink> and its <NoteLink
+to="adaptive-confidence-thresholds">adaptive-threshold successors</NoteLink> do <Cite id="sohn2020" />; the Π-model and
+temporal ensembling survive as baselines and as the simplest instance of the template. The Unified
+<NoteLink to="semi-supervised-learning">Semi-supervised Learning</NoteLink> Benchmark (USB) evaluates these methods
+starting from pretrained transformers rather than from random initialisation <Cite id="wang2022usb" />, and starting
+from a <NoteLink
+to="self-supervised-pretraining-for-semi-supervised-learning">self-supervised pretrained</NoteLink> network is a strong
+alternative on its own. The same agreement between perturbed views drives
+<NoteLink to="self-supervised-learning">self-supervised learning</NoteLink> without labels, where an averaged-weights
+teacher supplies the target, as in <NoteLink
+to="self-distillation-and-dino">self-distillation with DINO</NoteLink>.

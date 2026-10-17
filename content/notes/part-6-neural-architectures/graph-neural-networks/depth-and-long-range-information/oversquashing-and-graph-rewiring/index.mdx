@@ -1,0 +1,229 @@
+---
+title: 'Oversquashing and graph rewiring'
+kind: concept
+summary: 'A node''s receptive field grows exponentially with depth, but all that information passes through fixed-width vectors and few edges. Bottlenecks (low Cheeger constant, negative curvature) block long-range signal; rewiring (SDRF, FoSR), virtual nodes and global attention add paths.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['over-squashing', 'graph bottleneck', 'graph rewiring', 'virtual node', 'SDRF', 'FoSR']
+requires: [message-passing-neural-network, graph-laplacian-and-graph-fourier-transform]
+related:
+  [
+    oversmoothing,
+    graph-transformer,
+    residual-and-jumping-knowledge-graph-networks,
+    depth-and-long-range-information-in-graph-networks,
+    spectral-clustering,
+    graph-learning-benchmarks,
+  ]
+references:
+  [
+    alon2021,
+    topping2022curvature,
+    karhadkar2023fosr,
+    digiovanni2023oversquashing,
+    black2023resistance,
+    gilmer2017,
+    dwivedi2022lrgb,
+    tonshoff2023lrgb,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { SquashingSensitivity } from './SquashingSensitivity'
+
+<Definition>
+Oversquashing is the loss of sensitivity of a <NoteLink to="message-passing-neural-network">message passing</NoteLink>
+network's output at a node $v$ to the input features of distant nodes $u$, because information from a
+<NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink> that grows quickly with depth must
+pass through fixed-width vectors along few edges <Cite id="alon2021" />. It is measured by the Jacobian
+$\partial\hvec_v^{(r)}/\partial\xvec_u$ of the layer-$r$ features of $v$ with respect to the input of $u$, which is
+bounded by the entry $(\hat\Amat^r)_{vu}$ of a power of the normalised adjacency matrix
+<Cite id="topping2022curvature" />. **Graph rewiring** changes the edges that messages travel along, by adding edges
+across bottlenecks, a virtual node joined to every node, or attention between all pairs, so that distant nodes interact
+through fewer and wider routes.
+</Definition>
+
+## Intuition
+
+A node's receptive field after $r$ layers is every node within $r$ hops. In a tree where every node has two children,
+that field holds $2^r$ nodes at the last level alone. A <Gloss name="gnn">message passing</Gloss> network must summarise
+all of them in one vector of fixed width $F$ at the root. As $r$ grows, the vector's capacity stays the same while the
+information it must carry grows exponentially. Alon and Yahav named this oversquashing and showed that popular networks
+fail to fit long-range signals even on their training data <Cite id="alon2021" />.
+
+The graph's shape makes it worse. Two dense communities joined by one edge must exchange everything through that edge.
+Each layer passes one message per edge, and the message from the bridge node is one vector averaged with all its
+other neighbours' messages. Distant information arrives diluted by every averaging step on the way. Adding layers does
+not help: the receptive field already contains the distant node, and more layers mostly add more averaging.
+
+Oversquashing differs from two neighbouring failures. **Under-reaching** is a network with fewer layers than the
+distance between the nodes that must interact; more layers fix it.
+**<NoteLink to="oversmoothing">Oversmoothing</NoteLink>** is the collapse of all features to one profile with depth.
+Oversquashing happens in networks deep enough to reach the distant node and not yet oversmoothed, when the graph's
+topology throttles the flow between the two.
+
+## Details
+
+### Sensitivity through powers of the adjacency
+
+Write the propagation matrix with self-loops as
+$\hat\Amat = \tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2}$, where $\tilde d_i$ is the degree of node $i$ plus one.
+Consider a message passing network with scalar features whose message and update functions have derivatives bounded by
+$\alpha$ and $\beta$. Topping et al. prove that for a node $u$ at distance $r + 1$ from $v$,
+
+$$
+\abs{\frac{\partial h_v^{(r+1)}}{\partial x_u}} \le (\alpha\beta)^{r+1}\, \paren{\hat\Amat^{r+1}}_{vu}
+$$
+
+<Cite id="topping2022curvature" />. The weights set the factor $(\alpha\beta)^{r+1}$; the graph sets
+$(\hat\Amat^{r+1})_{vu}$. At the exact distance, only shortest paths contribute to the matrix power, so
+
+$$
+\paren{\hat\Amat^{r}}_{vu} = \sum_{\text{shortest paths } v = w_0, w_1, \dots, w_r = u}\ \prod_{t=1}^{r}
+\frac{1}{\sqrt{\tilde d_{w_{t-1}}\tilde d_{w_t}}} .
+$$
+
+Every edge on the path divides by the square root of its endpoints' degrees. A path through high-degree nodes, or
+through few parallel routes, gives a small entry. When the ball of radius $r + 1$ around $v$ is a binary tree, the entry
+for a node at distance $r + 1$ is $2^{-1}3^{-r}$: exponential decay with distance <Cite id="topping2022curvature" />.
+
+Width and depth change only the factor in front. Wider layers raise $\alpha\beta$ and so the bound for every pair, not
+just the distant ones. More layers let longer walks contribute to $(\hat\Amat^r)_{vu}$, but the entry then tends to its
+oversmoothed limit $\sqrt{\tilde d_u\tilde d_v}/\sum_i \tilde d_i$, and deep stacks bring
+<NoteLink to="backpropagation-through-time">vanishing gradients</NoteLink>. The topology remains the decisive term:
+oversquashing is worst between nodes with high commute time, the expected number of steps a
+<NoteLink to="random-walk">random walk</NoteLink> takes to go from $u$ to $v$ and back
+<Cite id="digiovanni2023oversquashing" />.
+
+### Bottlenecks: the Cheeger constant and curvature
+
+Three graph quantities identify bottlenecks.
+
+- **The Cheeger constant.** For a set of nodes $S$, let $\abs{\partial S}$ be the number of edges leaving it and
+  $\operatorname{vol}(S) = \sum_{i \in S} d_i$ its total degree. The Cheeger constant is
+  $h_G = \min_S \abs{\partial S} / \min\paren{\operatorname{vol}(S), \operatorname{vol}(\bar S)}$. A small $h_G$ means
+  the graph splits into two large parts joined by few edges. The Cheeger inequality ties it to the spectral gap
+  $\lambda_1$, the second-smallest eigenvalue of the
+  <NoteLink to="graph-laplacian-and-graph-fourier-transform">normalised Laplacian</NoteLink>
+  $\I - \Dmat^{-1/2}\Amat\Dmat^{-1/2}$: $2h_G \ge \lambda_1 \ge h_G^2/2$ <Cite id="topping2022curvature" />. The
+  spectral gap is cheap to compute and stands in for $h_G$.
+- **Curvature.** An edge between two nodes whose neighbourhoods overlap, in triangles or 4-cycles, has positive
+  curvature, as in a clique. An edge whose endpoints share nothing, so that their neighbourhoods spread apart as in a
+  tree, has negative curvature. Topping et al. define the balanced Forman curvature $\operatorname{Ric}(i, j)$ from the
+  degrees and the triangles and 4-cycles at the edge. For an edge with no triangles or 4-cycles it is
+  $2/d_i + 2/d_j - 2$. They prove that strongly negatively curved edges cause oversquashing: they bound the average
+  Jacobian between a node and the nodes two hops away across the edge <Cite id="topping2022curvature" />.
+- **Effective resistance.** Treat each edge as a unit resistor. The effective resistance between $u$ and $v$ is large
+  when few, long paths join them, and it is proportional to their commute time. Black et al. use the total effective
+  resistance over all pairs as a measure of oversquashing in the whole graph <Cite id="black2023resistance" />.
+
+### Rewiring
+
+Rewiring passes messages over a graph different from the input graph. Each method adds routes across bottlenecks.
+
+- **Virtual node.** Add one node joined to every node, the master node of Gilmer et al. <Cite id="gilmer2017" />.
+  Every pair is then within two hops. The virtual node itself becomes a bottleneck of width $F$ that every global
+  message shares.
+- **Fully adjacent layer.** Make the last layer's graph complete, so every pair interacts once. Alon and Yahav removed
+  the bottleneck of previously tuned networks this way and improved their results without new weights
+  <Cite id="alon2021" />. Attention between all pairs in every layer is a <NoteLink to="graph-transformer" />.
+- **Curvature-based rewiring (SDRF).** Stochastic discrete Ricci flow repeatedly finds the most negatively curved edge,
+  adds an edge between the neighbourhoods of its endpoints, sampled with a preference for the edge that most raises its
+  curvature, and optionally removes the most positively curved edge <Cite id="topping2022curvature" />. The changes stay
+  local: each added edge closes a triangle or a 4-cycle around a bridge.
+- **First-order spectral rewiring (FoSR).** Add edges one at a time to raise the spectral gap as fast as possible
+  <Cite id="karhadkar2023fosr" />. Recomputing the gap for every candidate edge is expensive, so FoSR uses the
+  first-order change of the second-largest eigenvalue of $\Dmat^{-1/2}\Amat\Dmat^{-1/2}$. With $\xvec$ the
+  corresponding eigenvector, it adds the non-edge $(i, j)$ that minimises
+  $$
+  \frac{x_i x_j}{\sqrt{(1 + d_i)(1 + d_j)}} .
+  $$
+  The eigenvector has opposite signs on the two sides of the weakest cut, so the product $x_i x_j$ is most negative
+  for a pair that straddles it, at large $\abs{x_i}$ and $\abs{x_j}$ and low degree. FoSR passes messages along the
+  original and the added edges with separate weights, so the network can learn how much to use the new edges.
+- **Effective-resistance rewiring.** Add the edges that most reduce the total effective resistance
+  <Cite id="black2023resistance" />.
+
+Rewiring conflicts with <NoteLink to="oversmoothing" />. Oversmoothing proceeds at a rate set by the spectral gap, and
+rewiring raises the gap, so a heavily rewired graph oversmooths in fewer layers. Keeping the added edges as a separate
+edge type, as FoSR does, lets the network weight them down where they hurt <Cite id="karhadkar2023fosr" />.
+
+## Worked example
+
+Take two cliques of 5 nodes joined by a path of 3 nodes: nodes 0 to 4 form the first clique, nodes 5, 6, 7 the path
+and nodes 8 to 12 the second clique, with edges 4–5, 5–6, 6–7 and 7–8. There are 13 nodes and 24 edges. Node 4 has
+degree 5 (four clique neighbours and node 5), and so does node 8; the other clique nodes have degree 4 and the path
+nodes degree 2.
+
+**Receptive field.** Node 12 is at distance 6 from node 0, along the unique shortest path
+$0, 4, 5, 6, 7, 8, 12$. A network needs 6 layers for node 12 to see node 0 at all. After 6 layers the receptive field
+of node 12 is the whole graph.
+
+**Sensitivity at the exact distance.** With self-loops the degrees along the path are $\tilde d = 5, 6, 3, 3, 3, 6, 5$.
+The product formula gives
+
+$$
+\paren{\hat\Amat^6}_{12,0} = \frac{1}{\sqrt{5 \cdot 6}} \cdot \frac{1}{\sqrt{6 \cdot 3}} \cdot \frac13 \cdot \frac13
+\cdot \frac{1}{\sqrt{3 \cdot 6}} \cdot \frac{1}{\sqrt{6 \cdot 5}} = \frac{1}{30 \cdot 18 \cdot 9} = \frac{1}{4860}
+\approx 2.1 \times 10^{-4} .
+$$
+
+On a plain path of 7 nodes, where the ends have $\tilde d = 2$ and the interior nodes $\tilde d = 3$, the same distance
+gives $\frac{1}{\sqrt6} \cdot \paren{\frac13}^4 \cdot \frac{1}{\sqrt6} = \frac{1}{486} \approx 2.1 \times 10^{-3}$, ten
+times more. The cliques cost a factor of 10: node 0's feature is averaged with four clique neighbours at node 4, and
+the arriving message at node 8 is averaged with four more.
+
+**Bottleneck.** The Cheeger constant is attained by $S = \set{0, \dots, 5}$, the first clique and the first path node.
+One edge, 5–6, leaves $S$, and $\operatorname{vol}(S) = 4 \cdot 4 + 5 + 2 = 23$ against 25 for the rest, so
+$h_G = 1/23 = 0.043$. The spectral gap of the normalised Laplacian is $\lambda_1 = 0.022$, inside the Cheeger bounds
+$2h_G = 0.087$ and $h_G^2/2 = 0.0009$. The bridge edge 4–5 has no triangles or 4-cycles, so its curvature is
+$2/5 + 2/2 - 2 = -0.6$. An edge inside a clique of 5 has curvature $5/4$.
+
+**Virtual node.** Join a virtual node to all 13 nodes. Nodes 0 and 12 now have $\tilde d = 6$ and the virtual node
+$\tilde d = 14$, and the shortest path has 2 edges:
+
+$$
+\paren{\hat\Amat^2}_{12,0} = \frac{1}{\sqrt{6 \cdot 14}} \cdot \frac{1}{\sqrt{14 \cdot 6}} = \frac{1}{84}
+\approx 1.2 \times 10^{-2},
+$$
+
+about 60 times the original value at a third of the depth. The spectral gap rises from 0.022 to 0.214.
+
+**FoSR.** The second eigenvector of the normalised adjacency is $-0.312$ on nodes 0 to 3, $-0.318$ on node 4, $-0.103,
+0, 0.103$ on the path, and the mirror image on the second clique. A pair across the cut scores
+$x_i x_j / \sqrt{(1 + d_i)(1 + d_j)}$. Nodes 0 and 9 score $-0.312 \times 0.312 / \sqrt{5 \cdot 5} = -0.0195$. Nodes 4
+and 8 have larger entries but degree 5, and score $-0.318 \times 0.318 / \sqrt{6 \cdot 6} = -0.0169$. So the first edge
+FoSR adds joins node 0 of the first clique to node 9 of the second (ties broken by node number), and the next two join 1
+to 10 and 2 to 11. After three edges the spectral gap is 0.234 and $(\hat\Amat^6)_{12,0} = 6.1 \times 10^{-2}$, about
+300 times the original.
+
+<SquashingSensitivity />
+
+## Assumptions
+
+- **The task needs long-range interactions.** Oversquashing matters only when the label of a node or graph depends on
+  features far away. Many <NoteLink to="graphs-as-neural-network-inputs">node classification</NoteLink> benchmarks are
+  local, and rewiring them can hurt.
+- **The bound is an upper bound.** $(\hat\Amat^r)_{vu}$ bounds the Jacobian for networks of the <Gloss name="gcn" />
+  form with bounded derivatives. Attention and gating reweight the edges: networks that weight incoming edges unequally,
+  such as <NoteLink to="graph-attention-network">graph attention</NoteLink> and gated graph networks, are less affected
+  than GCN and <Gloss name="gin" /> <Cite id="alon2021" />.
+- **The input graph is not sacred.** Rewiring assumes the edges are a channel for computation, not a fact the model
+  must respect. Where an edge has a physical meaning, such as a chemical bond, added edges should be marked as a
+  separate type.
+
+## Pitfalls
+
+- **Rewiring speeds up oversmoothing.** Every added edge raises the spectral gap and with it the rate at which features
+  converge. A heavily rewired graph needs fewer layers or a separate edge type for the new edges.
+- **Long-range benchmarks need careful baselines.** The <NoteLink to="graph-learning-benchmarks">Long Range Graph
+  Benchmark</NoteLink> was built so that tasks require long-range interactions, and graph transformers first
+  outperformed message passing networks on it <Cite id="dwivedi2022lrgb" />. After basic hyperparameter tuning of the
+  message passing baselines the gap vanished on several of its datasets <Cite id="tonshoff2023lrgb" />. A claimed gain
+  from rewiring or attention is only as good as the tuning of the baseline.
+- **Cost of the measures.** Exact curvature, effective resistance and the Cheeger constant are expensive on large
+  graphs: the Cheeger constant is NP-hard to compute exactly, effective resistance needs a pseudoinverse of the
+  Laplacian, and curvature scales with the number of edges times a power of the maximum degree. FoSR's first-order
+  rule and power iteration keep spectral rewiring cheap.
+- **A virtual node is a new bottleneck.** It gives every pair a two-hop route, but every route shares one vector of
+  width $F$. Several virtual nodes, or attention, widen the channel.

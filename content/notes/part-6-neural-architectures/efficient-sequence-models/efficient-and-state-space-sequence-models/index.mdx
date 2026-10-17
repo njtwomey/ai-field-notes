@@ -1,79 +1,100 @@
 ---
 title: 'Efficient and state-space sequence models'
 kind: overview
-summary: 'Sequence layers that avoid the quadratic cost of full attention: sparse and sliding-window attention, linear attention, RWKV and RetNet, structured state-space models (S4) and Mamba trained with parallel scans, and hybrids that mix them with attention.'
+summary: 'Sequence layers that cost less than quadratic attention: sparse, low-rank and linear attention, linear recurrences with decay, gates and delta rules, S4 and Mamba state-space layers, and hybrid stacks that keep a few attention layers for exact recall.'
 tags: [sequence-models, attention, state-space-models, overview]
 aliases: [subquadratic sequence models, linear-time sequence models]
 requires: [scaled-dot-product-attention, recurrent-neural-network]
-related: [transformers, recurrent-networks, large-language-models]
+related: [transformers, sequence-models, recurrent-networks, large-language-models]
 references: [tay2022, gu2023mamba, dao2024]
 status: draft
-updated: 2026-10-12
+updated: 2026-10-17
 ---
 
 <Definition>
-**Efficient sequence models** replace or approximate full self-attention so that the cost of processing $n$ tokens
-grows more slowly than $n^2$. One family keeps attention but restricts or approximates it <Cite id="tay2022" />. The
-other replaces attention with a linear recurrence over a fixed-size state, trained in parallel over the sequence and
-run step by step at generation time; structured state-space models and Mamba are the main examples
-<Cite id="gu2023mamba" />.
+**Efficient sequence models** are token-mixing layers whose cost grows more slowly in the sequence length $n$ than the
+$O(n^2)$ of softmax attention. One family keeps attention and scores fewer query–key pairs or approximates the attention
+matrix <Cite id="tay2022" />. The other family compresses the past into a state of fixed size, updated by a map that is
+linear in the state, $\hvec_t = \Amat_t\hvec_{t-1} + \bvec_t$, where $\Amat_t$ and $\bvec_t$ depend at most on token
+$t$. Linear attention, linear recurrent models and <Gloss name="state-space-model">state-space models</Gloss> such as S4
+and Mamba belong to the second family <Cite id="gu2023mamba" />.
 </Definition>
 
 ## What it is for
 
-Self-attention compares every token with every other, so a layer costs $O(n^2 d)$ time and $O(n^2)$ memory per head
-for $n$ tokens of width $d$, and generating each new token reads a key-value cache that grows with $n$. Long documents,
-genomes, audio and long conversations make this cost dominant. The models in this topic cut training cost to linear or
-near-linear in $n$, and several of them generate each token with constant time and memory.
+A head of <NoteLink to="scaled-dot-product-attention">scaled dot-product attention</NoteLink> over $n$ tokens of width
+$d$ costs $O(n^2 d)$ time. The standard algorithm also stores an $n \times n$ score matrix, and a decoder reads a
+<NoteLink to="key-value-cache" /> that grows by one key and one value per generated token. These three costs limit how
+long a document, conversation, codebase, audio clip or genome a transformer can process.
+<NoteLink to="efficient-attention" /> compares the methods by which of the three costs each one cuts. Tiled exact
+attention, <NoteLink to="flash-attention">FlashAttention</NoteLink>, removes the score memory but keeps the arithmetic
+and the cache.
 
-The two families turned out to be closely related. Causal linear attention is a recurrent network whose state is a
-matrix, and a structured state-space layer can be written as a form of masked attention <Cite id="dao2024" />. Current
-large models often combine the two in hybrids.
+The layers in this topic cut the arithmetic to linear or $O(n \log n)$ in training. The fixed-state layers also
+generate each token at constant time and memory. Current open <Gloss name="language-model">language models</Gloss> use
+them as most of their layers: Jamba, Qwen3-Next and Nemotron-H interleave them with a few attention layers, and Gemma 3
+uses sliding-window attention in five of every six layers.
 
 ## Main ideas
 
-**Restrict which pairs are scored.** <NoteLink to="efficient-attention" /> surveys the ways to make attention cheaper:
-sparse patterns, low-rank projection, kernel feature maps and exact tiling.
-<NoteLink to="sliding-window-and-sparse-attention" /> scores each query against a local window, strided positions,
-global tokens or random keys, cutting cost to $O(nw)$ for window width $w$ while stacked layers still pass information
-far.
+**Score fewer pairs.** <NoteLink to="sliding-window-and-sparse-attention" /> fixes each query's keys in advance: a local
+window of width $w$, strided positions, global tokens or random keys, at cost $O(nw)$.
+<NoteLink to="trainable-sparse-attention" /> lets each query select blocks of keys from cheap block scores.
+<NoteLink to="low-rank-and-hashing-attention" /> replaces the attention matrix by thin factors (Linformer,
+Nyströmformer) or restricts each query to a bucket of similar keys (Reformer).
 
-**Reassociate the product.** <NoteLink to="linear-attention" /> replaces the softmax similarity with a kernel
-$\phi(\qvec)^\top\phi(\kvec)$, so the attention product can be computed right to left in $O(n)$. In causal form it is a
-recurrent network whose state accumulates outer products $\phi(\kvec_t)\vvec_t^\top$.
-<NoteLink to="rwkv-and-retentive-networks">RWKV and RetNet</NoteLink> add exponential decay to that recurrence and offer
-parallel, recurrent and chunkwise forms of the same layer.
+**A fixed-size state, trained in parallel.** <NoteLink to="linear-attention" /> replaces the softmax similarity by a
+kernel $\phi(\qvec)^\tr\phi(\kvec)$. Causal linear attention is then a recurrent network whose fixed-size matrix state
+sums the outer products $\phi(\kvec_t)\vvec_t^\tr$. The update is affine in the state, so a
+<NoteLink to="parallel-scan" /> computes all $n$ states in $O(\log n)$ parallel steps. Every fixed-state layer thus has
+a parallel form for training and a recurrent form for generation. <NoteLink to="mamba-2-and-state-space-duality" />
+shows that a selective state-space layer with a scalar transition is masked linear attention with a mask of cumulative
+decays <Cite id="dao2024" />.
 
-**Linear recurrences can be trained in parallel.** A recurrence $h_t = a_t h_{t-1} + b_t$ looks sequential, but its
-update composes associatively, so a <NoteLink to="parallel-scan" /> computes all states in $O(\log n)$ parallel steps.
-This is what lets recurrent layers train as fast as attention on accelerators.
+**From a fixed transition to a selective one.** The transition $\Amat_t$ sets what the state forgets.
+<NoteLink to="hippo" /> derives a continuous-time transition whose state holds a polynomial approximation of the input
+history. <NoteLink to="structured-state-space-models">S4</NoteLink> discretises it; a transition fixed across steps
+makes the layer a long convolution, computed by the FFT. <NoteLink to="linear-recurrent-unit-and-s5">S5 and the linear
+recurrent unit</NoteLink> run a diagonal recurrence as a scan instead, and <NoteLink to="long-convolution-models" />
+generate long filters with a small network.
+<NoteLink to="rwkv-and-retentive-networks">RetNet and RWKV</NoteLink> apply a fixed decay to a linear-attention state.
+<NoteLink to="gated-linear-recurrence">Gated linear recurrences</NoteLink> and <NoteLink to="mamba" /> compute the
+decay from each token, so the layer keeps or discards tokens by content.
 
-**Discretised linear systems as layers.** A <NoteLink to="structured-state-space-models">structured state-space
-model</NoteLink> maps a sequence through a discretised linear system from <NoteLink to="control-theory">control
-theory</NoteLink>. Unrolled, it is a long convolution computed with the FFT in training and a recurrence in generation.
-Structure in the state matrix makes the convolution kernel cheap to compute.
+**How the state is written.** Linear attention adds each new key–value pair to the state, so overlapping keys blur and
+no stored value can be replaced. <NoteLink to="xlstm" /> scales the write by exponential input gates and divides by a
+normaliser. The <NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink> writes only the difference
+between the new value and what the state returns for its key, one gradient step of online regression. Gated DeltaNet
+and RWKV-7 combine the delta rule with decay; test-time-training layers replace the matrix state by a small network
+trained as the sequence is read.
 
-**Selection makes the state content-aware.** <NoteLink to="mamba" /> computes the step size and input and output
-matrices of a diagonal state-space layer from each token, so the layer can keep or discard tokens by their content. It
-trains with a parallel scan and generates in $O(1)$ time and memory per token.
-
-**Hybrids keep a little attention.** A fixed-size state cannot store every token exactly, so pure recurrent models are
-weaker at exact recall and in-context copying. <NoteLink to="hybrid-sequence-models" /> interleave a few attention
-layers among state-space layers to restore those abilities at most of the efficiency.
+**What a fixed state loses, and hybrids.** A state of fixed size cannot store every token, and a $d \times d$ linear
+memory holds at most $d$ exact key–value associations. <NoteLink to="long-range-and-recall-benchmarks" /> show the
+result: S4 solves 16,384-step Path-X, while fixed-state layers fall behind attention on associative recall as the
+number of stored pairs grows. <NoteLink to="expressiveness-of-linear-recurrences" /> shows that diagonal transitions
+with entries in $[0, 1]$ cannot track parity, and that negative eigenvalues or non-diagonal delta-rule transitions can.
+<NoteLink to="hybrid-sequence-models" /> keep one attention layer per one to seven recurrent layers to restore exact
+recall.
 
 ## How the notes fit together
 
-Start with <NoteLink to="efficient-attention" />, which explains the quadratic cost and maps the attention-based
-methods. <NoteLink to="sliding-window-and-sparse-attention" /> and <NoteLink to="linear-attention" /> develop two of
-them; <NoteLink to="rwkv-and-retentive-networks" /> extends linear attention. The state-space line starts with the
-<NoteLink to="parallel-scan" />, then <NoteLink to="structured-state-space-models" /> and <NoteLink to="mamba" />.
-<NoteLink to="hybrid-sequence-models" /> comes last and draws on both lines.
+The topic has four sub-chapters, read in order.
+
+- <NoteLink to="sparse-linear-and-low-rank-attention" /> covers the methods that keep attention's form; its
+  linear-attention note leads into the rest.
+- <NoteLink to="linear-recurrent-models" /> starts with the parallel scan and develops matrix-state recurrences with
+  decay, gates and the delta rule.
+- <NoteLink to="structured-and-selective-state-space-models" /> derives the same kind of recurrence from continuous
+  linear systems, from HiPPO and S4 to Mamba and Mamba-2, and uses the parallel scan of the previous sub-chapter.
+- <NoteLink to="comparing-and-combining-sequence-models" /> compares the layer types on recall and state tracking,
+  mixes them in hybrid stacks, and applies state-space layers to images, audio and DNA in
+  <NoteLink to="state-space-models-beyond-text" />.
 
 ## Prerequisites and next steps
 
-The notes assume <NoteLink to="scaled-dot-product-attention" />, the <NoteLink to="recurrent-neural-network" /> and,
-for the state-space notes, the <NoteLink to="state-space-representation" /> and
-<NoteLink to="fast-fourier-transform" /> of Part II. Other routes to long context, through position schemes and
-extrapolation, are in <NoteLink to="long-context-methods" />; memory-efficient exact attention at inference is
-<NoteLink to="flash-attention" />, and the cost of generation with attention is the
-<NoteLink to="key-value-cache" />. These layers are used inside <NoteLink to="large-language-models" />.
+The notes assume <NoteLink to="scaled-dot-product-attention" />, <NoteLink to="causal-masking" /> and the
+<NoteLink to="recurrent-neural-network" />. The state-space notes also use the
+<NoteLink to="state-space-representation" /> of <NoteLink to="control-theory" /> and the
+<NoteLink to="fast-fourier-transform" />. Other routes to long context, through position schemes and extrapolation,
+are in <NoteLink to="long-context-methods" />. The layers are used inside <NoteLink to="large-language-models" /> and
+in <NoteLink to="deep-state-space-models" /> for forecasting <NoteLink to="time-series" />.

@@ -1,0 +1,199 @@
+---
+title: 'Kelvin–Helmholtz instability'
+kind: concept
+summary: 'The interface between two streams sliding past each other is unstable: a wave of wavenumber k grows at the rate kΔU/2 for a velocity jump ΔU, and the waves roll up into billows. A vortex sheet of smoothed point vortices (Krasny''s vortex-blob method) reproduces the roll-up.'
+tags: [fluid-dynamics, worked-example]
+aliases: [KH instability, shear instability, vortex sheet, vortex-sheet roll-up, vortex-blob method, Krasny's δ-equations, Birkhoff–Rott equation, Moore's singularity]
+requires: [point-vortex-dynamics]
+related: [point-vortex-dynamics, cole-hopf-transformation, bifurcations-and-chaos, numerical-ode-solvers]
+references: [saffman1992, krasny1986, moore1979]
+status: draft
+updated: 2026-10-17
+---
+
+import { SheetRollUp } from './SheetRollUp'
+
+<Definition>
+The **Kelvin–Helmholtz instability** is the growth of waves on the interface between two layers of fluid that move
+at different velocities. For a sharp interface between fluids of equal density, with no gravity or surface tension,
+the interface is a **vortex sheet**, and a sinusoidal displacement of wavenumber $k$ grows exponentially at the rate
+$\sigma = k\,\Delta U/2$, where $\Delta U$ is the jump in velocity across the sheet <Cite id="saffman1992" />. The
+waves steepen and roll up into spirals of concentrated vorticity. Because $\sigma$ grows without bound with $k$, the
+sharp-sheet problem needs a regularisation, such as Krasny's vortex blobs, before it can be computed
+<Cite id="krasny1986" />.
+</Definition>
+
+## Intuition
+
+Wind blowing over a lake raises waves; a fast jet of smoke entering still air breaks into curls; rows of curling
+"billow clouds" form where a fast layer of air slides over a slow one. All three are the same instability of a shear
+layer, a thin region where the velocity changes from one value to another.
+
+The mechanism is easiest to see in the vortex-sheet picture. A shear layer carries vorticity: the velocity jumps across
+it, so the circulation around a short stretch of the layer is not zero. Model the layer as a row of point vortices, each
+carried by the flow of the others (<NoteLink to="point-vortex-dynamics">point vortex dynamics</NoteLink>). On a flat row
+every vortex is pushed equally from both sides and nothing moves. On a wavy row the balance breaks: the vortices drift
+along the sheet towards every other node, where the sheet crosses its mean line with one particular slope. Vorticity
+piles up at those nodes, the extra vorticity turns the sheet there more steeply, and the turning moves still more
+vortices towards the nodes. This positive feedback is the instability, and the piles of vorticity become the cores of
+the spirals.
+
+Short waves grow fastest. A wave of half the length has its nodes half as far apart, and the vortices reach them in
+half the time. In a real shear layer the waves shorter than the layer's thickness see a smooth velocity profile rather
+than a jump and stop growing. The sharp vortex sheet has no thickness, so nothing stops its shortest waves.
+
+## The linear growth rate
+
+Let the fluid above the interface move at velocity $U_1$ in the $x$ direction and the fluid below at $U_2$, both in
+metres per second, with $\Delta U = U_1 - U_2$. Both fluids have the same constant density, and gravity and surface
+tension are ignored. Displace the interface to $y = \eta(x, t) = \hat\eta\, e^{ikx + st}$ with a small amplitude
+$\hat\eta$, a wavenumber $k > 0$ (in inverse metres) and a complex rate $s$ (in inverse seconds).
+
+Away from the interface the flow stays irrotational, so each perturbation velocity is the gradient of a potential that
+satisfies Laplace's equation and decays away from the interface:
+$\phi_1 = \hat\phi_1\, e^{-ky}\, e^{ikx + st}$ above and $\phi_2 = \hat\phi_2\, e^{ky}\, e^{ikx + st}$ below. Two
+conditions at $y = 0$ couple them.
+
+1. **The interface moves with each fluid.** A fluid particle on the interface stays on it, so
+   $\partial_t\eta + U_j\, \partial_x\eta = \partial_y\phi_j$ on each side. This gives
+   $(s + ikU_1)\hat\eta = -k\hat\phi_1$ and $(s + ikU_2)\hat\eta = k\hat\phi_2$.
+2. **The pressure is continuous.** The linearised Bernoulli equation gives the pressure perturbation on each side as
+   $-\rho(\partial_t\phi_j + U_j\,\partial_x\phi_j)$, and equal pressures require
+   $(s + ikU_1)\hat\phi_1 = (s + ikU_2)\hat\phi_2$.
+
+Substituting $\hat\phi_1$ and $\hat\phi_2$ from the first condition into the second gives
+
+$$
+-\frac{(s + ikU_1)^2}{k}\,\hat\eta = \frac{(s + ikU_2)^2}{k}\,\hat\eta
+\quad\Longrightarrow\quad (s + ikU_1)^2 + (s + ikU_2)^2 = 0.
+$$
+
+Write $s = -ik\bar{U} + \sigma$ with the mean velocity $\bar{U} = (U_1 + U_2)/2$. Then
+$s + ikU_1 = \sigma + ik\Delta U/2$ and $s + ikU_2 = \sigma - ik\Delta U/2$, and the condition becomes
+$2\sigma^2 - 2(k\Delta U/2)^2 = 0$. Hence
+
+$$
+\sigma = \pm\frac{k\,\Delta U}{2}.
+$$
+
+The wave drifts with the mean velocity $\bar{U}$ and its amplitude grows as $e^{k\abs{\Delta U} t/2}$. Any velocity
+jump makes the interface unstable, and the rate is proportional to the wavenumber.
+
+## Why the sharp sheet needs regularising
+
+A rate proportional to $k$ makes the initial-value problem ill-posed: a disturbance of size $10^{-16}$ at wavenumber
+$k$ reaches size 1 after time $2\ln(10^{16})/(k\,\Delta U)$, which tends to zero as $k$ grows. Rounding errors in a
+computation contain every wavenumber the grid can represent, so the finer the discretisation, the sooner the computed
+sheet turns ragged. Even smooth initial data does not survive: Moore showed by asymptotic analysis that the curvature of
+a sinusoidally perturbed sheet becomes infinite at a finite time, before any roll-up <Cite id="moore1979" />.
+
+The vortex-blob method replaces each point vortex by a blob with a core of size set by a smoothing parameter $\delta$.
+Far from a blob the flow is that of a point vortex; near it the velocity stays bounded. Waves much longer than $\delta$
+grow almost at the sharp-sheet rate, and waves much shorter than $\delta$ barely grow, which is what a shear layer of
+thickness about $\delta$ does <Cite id="krasny1986" />.
+
+## Krasny's δ-equations
+
+Take a sheet that is periodic in $x$ with period 1 and carries circulation 1 per period, so that the velocity jumps by
+$\Delta U = 1$ across it: far above the sheet the fluid moves at $-\tfrac12$, far below at $+\tfrac12$. Label the
+points of the sheet by the Lagrangian parameter $\Gamma \in [0, 1)$, the circulation between the left end of the
+period and the point. Discretise by $N$ blobs at $\Gamma_j = j/N$, each of circulation $1/N$.
+
+A blob and all its periodic copies $x + n$, $n \in \integers$, form a row of vortices. Summing the point-vortex
+velocity $\frac{1}{2\pi i}\,\frac{\Gamma}{z - z_0}$ over the row with $\sum_n \frac{1}{z - n} = \pi\cot(\pi z)$ gives
+$u - iv = \frac{\Gamma}{2i}\cot\pi(z - z_0)$, whose real and imaginary parts contain
+$\cosh 2\pi\Delta y - \cos 2\pi\Delta x$ in the denominator. Krasny adds $\delta^2$ to that denominator
+<Cite id="krasny1986" />:
+
+$$
+\frac{\mathrm{d}x_j}{\mathrm{d}t} = -\frac{1}{2N}\sum_{k=1}^{N}
+\frac{\sinh 2\pi(y_j - y_k)}{\cosh 2\pi(y_j - y_k) - \cos 2\pi(x_j - x_k) + \delta^2},
+$$
+
+$$
+\frac{\mathrm{d}y_j}{\mathrm{d}t} = \frac{1}{2N}\sum_{k=1}^{N}
+\frac{\sin 2\pi(x_j - x_k)}{\cosh 2\pi(y_j - y_k) - \cos 2\pi(x_j - x_k) + \delta^2}.
+$$
+
+The term $k = j$ is zero, because its numerators vanish. Setting $\delta = 0$ gives Rosenhead's point-vortex sheet. As
+$N \to \infty$ at $\delta = 0$ the sum becomes the **Birkhoff–Rott equation** for the continuous sheet, $\partial_t \bar{z}(\Gamma, t) = \frac{1}{2\pi i}\,\mathrm{PV}\!\int_0^1 \pi\cot\pi\paren{z(\Gamma, t) - z(\Gamma', t)}\,
+\mathrm{d}\Gamma'$, where PV is the principal value of the integral. For two nearby blobs the denominator is about
+$2\pi^2 r^2 + \delta^2$ at separation $r$, so smoothing takes over below
+$r \approx \delta/(\pi\sqrt{2}) \approx 0.23\,\delta$. The initial sheet is $x = \Gamma + \varepsilon\sin 2\pi\Gamma$,
+$y = -\varepsilon\sin 2\pi\Gamma$ with $\varepsilon = 0.01$ <Cite id="krasny1986" />. That displacement is the growing
+mode of the linearised flat sheet, so the amplitude starts growing at once at the rate $\sigma = k\Delta U/2 = \pi$,
+with $k = 2\pi$.
+
+In Krasny's computations the spiral gains more turns as $\delta$ decreases, while its overall size stays the same
+<Cite id="krasny1986" />.
+
+<Derivation title="The growth rate of the discretised δ-sheet">
+Linearise about the flat sheet $x_j = \Gamma_j$, $y_j = 0$ with perturbations $\xi_j$ in $x$ and $\eta_j$ in $y$, both
+proportional to $e^{2\pi i m \Gamma_j}$ for a mode number $m$ (wavelength $1/m$). Write $\theta_k = 2\pi k/N$ and
+$D_k = 1 - \cos\theta_k + \delta^2$. To first order, $\sinh 2\pi\Delta y \approx 2\pi\Delta y$, and the change of the
+denominator multiplies an already small numerator in $\mathrm{d}x_j/\mathrm{d}t$. In $\mathrm{d}y_j/\mathrm{d}t$ both
+$\sin 2\pi\Delta x$ and the denominator change with $\Delta\xi$. Summing over the other blobs gives
+
+$$
+\frac{\mathrm{d}\xi}{\mathrm{d}t} = -\frac{\pi}{N}A\,\eta, \qquad \frac{\mathrm{d}\eta}{\mathrm{d}t} = \frac{\pi}{N}B\,\xi,
+$$
+
+$$
+A = \sum_{k=1}^{N-1}\frac{1 - \cos m\theta_k}{D_k}, \qquad
+B = \sum_{k=1}^{N-1}\frac{(1 - \cos m\theta_k)(\cos\theta_k\, D_k - \sin^2\theta_k)}{D_k^2}.
+$$
+
+Eliminating $\xi$ gives $\ddot\eta = -(\pi/N)^2 AB\,\eta$, so the growth rate is $\sigma = (\pi/N)\sqrt{-AB}$ when
+$AB < 0$. At $\delta = 0$ the second numerator simplifies to $-(1 - \cos\theta_k)$, so $B = -A$ and
+$\sigma = (\pi/N)A$; for $m = 1$ the sum is $A = N - 1$ and $\sigma = \pi(N - 1)/N$, which tends to the continuous
+sheet's $\pi$. The figure's readouts evaluate this formula.
+</Derivation>
+
+## Worked example
+
+**Physical units.** A layer of air moving at $10$ m/s over still air has $\Delta U = 10$ m/s. A wave of wavelength
+$100$ m has $k = 2\pi/100 = 0.0628$ m⁻¹ and grows at $\sigma = 0.0628 \times 10/2 = 0.314$ s⁻¹, so its amplitude
+multiplies by $e$ every $1/0.314 = 3.2$ s. A wave of wavelength $1$ m grows a hundred times faster, multiplying by $e$
+every $0.032$ s.
+
+**Krasny's units.** Period 1, $\Delta U = 1$ and $\varepsilon = 0.01$, the figure's defaults.
+
+1. The fundamental mode has $k = 2\pi$, so the sharp sheet grows at $\sigma = \pi \approx 3.14$. The amplitude reaches
+   $0.1$, ten times its start, at $t = \ln 10/\pi = 0.73$.
+2. With $N = 150$ blobs, neighbours sit $1/150$ apart, and their denominator without smoothing is
+   $1 - \cos(2\pi/150) = 0.00088$. With $\delta = 0.2$ it becomes $0.00088 + 0.04 = 0.04088$, about 47 times larger,
+   so the velocity one neighbour induces on the next drops by the same factor.
+3. The discrete formula of the derivation gives, for $N = 150$ and $\delta = 0.2$, $\sigma = 2.53$ for $m = 1$ against
+   $3.12$ for $\delta = 0$. The amplitude now reaches $0.1$ at $t = \ln 10/2.53 = 0.91$.
+4. The shortest wave the blobs can carry, $m = 75$, grows at $\sigma = 118$ with $\delta = 0$ and at $0.002$ with
+   $\delta = 0.2$. Among all modes the fastest with $\delta = 0.2$ is near $m = 5$, at $\sigma \approx 5.6$.
+5. A rounding error of $10^{-16}$ in mode 75 of the point-vortex sheet reaches $0.01$, the size of the deliberate
+   perturbation, after $\ln(10^{14})/118 = 0.27$ time units. That is when the figure's $\delta = 0$ sheet turns ragged.
+
+## The toy
+
+The figure integrates Krasny's δ-equations with the <Gloss name="rk4">classical fourth-order Runge–Kutta method</Gloss>.
+Each evaluation sums over all pairs of blobs once, using the oddness of the kernel. The trace is computed up front and
+played back.
+
+<SheetRollUp />
+
+Things to try:
+
+- Play the default run: the wave grows on the linear law until about $t = 0.8$, then steepens, and by $t = 1.5$ a
+  spiral has formed around $x = \tfrac12$. The amplitude then saturates near $0.25$.
+- Lower $\delta$ to $0.1$ or $0.05$: the spiral gains turns, and its core needs more blobs to stay smooth.
+- Set $\delta = 0$: the sheet turns ragged near $t = 0.3$, as step 5 predicts.
+- Raise $\varepsilon$ to $0.03$: the roll-up comes earlier by about $\ln 3/\sigma \approx 0.4$ time units.
+
+## Pitfalls
+
+- **The rate is a linear result.** $\sigma = k\Delta U/2$ holds while the amplitude is small compared with the
+  wavelength. The amplitude in the figure leaves the exponential near $0.1$, a tenth of the wavelength.
+- **Equal densities and no gravity.** Gravity stabilises a heavy fluid below a light one, and then waves longer than a
+  threshold set by the density difference and $\Delta U$ are stable. Surface tension stabilises short waves. Neither is
+  in the vortex-sheet model.
+- **δ is not viscosity.** The blob method smooths the induced velocity but conserves circulation exactly and has no
+  diffusion. It mimics a shear layer of finite thickness, not a viscous one.
+- **Fixed blobs run out.** The spiral's turns stretch the sheet exponentially, so the blobs in the core spread apart
+  and the drawn sheet becomes a polygon there. More blobs or a larger $\delta$ keep the core resolved.

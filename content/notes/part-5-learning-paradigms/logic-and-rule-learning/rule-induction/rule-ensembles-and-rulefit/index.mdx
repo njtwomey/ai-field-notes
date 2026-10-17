@@ -1,0 +1,205 @@
+---
+title: 'Rule ensembles and RuleFit'
+kind: technique
+summary: 'RuleFit turns every node of the trees in a boosted ensemble into a 0/1 rule feature, adds the inputs as linear terms and fits a lasso on them, so a few dozen rules and terms with nonzero weight replace hundreds of trees (Friedman and Popescu).'
+tags: [logic, rule-learning, ensembles, worked-example]
+aliases: ['RuleFit', 'rule ensemble', 'rule-based ensemble']
+requires: [gradient-boosting, lasso, rules-from-decision-trees]
+related:
+  [
+    rule-extraction-from-tree-ensembles,
+    decision-lists-and-rule-sets,
+    random-forest,
+    elastic-net,
+    intrinsically-interpretable-models,
+    generalised-additive-model,
+  ]
+references: [friedman2008rulefit, friedman2001, tibshirani1996, friedman2010, nalenz2018horseshoe, singh2021imodels]
+status: draft
+updated: 2026-10-17
+---
+
+import { RuleFitPath } from './RuleFitPath'
+
+<Definition>
+A **rule ensemble** is a model
+
+$$
+F(\xvec) = a_0 + \sum_{k=1}^{K} a_k r_k(\xvec) + \sum_{j=1}^{d} b_j\, l_j(x_j),
+$$
+
+in which each **rule** $r_k(\xvec) \in \{0, 1\}$ is a conjunction of conditions on single inputs, such as
+$\indicator[x_1 \le 0.71]\,\indicator[x_2 \le 0.52]$, and each $l_j$ is a clipped copy of input $x_j$.
+<Gloss name="rulefit" /> takes the rules from the nodes of a boosted tree ensemble and estimates the coefficients by the
+<NoteLink to="lasso">lasso</NoteLink>, which sets most of them to zero <Cite id="friedman2008rulefit" />.
+</Definition>
+
+## Problem
+
+A <NoteLink to="gradient-boosting">gradient-boosted</NoteLink> ensemble of a few hundred trees predicts well and cannot
+be read <Cite id="friedman2001" />. A single tree or a short <NoteLink to="decision-lists-and-rule-sets">rule
+list</NoteLink> can be read and often predicts worse. The ensemble's trees overlap heavily: many of them repeat a split
+near the root, and many of their leaves describe nearly the same region. Its prediction gives every tree the same weight
+after shrinkage, so the redundancy is never removed.
+
+RuleFit keeps the ensemble's pool of candidate regions and replaces the fixed weights by a sparse fit. It keeps from
+<NoteLink to="rules-from-decision-trees">rules from decision trees</NoteLink> the reading of a tree node as a
+conjunctive rule. It changes two things: every node becomes a rule, not only the leaves, and the rules are combined
+additively with fitted coefficients instead of in a list. The result is a sparse linear model on interpretable features,
+with an accuracy close to the ensemble it came from <Cite id="friedman2008rulefit" />.
+
+## Mechanism
+
+### Generating the rules
+
+The trees come from boosting on random subsamples. Tree $m$ is fitted to the pseudo-residuals of the current model on a
+subsample of $\eta < n$ rows drawn without replacement, and the model is updated with shrinkage $\nu$:
+$F_m = F_{m-1} + \nu f_m$. Friedman and Popescu found small shrinkage, $\nu \approx 0.01$, and small subsamples,
+$\eta \lesssim n/2$, to work best for generating rules <Cite id="friedman2008rulefit" />. They draw the number of
+leaves of each tree at random, $t_m = 2 + \lfloor \gamma \rfloor$ with $\gamma$ exponential of mean $\bar L - 2$, so the
+pool mixes short rules for main effects with longer rules for interactions.
+
+Every node of a tree except the root defines one rule: the product of the indicator functions on the path from the root
+to the node. A node reached by $x_{14} \le u$ and then $x_{32} \notin \{a, b, c\}$ gives
+$r(\xvec) = \indicator[x_{14} \le u]\,\indicator[x_{32} \notin \{a, b, c\}]$. A tree with $t_m$ leaves has
+$2(t_m - 1)$ non-root nodes, so the pool holds $K = \sum_m 2(t_m - 1)$ rules. Rules that cover exactly the same
+training rows are kept once.
+
+### Linear terms
+
+Trees approximate a linear effect by a staircase, which takes many rules. RuleFit therefore adds each input as a linear
+term, clipped at its $\beta$ and $1 - \beta$ quantiles to resist outliers, $l_j(x_j) = \min(\delta_j^+, \max(\delta_j^-,
+x_j))$ with $\beta \approx 0.025$. Each linear term is rescaled to standard deviation 0.4 before fitting. The constant
+0.4 is the average standard deviation $\sqrt{s(1 - s)}$ of a rule whose support $s$ is uniform on $(0, 1)$:
+$\int_0^1 \sqrt{s(1 - s)}\,ds = \pi/8 \approx 0.39$. A linear term then enters the penalty on the same footing as a
+typical rule.
+
+### Fitting the coefficients
+
+The coefficients solve the lasso
+
+$$
+\min_{a_0, \avec, \bvec} \frac{1}{2n}\sum_{i=1}^{n}\Big(y_i - a_0 - \sum_k a_k r_k(\xvec_i) - \sum_j b_j l_j(x_{ij})\Big)^2
++ \alpha\Big(\sum_k \abs{a_k} + \sum_j \abs{b_j}\Big),
+$$
+
+along a decreasing sequence of penalties $\alpha$, by <NoteLink to="regularisation-paths">pathwise coordinate
+descent</NoteLink> <Cite id="friedman2010" />. The $\ell_1$ penalty sets coefficients exactly to zero, which is what
+makes the model short <Cite id="tibshirani1996" />. The penalty is chosen by cross-validation or on held-out rows. Other
+losses work the same way: Friedman and Popescu use the Huber loss for
+<NoteLink to="robust-and-quantile-regression">robust regression</NoteLink> and a squared ramp loss for classification
+<Cite id="friedman2008rulefit" />.
+
+### Support decides which rules survive
+
+The rules enter the lasso unstandardised, on their 0/1 scale. That choice decides which rules the penalty removes
+first. Consider one rule $r$ of support $s$, the share of training rows where $r = 1$, fitted with a free intercept.
+Write $\Delta = \bar y_{\text{in}} - \bar y_{\text{out}}$ for the difference between the mean target where the rule
+holds and where it does not. The centred rule $r - s$ has variance $s(1 - s)$ and covariance with $y$
+
+$$
+z = \frac{1}{n}\sum_i (r_i - s)\, y_i = s(1 - s)\,\Delta.
+$$
+
+Minimising $\frac{1}{2n}\sum_i (y_i - a_0 - a r_i)^2 + \alpha \abs{a}$ over $a_0$ and $a$ gives the soft-thresholded
+least-squares coefficient
+
+$$
+\hat a = \frac{\operatorname{sign}(z)\,\max(\abs{z} - \alpha, 0)}{s(1 - s)}.
+$$
+
+The rule survives only when $s(1 - s)\abs{\Delta} > \alpha$. A rule that holds for few rows, or for almost all of them,
+needs a much larger effect $\Delta$ to enter than a rule that splits the data in half. Rules supported by a handful of
+rows are exactly those whose $\Delta$ is estimated worst, so the unstandardised penalty lowers the variance of the
+fitted model <Cite id="friedman2008rulefit" />. Standardising the rules would weaken the threshold to
+$\sqrt{s(1 - s)}\,\abs{\Delta} > \alpha$. On the full path the same quantity orders the start: the path begins at
+$\alpha_{\max} = \max_k \abs{z_k}$, below which the first rule enters.
+
+### Reading the model
+
+The **importance** of a rule is the absolute coefficient of its standardised version, $I_k = \abs{a_k}\sqrt{s_k(1 -
+s_k)}$, and of a linear term $I_j = \abs{b_j}\,\mathrm{sd}(l_j)$. Both measure how much the prediction varies because of
+the term across the training data. A local version, $\abs{a_k}\,\abs{r_k(\xvec) - s_k}$, gives the change in the
+prediction at one point if the rule were removed and the intercept adjusted. Ranking terms by importance gives the short
+list an analyst reads. The paper also derives <NoteLink to="random-forest">variable importances</NoteLink> and
+interaction statistics from the fitted terms <Cite id="friedman2008rulefit" />.
+
+## Worked example
+
+**Four rules by hand.** Take eight rows with $x = 1, 2, \dots, 8$ and $y = (1, 1, 1, 1, 5, 5, 5, 9)$, so $\bar y = 3.5$.
+Two stumps from a boosted ensemble split at $x = 4.5$ and $x = 7.5$, and their four non-root nodes give
+
+| rule | support $s$ | $\bar y_{\text{in}}$ | $\bar y_{\text{out}}$ | $\Delta$ | $z = s(1 - s)\Delta$ |
+| --- | --- | --- | --- | --- | --- |
+| $r_1 = \indicator[x \le 4.5]$ | 0.5 | 1 | 6 | $-5$ | $-1.25$ |
+| $r_2 = \indicator[x > 4.5]$ | 0.5 | 6 | 1 | 5 | 1.25 |
+| $r_3 = \indicator[x \le 7.5]$ | 0.875 | 2.71 | 9 | $-6.29$ | $-0.6875$ |
+| $r_4 = \indicator[x > 7.5]$ | 0.125 | 9 | 2.71 | 6.29 | 0.6875 |
+
+$r_1$ and $r_2$ are complements, so with a free intercept they carry the same information, and the lasso uses one of
+them; likewise $r_3$ and $r_4$.
+
+- **Where the path starts.** $\alpha_{\max} = \max_k \abs{z_k} = 1.25$. The half-and-half split enters first.
+- **The support effect.** The rule $r_4$, which isolates the single row with $y = 9$, has the larger effect, $6.29$
+  against $5$. Its support $1/8$ shrinks $s(1 - s)$ to $0.109$ against $0.25$, so $\abs{z_4} = 0.69$ against
+  $\abs{z_1} = 1.25$.
+- **One penalty.** At $\alpha = 0.7$, $r_1$ alone would get $\hat a_1 = -(1.25 - 0.7)/0.25 = -2.2$, less than half
+  its least-squares value $-5$. $r_4$ alone would get $\hat a_4 = 0$, since $0.69 < 0.7$.
+
+**A linear term.** An input uniform on $[0, 1]$ has standard deviation $1/\sqrt{12} = 0.289$. RuleFit multiplies it by
+$0.4/0.289 = 1.39$ before fitting, and divides the fitted coefficient by the same factor to report it on the input's
+scale.
+
+**Friedman's benchmark.** The figure fits RuleFit to 400 rows of Friedman's first benchmark, ten uniform inputs and
+$y = 10\sin(\pi x_1 x_2) + 20(x_3 - \tfrac12)^2 + 10 x_4 + 5 x_5 + \varepsilon$ with noise variance 1; inputs $x_6$ to
+$x_{10}$ do not affect $y$. Fifty boosted trees with four leaves each give 300 rules, 287 after merging rules with equal
+coverage. Along the lasso path, the held-out <Gloss name="mse">mean squared error</Gloss> falls from 24.1, the error of
+predicting the training mean, to a minimum of 3.43 with 83 terms, 78 rules and 5 linear terms. The boosted ensemble that
+supplied the rules has held-out error 5.60, and the best lasso on the ten linear terms alone 7.11. The most important
+term is the linear term in $x_4$, matching the $10 x_4$ of the formula; the next is $x_1 \le 0.71 \wedge x_2 \le 0.52$,
+a corner of the $\sin(\pi x_1 x_2)$ interaction where the target is low. With 52 terms the held-out error is 4.39, still
+below the ensemble's.
+
+<RuleFitPath />
+
+## Cost
+
+Generating the rules costs the boosting run: $M$ trees, each fitted on $\eta$ rows. Building the design matrix costs
+$O(nK)$ for $K$ rules on $n$ rows. Each sweep of <NoteLink to="coordinate-descent">coordinate descent</NoteLink> costs
+$O(nK)$ or less with sparse columns, and a path of a few dozen penalties with warm starts takes a modest multiple of one
+fit <Cite id="friedman2010" />. In the paper's simulations, 500 trees with six leaves gave $K = 5000$ rules, of which
+typically about 10% had nonzero coefficients in the final model <Cite id="friedman2008rulefit" />. Prediction needs only
+the nonzero terms.
+
+## Trade-offs
+
+- **Against the ensemble.** On 100 simulated regression and classification problems, RuleFit with rules from 500 trees
+  was on average slightly more accurate than the boosted and post-processed tree ensembles it was compared with
+  <Cite id="friedman2008rulefit" />. The model has tens of terms instead of hundreds of trees.
+- **Against rule lists.** A rule list explains a prediction by one rule. RuleFit sums every rule that holds, with
+  coefficients that are adjustments given the other terms, so a prediction can involve dozens of overlapping rules. It
+  is a sparse additive model on rule features, closer to a <NoteLink to="generalised-additive-model">generalised
+  additive model</NoteLink> than to a decision list.
+- **Rules and linear terms.** Linear terms help most when many inputs act nearly linearly; when the target is strongly
+  nonlinear, the rules carry the fit and the linear terms add little <Cite id="friedman2008rulefit" />.
+- **Choice of penalty.** The lasso picks one of several correlated rules more or less arbitrarily. Bayesian shrinkage
+  with a <NoteLink to="sparse-bayesian-priors">horseshoe prior</NoteLink> that also favours short, well-supported rules
+  keeps the rule structure in the prior instead <Cite id="nalenz2018horseshoe" />. The package imodels implements
+  RuleFit beside other rule learners behind one interface <Cite id="singh2021imodels" />.
+- **Relation to rule extraction.** RuleFit refits a model on the rules. <NoteLink
+  to="rule-extraction-from-tree-ensembles">Rule extraction from tree ensembles</NoteLink> instead selects rules that
+  imitate the ensemble.
+
+## Pitfalls
+
+- **Reading coefficients as effects.** A rule's coefficient is its contribution given every other term, and
+  complementary or nested rules share credit. Read importances and the rules' own definitions together.
+- **Arbitrary choice among near-duplicates.** Two rules covering almost the same rows can swap in and out of the model
+  between bootstrap samples. Check stability before reporting individual rules.
+- **Noise terms at the best penalty.** The penalty with the smallest held-out error keeps some terms with tiny effects;
+  in the figure, linear terms in the noise inputs $x_8$ and $x_9$ enter with small coefficients. A slightly larger
+  penalty gives a shorter model at little cost.
+- **Too many terms to read.** Dozens of rules are fewer than hundreds of trees but still a lot. Report the top terms by
+  importance and the error of the truncated model.
+- **Clipped linear terms.** Winsorising flattens the linear terms beyond the training quantiles, so predictions do not
+  extrapolate a linear trend beyond them.

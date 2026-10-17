@@ -1,0 +1,202 @@
+---
+title: 'Heterogeneous graph networks'
+kind: concept
+summary: 'In a heterogeneous graph nodes and edges have types. R-GCN uses one weight matrix per relation, shared through a few basis matrices; HAN attends over meta-paths and HGT uses type-specific attention projections.'
+tags: [graph-neural-networks, deep-learning, worked-example]
+aliases: ['relational graph convolutional network', 'R-GCN', 'HAN', 'heterogeneous graph transformer', 'HGT', 'meta-path']
+requires: [message-passing-neural-network, heterogeneous-and-temporal-graphs]
+related:
+  [
+    knowledge-graph-embeddings,
+    knowledge-graph-data,
+    graph-attention-network,
+    gated-and-edge-conditioned-message-passing,
+    temporal-graph-networks,
+    hypergraph-neural-networks,
+  ]
+references: [schlichtkrull2018rgcn, wang2019han, hu2020hgt, lv2021hgb, fey2024]
+status: draft
+updated: 2026-10-17
+---
+
+import { RelationalMessages } from './RelationalMessages'
+
+<Definition>
+A heterogeneous graph has a node-type map $\tau : \Vcal \to \Tcal_V$ and an edge-type map $\phi : \Ecal \to \Rcal$, with
+more than one type in total. A heterogeneous graph network is a <Gloss name="gnn">message passing</Gloss> network whose
+message, attention or update functions depend on these types. The relational graph convolutional network (R-GCN) gives
+each relation $r \in \Rcal$ its own weight matrix. HAN aggregates along typed paths called meta-paths. The heterogeneous
+<NoteLink to="graph-transformer">graph transformer</NoteLink> (HGT) attends with projections chosen by the types of the
+two endpoints and of the edge.
+</Definition>
+
+## Intuition
+
+A bibliographic graph has authors, papers and venues. A paper is written by authors, cites papers and appears in a
+venue. A <NoteLink to="message-passing-neural-network">message passing</NoteLink> layer that ignores the types applies
+one weight matrix to every neighbour. It must then turn an author's vector, a cited paper's vector and a venue's vector
+into messages with the same map, and it averages all of them together. The three kinds of neighbour carry different
+information, and their vectors may not even live in the same space: an author can be described by a publication
+record, a venue by a topic distribution.
+
+A heterogeneous network keeps one function per type. The simplest version groups a node's neighbours by relation,
+transforms each group with that relation's weights, and adds the groups. Relations then contribute separately, and a
+relation with many edges does not drown one with few. The <NoteLink to="heterogeneous-and-temporal-graphs">heterogeneous
+and temporal graphs</NoteLink> note describes the data: type maps, schemas and meta-paths.
+
+## Details
+
+### Relational graph convolution
+
+Write $\Ncal_i^r$ for the neighbours of node $i$ under relation $r$ and $\hvec_j^{(l)} \in \reals^{d_l}$ for node $j$'s
+vector at layer $l$. The R-GCN layer is
+
+$$
+\hvec_i^{(l+1)} = \sigma\paren{\Wmat_0^{(l)} \hvec_i^{(l)} + \sum_{r \in \Rcal} \sum_{j \in \Ncal_i^r}
+\frac{1}{c_{i,r}} \Wmat_r^{(l)} \hvec_j^{(l)}},
+$$
+
+with one weight matrix $\Wmat_r^{(l)} \in \reals^{d_{l+1} \times d_l}$ per relation, a self-connection $\Wmat_0^{(l)}$,
+an elementwise nonlinearity $\sigma$ and a normalising constant $c_{i,r}$ <Cite id="schlichtkrull2018rgcn" />. The
+paper's entity classification uses $c_{i,r} = \abs{\Ncal_i^r}$, a mean per relation. Its
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink> found
+$c_{i,r} = \sum_r \abs{\Ncal_i^r}$, one mean across all relations, to work best <Cite id="schlichtkrull2018rgcn" />. The
+relation set holds every relation in both directions ("cites" and "cited by"), so information flows both ways along an
+edge.
+
+The layer is a message passing layer whose message is $\Wmat_{\phi(j,i)} \hvec_j$: the edge type picks the weight
+matrix. With one relation and $c_{i,r}$ the degree, it reduces to a mean-aggregation
+<NoteLink to="graph-convolutional-network">graph convolution</NoteLink> with a separate self weight.
+
+### Basis and block-diagonal decomposition
+
+A knowledge graph can have hundreds of relations, and $\abs{\Rcal}$ full weight matrices overfit the rare ones. The
+**basis decomposition** writes every relation's weight as a combination of $B$ shared bases,
+
+$$
+\Wmat_r^{(l)} = \sum_{b=1}^{B} a_{rb}^{(l)} \Vmat_b^{(l)},
+$$
+
+so only the $B$ coefficients $a_{rb}$ are specific to relation $r$ <Cite id="schlichtkrull2018rgcn" />. A rare relation
+then shares most of its parameters with frequent ones. The **block-diagonal decomposition** instead makes each
+$\Wmat_r$ block-diagonal, with $B$ blocks of size $(d_{l+1}/B) \times (d_l/B)$, which is a sparsity constraint
+rather than sharing <Cite id="schlichtkrull2018rgcn" />.
+
+### Meta-paths and the heterogeneous graph attention network
+
+A **meta-path** is a sequence of node and relation types, such as author–paper–author (APA, co-authorship) or
+author–paper–venue–paper–author (APVPA, same venue). Two nodes are meta-path neighbours if a path of that type joins
+them. The meta-path adjacency is the product of the relation adjacencies along it, $\Amat_{\text{APA}} =
+\Amat_{\text{AP}}\Amat_{\text{AP}}^{\tr}$, whose $(i, j)$ entry counts the paths.
+
+HAN works in two levels <Cite id="wang2019han" />. First, a type-specific matrix projects every node's features into a
+shared space, $\hvec'_i = \Mmat_{\tau(i)} \xvec_i$. **Node-level attention** then runs a
+<NoteLink to="graph-attention-network">graph attention</NoteLink> layer on each meta-path's neighbour graph $\Phi$:
+
+$$
+\alpha_{ij}^{\Phi} = \mathrm{softmax}_{j \in \Ncal_i^{\Phi}}\paren{\sigma\paren{\avec_\Phi^{\tr}[\hvec'_i \Vert \hvec'_j]}},
+\qquad \zvec_i^{\Phi} = \sigma\paren{\sum_{j \in \Ncal_i^{\Phi}} \alpha_{ij}^{\Phi} \hvec'_j},
+$$
+
+with one attention vector $\avec_\Phi$ per meta-path. **Semantic-level attention** weighs the meta-paths. It scores each
+by $w_\Phi = \frac{1}{\abs{\Vcal}} \sum_i \qvec^{\tr}\tanh(\Wmat \zvec_i^{\Phi} + \bvec)$, takes
+$\beta_\Phi = \mathrm{softmax}_\Phi(w_\Phi)$, and outputs $\zvec_i = \sum_\Phi \beta_\Phi \zvec_i^{\Phi}$
+<Cite id="wang2019han" />. The meta-paths are chosen by hand, which needs knowledge of the schema.
+
+### Heterogeneous graph transformer
+
+HGT drops hand-chosen meta-paths and parameterises attention by the **meta-relation**
+$\langle \tau(s), \phi(e), \tau(t) \rangle$ of each edge $e$ from source $s$ to target $t$ <Cite id="hu2020hgt" />. For
+<NoteLink to="multi-head-attention">attention head</NoteLink> $i$, the key is
+$\mathrm{K}^i(s) = \text{K-Linear}^i_{\tau(s)}(\hvec_s)$ and the query
+$\mathrm{Q}^i(t) = \text{Q-Linear}^i_{\tau(t)}(\hvec_t)$, each a linear map chosen by node type. The score is
+
+$$
+\text{ATT-head}^i(s, e, t) = \paren{\mathrm{K}^i(s)\, \Wmat^{\text{ATT}}_{\phi(e)}\, \mathrm{Q}^i(t)^{\tr}}
+\cdot \frac{\mu_{\langle \tau(s), \phi(e), \tau(t) \rangle}}{\sqrt d},
+$$
+
+with a matrix $\Wmat^{\text{ATT}}_{\phi(e)}$ per edge type and a learned prior $\mu$ per meta-relation, followed by a
+softmax over the target's neighbours <Cite id="hu2020hgt" />. Messages are built the same way with type-specific value
+projections. Node types and edge types are parameterised separately, so the number of weight matrices grows with
+$\abs{\Tcal_V} + \abs{\Rcal}$; only the scalar prior $\mu$ is kept per meta-relation. HGT was trained on the Open
+Academic Graph of 179 million nodes and 2 billion edges, with a type-aware minibatch sampler <Cite id="hu2020hgt" />.
+
+### Practice
+
+Current libraries build heterogeneous layers by wrapping a homogeneous layer once per edge type and summing the outputs
+at each destination, which is the R-GCN pattern with any message function. Type-specific input projections map
+features of different widths to one hidden width first. The same machinery applies to relational databases, with
+tables as node types and foreign keys as relations <Cite id="fey2024" />. Strong baselines matter: a benchmark of
+heterogeneous models found that a homogeneous graph attention network given proper inputs matched or beat most
+specialised heterogeneous models <Cite id="lv2021hgb" />. For link prediction on knowledge graphs, an R-GCN encoder is
+paired with a triple-scoring decoder such as DistMult <Cite id="schlichtkrull2018rgcn" />. The
+<NoteLink to="knowledge-graph-embeddings">knowledge graph embeddings</NoteLink> note covers those decoders.
+
+## Worked example
+
+Paper P1 has feature vector $(1, 0)$. It is written by two authors with vectors $(0, 1)$ and $(1, 1)$, cites two papers
+with vectors $(2, 0)$ and $(0, 2)$, and appears in one venue with vector $(1, -1)$. Take $\Wmat_0 = \I$ and
+
+$$
+\Wmat_{\text{written by}} = \begin{pmatrix} 0 & 1 \\ 1 & 0 \end{pmatrix}, \quad
+\Wmat_{\text{cites}} = \begin{pmatrix} 0.5 & 0 \\ 0 & 0.5 \end{pmatrix}, \quad
+\Wmat_{\text{published in}} = \begin{pmatrix} 1 & 0 \\ 0 & 0 \end{pmatrix},
+$$
+
+which swap the two features, halve them, and keep the first, respectively. Use $c_{i,r} = \abs{\Ncal_i^r}$.
+
+1. **Written by.** The authors' mean is $(0.5, 1)$; the swap gives $(1, 0.5)$.
+2. **Cites.** The cited papers' mean is $(1, 1)$; halving gives $(0.5, 0.5)$.
+3. **Published in.** The single venue gives $(1, -1)$; keeping the first feature gives $(1, 0)$.
+4. **Self.** $\Wmat_0 (1, 0) = (1, 0)$.
+5. **Sum.** $(1 + 0.5 + 1 + 1,\; 0.5 + 0.5 + 0 + 0) = (3.5, 1)$, unchanged by a <Gloss name="relu" />.
+
+**Normalising across relations.** With $c_{i,r} = 5$ for every relation, the relation sums $(2, 1)$, $(1, 1)$ and
+$(1, 0)$ are each divided by 5. The result is $(1, 0) + (0.8, 0.4) = (1.8, 0.4)$. The venue's single edge now counts a
+fifth as much as before, and the written-by and cites relations count in proportion to their number of edges.
+
+**One shared weight.** A homogeneous layer with the identity weight averages all five neighbours to $(0.8, 0.6)$ and
+adds the self term, giving $(1.8, 0.6)$. The venue's $-1$ cancels part of the others' second feature. No single weight
+matrix can treat the venue differently from the authors, because they are averaged before the weight is applied.
+
+**Parameter count.** A knowledge graph with $\abs{\Rcal} = 100$ relations and hidden width $d = 64$ needs
+$100 \cdot 64^2 = 409{,}600$ weights per layer for the relation matrices. With $B = 10$ bases it needs
+$10 \cdot 64^2 + 100 \cdot 10 = 41{,}960$, about a tenth.
+
+**Meta-path adjacency.** Three authors and two papers: P1 by A1 and A2, P2 by A2 and A3. Then
+
+$$
+\Amat_{\text{AP}} = \begin{pmatrix} 1 & 0 \\ 1 & 1 \\ 0 & 1 \end{pmatrix}, \qquad
+\Amat_{\text{APA}} = \Amat_{\text{AP}}\Amat_{\text{AP}}^{\tr} =
+\begin{pmatrix} 1 & 1 & 0 \\ 1 & 2 & 1 \\ 0 & 1 & 1 \end{pmatrix}.
+$$
+
+The diagonal counts each author's papers. The off-diagonal entries count shared papers: A1 and A3 share none, so they
+are not APA neighbours, although both are two hops from A2.
+
+The figure runs the same layer on a graph of 20 nodes. P1 is the worked example.
+
+<RelationalMessages />
+
+## Assumptions
+
+- **Types carry information.** The gain over a homogeneous model comes from treating relations differently. If the
+  types are arbitrary, separate weights only divide the data.
+- **The schema is fixed and known.** R-GCN and HGT need the relation set in advance; a relation that first appears at
+  test time has no weights. HAN also needs meta-paths chosen by hand.
+- **Enough edges per relation.** A relation with a handful of edges cannot train a full weight matrix; the basis
+  decomposition and HGT's factorisation by node and edge type exist for this case.
+
+## Pitfalls
+
+- **Weak baselines.** Reported gains of specialised heterogeneous models over a well-tuned homogeneous attention
+  network often vanish on a common benchmark <Cite id="lv2021hgb" />. Compare against one.
+- **Inverse-relation leakage.** In link prediction on knowledge graphs, a test triple $(h, r, t)$ can be predicted from
+  its inverse $(t, r^{-1}, h)$ in the training set. The FB15k-237 split removes such pairs for this reason
+  <Cite id="schlichtkrull2018rgcn" />.
+- **Meta-path explosion.** The number of candidate meta-paths grows exponentially with their length, and products of
+  adjacency matrices along long meta-paths become dense.
+- **Unbalanced relations.** With normalisation across relations, a relation with thousands of edges per node
+  dominates one with a single edge, as the worked example shows on a small scale. Per-relation normalisation, or
+  attention over relations, keeps each relation's contribution separate.

@@ -1,0 +1,169 @@
+---
+title: 'Deep sets and permutation-invariant networks'
+kind: concept
+summary: 'A continuous permutation-invariant function of a set can be written $f(X)=\rho(\sum_{x\in X}\phi(x))$, with networks $\phi$ and $\rho$. Sum, mean and max pooling differ in what they can represent and in how outputs change with set size; set transformers pool by attention.'
+tags: [geometric-deep-learning, deep-learning, worked-example]
+aliases: ['Deep Sets', 'DeepSets', 'permutation invariance', 'set function', 'set transformer']
+requires: [symmetry-and-equivariance, multilayer-perceptron]
+related:
+  [
+    point-cloud-networks,
+    graph-pooling-and-readout,
+    multiple-instance-learning,
+    message-passing-neural-network,
+    graphs-as-neural-network-inputs,
+    transformer,
+  ]
+references: [zaheer2017, wagstaff2019, qi2017pointnet, lee2019settransformer, bronstein2021, ilse2018]
+status: draft
+updated: 2026-10-17
+---
+
+import { SetPoolingRun } from './SetPoolingRun'
+
+<Definition>
+A set function takes a finite set $X = \set{\xvec_1, \dots, \xvec_n}$ of elements $\xvec_i \in \reals^d$, of any size
+$n$, and must not depend on the order in which the elements are listed. A Deep Sets network computes
+
+$$
+f(X) = \rho\paren{\textstyle\sum_{i=1}^{n} \phi(\xvec_i)},
+$$
+
+where $\phi : \reals^d \to \reals^m$ encodes each element, the sum pools the codes into one vector of $m$ numbers, and
+$\rho : \reals^m \to \reals^c$ decodes it. Both $\phi$ and $\rho$ are <Gloss name="mlp" />s <Cite id="zaheer2017" />.
+Replacing the sum by a mean or an elementwise maximum gives the other common set networks.
+</Definition>
+
+## Intuition
+
+Many inputs are sets rather than sequences: the points of a <NoteLink to="point-cloud-networks">point cloud</NoteLink>,
+the patches of a slide in <NoteLink to="multiple-instance-learning">multiple-instance learning</NoteLink>, the particles
+in a collision, the members of a group, the nodes of a graph at readout time. Stored in an array, a set gets an
+arbitrary order. An MLP on the concatenated elements would treat the $n!$ orderings of the same set as $n!$ different
+inputs, and it needs a fixed $n$.
+
+Deep Sets removes the order in one step. Each element is processed alone, by the same network $\phi$, so no element
+knows its index. The codes are then added. Addition does not care about order, so the sum and everything computed from
+it is permutation invariant. The same network accepts sets of any size, because $\phi$ runs once per element and the sum
+always has $m$ entries.
+
+The design is the set case of the recipe in <NoteLink to="symmetry-and-equivariance" />: equivariant layers (here,
+$\phi$ applied per element) followed by an invariant pooling and a decoder.
+
+## The sum decomposition
+
+The form $\rho(\sum \phi)$ is invariant by construction. The surprise is that it loses almost nothing. Zaheer et al.
+proved that every permutation-invariant function of finite subsets of a countable universe, such as sets of integers or
+tokens, can be written as $\rho(\sum_{x \in X} \phi(x))$ for some $\phi$ and $\rho$ <Cite id="zaheer2017" />. The proof
+encodes each element as a distinct power of a small base, so that the sum spells out which elements are present, and
+lets $\rho$ read the set back from the sum.
+
+For real-valued elements and sets of at most $N$ elements, the power sums give a continuous construction. Let
+$\phi(x) = (1, x, x^2, \dots, x^N)$ for scalar $x$. The first pooled entry is the set size $n$, and the power sums
+$\sum_i x_i^k$, $k = 1, \dots, n$, determine the multiset $\set{x_1, \dots, x_n}$: Newton's identities recover the
+coefficients of the polynomial $\prod_i (t - x_i)$, whose roots are the elements. Any invariant $f$ is therefore a
+function $\rho$ of the pooled vector, with latent width $m = N + 1$.
+
+The width matters. Wagstaff et al. showed that with continuous $\phi$ and $\rho$, as neural networks are, a latent width
+smaller than the largest set size cannot represent every continuous set function <Cite id="wagstaff2019" />. The
+countable construction escapes the bound only through wildly discontinuous maps that a network cannot learn. In
+practice $m$ is set to a few hundred or a thousand, well above the sizes the task needs to resolve.
+
+## Sum, mean and max
+
+The pooling is the one design choice the decomposition leaves open, and it fixes what the network can see.
+
+- **Sum** keeps the count. With $\phi(x) = 1$ as one of its features, the sum contains $n$. It can represent counts,
+  totals and anything that grows with the set. Its outputs grow with $n$ too, so sets much larger than those seen in
+  training push $\rho$'s input outside its training range.
+- **Mean** divides the sum by $n$. It sees the empirical distribution of the elements and nothing else: a set and the
+  same set with every element duplicated give the same mean. It cannot count, and its input to $\rho$ stays in range
+  for any $n$, so averages such as a variance extrapolate to large sets.
+- **Max** takes the largest value of each of the $m$ features over the set. It ignores multiplicity and depends on at
+  most $m$ elements, the winners of each feature. It is robust to adding or removing elements that win nothing, which
+  makes it the default for point clouds: PointNet's comparison on ModelNet40 gave 87.1% accuracy for
+  <NoteLink to="pooling-and-strides">max pooling</NoteLink>, 83.8% for mean pooling and 83.0% for attention-weighted
+  sums <Cite id="qi2017pointnet" />.
+
+The figure below trains one network three times, once per pooling, and tests it on sets up to three times larger than
+any training set.
+
+<SetPoolingRun />
+
+At the defaults, sum pooling learns the sum with a test error of about 0.09 on sets of 30 numbers, and mean and max
+pooling miss by more than 10. Max pooling learns the maximum to within 0.01 at every size, and sum pooling's error grows
+to about 0.7 at size 30. For the variance, mean pooling stays within 0.005 from size 5 to 30 and sum pooling misses by
+about 0.04 at size 30, nearly half the typical variance of 1/12. The variance of 30 uniform draws is close to 1/12 for
+every set, so beyond the training sizes even max pooling, which cannot compute a variance, does better than sum pooling
+by predicting a near-constant value.
+
+## Interaction between elements
+
+$\rho(\sum \phi)$ processes each element without seeing the others before pooling. Functions of pairs, such as "the
+largest distance between two points", need a latent space large enough to encode the whole set first. Two extensions
+let elements interact before the pool while keeping permutation equivariance.
+
+**Equivariant layers.** The linear maps on $n$ elements that commute with every permutation are
+$\Hmat \mapsto \Hmat\Lambdab + \ones\ones^\tr\Hmat\Gammab$, for a set stored as the rows of
+$\Hmat \in \reals^{n \times m}$ and weight matrices $\Lambdab, \Gammab \in \reals^{m \times m}$: each element is updated
+from itself and from the sum over the set <Cite id="zaheer2017" />. The derivation in
+<NoteLink to="symmetry-and-equivariance" /> gives the scalar case. Stacking such layers with pointwise nonlinearities
+before the pool lets every element see a summary of the others.
+
+**Attention.** Self-attention without <NoteLink to="positional-encoding">positional encodings</NoteLink> is permutation
+equivariant: permuting the queries, keys and values permutes the outputs. The Set Transformer stacks self-attention
+blocks over the elements and pools with attention from a few learned seed vectors, which can weight elements by
+relevance. For large sets it attends through $k$ learned inducing points, cutting the cost from $O(n^2)$ to $O(nk)$
+<Cite id="lee2019settransformer" />. A <NoteLink to="transformer" /> encoder with <Gloss name="nope">no positional
+encoding</Gloss> is a set model, and attention-based pooling is the standard readout in multiple-instance learning
+<Cite id="ilse2018" />.
+
+<Gloss name="gnn">Message passing</Gloss> on a graph is the same construction with neighbourhoods: each node pools its
+neighbours' messages with a permutation-invariant aggregator, and a final pooling over all nodes is a Deep Sets readout;
+see <NoteLink to="graph-pooling-and-readout" />.
+
+## Worked example
+
+Take the set $X = \set{1, 2, 6}$ and the target $\operatorname{Var}(X) = \frac{1}{n}\sum_i (x_i - \bar x)^2$. The mean
+is $\bar x = 3$, the deviations are $-2, -1, 3$, and the variance is $(4 + 1 + 9)/3 = 14/3 \approx 4.667$.
+
+**Sum pooling.** Let $\phi(x) = (1, x, x^2)$. The pooled vector is
+$\sum_i \phi(x_i) = (1 + 1 + 1,\ 1 + 2 + 6,\ 1 + 4 + 36) = (3, 9, 41) = (n, \sum x, \sum x^2)$. The decoder
+$\rho(a, b, c) = c/a - (b/a)^2$ gives $41/3 - 3^2 = 13.667 - 9 = 4.667$. The decoder must divide by $a = n$, a ratio of
+two inputs that grow with the set.
+
+**Mean pooling.** The pooled vector is $(1, 3, 13.667)$, and $\rho(b, c) = c - b^2$ gives $13.667 - 9 = 4.667$. The
+decoder needs no division, and its inputs stay bounded whatever the set size. This is why mean pooling extrapolates for
+the variance in the figure.
+
+**Max pooling.** The pooled vector is $(1, 6, 36)$, the largest value of each feature. The sets $\set{1, 2, 6}$ and
+$\set{6}$ give the same vector, but their variances are $4.667$ and $0$. No decoder can recover the variance.
+
+**Mean pooling cannot count.** The sets $\set{3}$ and $\set{3, 3}$, read as multisets, both give the mean vector
+$(1, 3, 9)$. Their sums, 3 and 6, differ, so no decoder of the mean computes the sum.
+
+**Order.** Listing the set as $(6, 1, 2)$ changes nothing: each $\phi(x_i)$ is the same, and the three poolings add,
+average or maximise the same three vectors.
+
+## Assumptions
+
+- **The input is a set.** If order carries information, as in a sentence or a <NoteLink to="time-series">time
+  series</NoteLink>, it must be supplied as a feature or the order will be lost.
+- **Elements are exchangeable.** Every element is processed by the same $\phi$. Elements of different types need a type
+  feature or separate encoders.
+- **Pooling matches the target.** Counts and totals need the sum; averages and distributions suit the mean; extremes and
+  shape outlines suit the maximum. The wrong pooling caps accuracy whatever the network's size.
+
+## Pitfalls
+
+- **Extrapolating in set size.** A sum-pooled model sees inputs to $\rho$ that grow with $n$; at sizes beyond training
+  it is evaluated outside its training range. Train on the range of sizes expected at test time, or normalise.
+- **Too small a latent width.** The pooled vector must hold everything $\rho$ needs about the set. A width smaller than
+  the set sizes the task must resolve cannot represent general set functions with continuous maps
+  <Cite id="wagstaff2019" />.
+- **Padding leaks into the pool.** Batches pad sets to a common length. A sum or mean must mask the padding, and a
+  maximum must ignore it even when every real value is negative.
+- **Max pooling passes gradient to the winners only.** Each feature's gradient reaches one element per set, so most
+  elements get no signal in a given step.
+- **No pairwise structure.** Plain $\rho(\sum \phi)$ cannot cheaply express relations between elements; add equivariant
+  layers or attention before the pool.

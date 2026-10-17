@@ -1,0 +1,86 @@
+---
+title: 'Linear recurrent models'
+kind: overview
+summary: 'Sequence layers whose state update $h_t=a_t\odot h_{t-1}+b_t$ is linear in $h$, so training runs as a parallel scan and inference as a constant-memory recurrence: RWKV and retention, gated linear recurrences, xLSTM, and delta-rule and test-time-training layers.'
+tags: [sequence-models, long-context, overview]
+aliases: []
+requires: [recurrent-neural-network, linear-attention]
+related:
+  [
+    efficient-and-state-space-sequence-models,
+    structured-and-selective-state-space-models,
+    sparse-linear-and-low-rank-attention,
+    comparing-and-combining-sequence-models,
+  ]
+references: [martin2018, katharopoulos2020, yang2024gla]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+A **linear recurrent model** is a sequence layer whose state $\hvec_t$, a vector or a matrix, is updated by a map that
+is linear in the previous state, $\hvec_t = \Amat_t\hvec_{t-1} + \bvec_t$, with $\Amat_t$ and $\bvec_t$ computed from
+the current token alone. Nonlinearities sit between layers, not inside the recurrence. The linearity lets the whole
+sequence be processed in parallel during training, while generation keeps a state of fixed size, like a
+<NoteLink to="recurrent-neural-network">recurrent network</NoteLink>.
+</Definition>
+
+## What it is for
+
+<NoteLink to="scaled-dot-product-attention">Softmax attention</NoteLink> keeps every past key and value, so generating
+token $t$ costs time and memory that grow with $t$. Classical <NoteLink to="recurrent-networks">recurrent
+networks</NoteLink> keep a fixed state but train one token at a time, because each step's gates read the previous state.
+Linear recurrent models sit between the two. They are trained like transformers, in parallel over thousands of tokens,
+and they generate like recurrent networks, with a <NoteLink to="key-value-cache">cache</NoteLink> that does not grow.
+They are used as whole <Gloss name="language-model">language models</Gloss> (RWKV, xLSTM, Hawk) and as most of the
+layers of hybrid models, such as Griffin and Qwen3-Next, that keep a few attention layers for exact recall.
+
+## Main ideas
+
+**Linearity buys parallelism.** A step $\hvec \mapsto \Amat_t\hvec + \bvec_t$ is an affine map, and compositions of
+affine maps are affine. A <NoteLink to="parallel-scan">parallel scan</NoteLink> composes them in $O(\log T)$ depth
+<Cite id="martin2018" />. When the transition $\Amat_t$ is diagonal or a scalar, each composition is as cheap as one
+step. When the scan is not the fastest route, chunked algorithms use matrix products within chunks and the recurrence
+between them.
+
+**Linear attention is a linear recurrence.** Causal <NoteLink to="linear-attention">linear attention</NoteLink> stores
+the sum of outer products $\kvec_t\vvec_t^\tr$ in a matrix state and reads it with a query
+<Cite id="katharopoulos2020" />. Every layer in this chapter with a matrix state is a variant of it, and each has a
+parallel form, a masked attention-like product, beside its recurrent form.
+
+**Decay, fixed then chosen by the token.** Without decay the state never forgets.
+<NoteLink to="rwkv-and-retentive-networks">RetNet and RWKV</NoteLink> multiply it by a fixed factor per step.
+<NoteLink to="gated-linear-recurrence">Gated linear recurrences</NoteLink> compute the factor from the token, so filler
+is held through and important tokens overwrite the state. This is the step from <Gloss name="s4" /> to
+<Gloss name="mamba" />, made inside recurrent and attention-like layers (minGRU, HGRN, Griffin's RG-LRU, gated linear
+attention, RWKV-6) <Cite id="yang2024gla" />.
+
+**Gates with exponential weights.** <NoteLink to="xlstm">xLSTM</NoteLink> brings the LSTM into this family. Its
+exponential input gate lets a new token outweigh the stored past, a normaliser turns the state into a weighted average,
+and a stabiliser keeps the exponentials finite. Its matrix-memory cell, the mLSTM, is a gated linear attention layer.
+
+**Writing by correction.** An additive memory blurs overlapping keys and cannot replace a value. The
+<NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink> writes only the difference between the new value
+and what the memory returns, one gradient step of online regression. Gated DeltaNet and RWKV-7 combine it with decay,
+and test-time-training layers and Titans replace the matrix by a small network trained as the sequence is read.
+
+## How the notes fit together
+
+- Start with <NoteLink to="parallel-scan">parallel scans</NoteLink>, which every other note relies on for training.
+- <NoteLink to="rwkv-and-retentive-networks">RWKV and retentive networks</NoteLink> covers fixed decay, the parallel,
+  recurrent and chunkwise forms, and the RWKV line up to RWKV-7.
+- <NoteLink to="gated-linear-recurrence">Gated linear recurrences</NoteLink> makes the decay depend on the token.
+- <NoteLink to="xlstm">xLSTM</NoteLink> and the <NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink>
+  change how the state is written: exponential gates with a normaliser, and correction instead of addition.
+
+The state-space view of the same recurrences, with states derived from continuous linear systems, is in
+<NoteLink to="structured-and-selective-state-space-models">structured and selective state-space models</NoteLink>.
+
+## Prerequisites and next steps
+
+Read <NoteLink to="recurrent-neural-network">recurrent networks</NoteLink> and
+<NoteLink to="linear-attention">linear attention</NoteLink> first; the
+<NoteLink to="long-short-term-memory">LSTM</NoteLink> note helps for xLSTM. Next,
+<NoteLink to="comparing-and-combining-sequence-models">comparing and combining sequence models</NoteLink> covers hybrid
+stacks of these layers with attention, recall benchmarks that expose their fixed-size state, and the limits of what
+diagonal linear recurrences can compute.

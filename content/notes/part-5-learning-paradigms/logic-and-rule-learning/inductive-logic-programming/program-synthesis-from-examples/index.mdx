@@ -1,0 +1,184 @@
+---
+title: 'Program synthesis from examples'
+kind: concept
+summary: 'Programming by example finds a program in a domain-specific language that maps given inputs to given outputs. FlashFill represents all consistent programs by a version-space algebra, enumerative search lists programs by size, and DreamCoder learns a function library.'
+tags: [logic, program-synthesis, worked-example]
+aliases: ['programming by example', 'FlashFill', 'inductive programming', 'DreamCoder', 'version-space algebra', 'observational equivalence']
+requires: [concept-learning-and-version-spaces]
+related: [inductive-logic-programming, neural-program-synthesis, meta-interpretive-learning, predicate-invention, learning-from-failures, inductive-bias, minimum-description-length]
+references: [gulwani2011flashfill, lau2003vsa, polozov2015flashmeta, gulwani2017synthesis, ellis2021dreamcoder, alur2013sygus, udupa2013transit, albarghouthi2013escher, summers1977, balog2017deepcoder, chollet2019arc, mitchell1982]
+status: draft
+updated: 2026-10-17
+---
+
+import { StringSynthesis } from './StringSynthesis'
+
+<Definition>
+A **programming-by-example** problem has three inputs: a **domain-specific language**, whose programs form a set
+$\Pcal$; a set of examples $\set{(x_1, y_1), \dots, (x_m, y_m)}$, each an input and its desired
+output; and a **ranking**, a preference order on $\Pcal$. A program $p \in \Pcal$ is **consistent** when
+$p(x_i) = y_i$ for every example. The synthesiser returns the highest-ranked consistent program. The set of consistent
+programs is the **version space** of the examples, as in <NoteLink to="concept-learning-and-version-spaces">concept
+learning</NoteLink>, with programs in place of concepts <Cite id="lau2003vsa" />.
+</Definition>
+
+## Intuition
+
+A spreadsheet holds a column of names such as "jane doe". The user types "Doe, J." beside the first and "Turing, A."
+beside "alan turing". FlashFill, shipped in Microsoft Excel in 2013, fills in the rest of the column
+<Cite id="gulwani2011flashfill" /> <Cite id="gulwani2017synthesis" />. Two examples are enough because the program
+that the user has in mind is short in a language built for string edits: take the last word with a capital, then a
+comma and a space, then the first letter of the first word in upper case, then a full stop.
+
+Examples underdetermine programs. "Doe, J." is also produced by the constant program that ignores its input, and by a
+program that takes the second word rather than the last. Each new example removes the programs that get it wrong, so
+the version space shrinks. Two choices decide what is left to guess: the language, which fixes which programs exist,
+and the ranking, which picks one when several remain. Both are the synthesiser's
+<NoteLink to="inductive-bias">inductive bias</NoteLink>.
+
+<NoteLink to="inductive-logic-programming">Inductive logic programming</NoteLink> is program synthesis from examples
+with <NoteLink to="horn-clauses-and-logic-programs">logic programs</NoteLink> as the language. Synthesis over functional
+languages goes back to Summers, who built recursive Lisp programs from input-output pairs <Cite id="summers1977" />. The
+modern methods differ in how they search: enumerate programs, represent the version space directly, or learn the
+language itself.
+
+## Details
+
+### Languages and specifications
+
+The <Gloss name="dsl" /> is a grammar. FlashFill's top level concatenates **atomic expressions**: constant strings,
+and substrings of the input whose ends are positions found by regular expressions, with loops and conditionals above
+them <Cite id="gulwani2011flashfill" />. The figure uses a smaller language of the same shape. A program concatenates
+atoms. An atom is a constant string; the $i$-th token of the input, a maximal run of letters or digits, counted from the
+start for $i > 0$ and from the end for $i < 0$, in its own case or in upper, lower or title case; or the first character
+of a token. Syntax-guided synthesis makes the grammar an explicit input, so one solver serves many languages
+<Cite id="alur2013sygus" />.
+
+### Enumerative search
+
+The plain method lists the programs of the grammar in order of size and returns the first consistent one. The number of
+programs grows exponentially with size, and most of them compute the same function on the examples. **Observational
+equivalence** keeps, for each vector of outputs on the example inputs, only the smallest program that produces it, and
+builds larger programs only from the kept ones <Cite id="udupa2013transit" /> <Cite id="albarghouthi2013escher" />. Two
+programs that agree on every example input cannot be told apart by the specification, so pruning one of them loses
+nothing the examples could detect. Enumeration returns the smallest consistent program, an
+<NoteLink to="minimum-description-length">Occam</NoteLink> ranking by construction.
+
+### Version-space algebra
+
+Mitchell's version space stores the consistent hypotheses through their boundaries in a generality order
+<Cite id="mitchell1982" />. Programs have no useful generality order, so Lau, Wolfman, Domingos and Weld built version
+spaces of programs from smaller ones by union and by joining the version spaces of sub-programs, an **algebra** of
+version spaces <Cite id="lau2003vsa" />. FlashFill applies it to concatenation.
+
+For one example $(x, y)$ with output length $n$, define a <Gloss name="dag">directed acyclic graph</Gloss> with nodes
+$0, 1, \dots, n$, the positions in $y$. The edge from $i$ to $j > i$ carries the set $A(i, j)$ of atoms whose value on
+$x$ is the substring $y[i{:}j]$. Every path from $0$ to $n$ spells $y$, and choosing one atom per edge of a path gives a
+consistent program. Every consistent concatenation arises this way, since its atoms cut $y$ into consecutive pieces. The
+number of consistent programs $N(n)$ follows from the recursion
+
+$$
+N(0) = 1, \qquad N(j) = \sum_{i < j} N(i) \, \abs{A(i, j)},
+$$
+
+computed in $O(n^2)$ steps, while the programs themselves can number exponentially many in $n$.
+
+A second example $(x', y')$ gives a second graph. The programs consistent with both are the paths of the **product
+graph**, whose nodes are pairs of positions $(i, i')$ and whose edge from $(i, i')$ to $(j, j')$ carries
+$A(i, j) \cap A'(i', j')$: the atoms that produce the right piece of both outputs. Each further example multiplies in
+the same way. Pruning the nodes that cannot reach the end keeps the graph small.
+
+<Derivation title="Paths of the product graph are the programs consistent with both examples">
+Let $p = a_1 a_2 \cdots a_k$ be consistent with both examples. On $x$ its atoms produce consecutive pieces of $y$,
+ending at positions $0 = i_0 < i_1 < \dots < i_k = n$, so $a_t \in A(i_{t-1}, i_t)$. On $x'$ they produce consecutive
+pieces of $y'$, ending at $0 = i'_0 < \dots < i'_k = n'$, so $a_t \in A'(i'_{t-1}, i'_t)$. Every atom produces a
+non-empty string, so both sequences increase strictly. The pairs $(i_t, i'_t)$ are therefore a path from $(0, 0)$ to
+$(n, n')$ in the product graph with $a_t$ on its $t$-th edge. Conversely, a path with one atom chosen from each edge's
+intersection spells $y$ on $x$ and $y'$ on $x'$ by the definition of the edge sets.
+</Derivation>
+
+FlashMeta generalises the construction to any language whose operators come with **witness functions**, inverse
+semantics that turn a specification for an expression into specifications for its arguments, so one framework builds
+the version spaces of many domain-specific synthesisers <Cite id="polozov2015flashmeta" />.
+
+### Ranking
+
+A version space with several members needs a choice. "Fewest atoms" picks the constant output after one example,
+because a constant is a single atom. Rankings for string programs penalise constants and prefer tokens of the input,
+since a constant reproduces the example without generalising <Cite id="gulwani2011flashfill" />. The figure scores a
+program by summing a cost per atom: a constant costs 1 plus its length, any other atom 1. Over a version-space graph the
+best program under an additive cost is a shortest path, and the $k$ best are found by keeping the $k$ best partial
+programs at each node.
+
+### Learning the language
+
+The language is the strongest bias, and it is usually written by hand. DreamCoder learns it. In a **wake** phase it
+searches for programs that solve a set of tasks, guided by a neural network that predicts which functions a task needs.
+In an **abstraction** phase it rewrites the solutions to share common subprograms and adds those subprograms to the
+library as new functions. In a **dreaming** phase it trains the network on replayed and imagined tasks
+<Cite id="ellis2021dreamcoder" />. Each new function makes later solutions shorter, and a shorter solution is
+exponentially cheaper to find by enumeration. Learning a library is the program-synthesis counterpart of
+<NoteLink to="predicate-invention">predicate invention</NoteLink>.
+
+### Practice
+
+The DSL-based synthesisers of the FlashFill family remain the standard for spreadsheet and data-wrangling tasks, where
+users give two or three examples and expect an answer at once. Neural models now guide the search: DeepCoder predicts
+which functions appear in the target program and orders an enumerative search by those predictions
+<Cite id="balog2017deepcoder" />. <Gloss name="llm">Large language models</Gloss> generate candidate programs from
+examples or descriptions, and the examples serve as tests that filter the candidates
+(<NoteLink to="neural-program-synthesis">neural program synthesis</NoteLink>). The Abstraction and Reasoning Corpus
+poses grid puzzles with a few input-output pairs each, as a test of acquiring a new skill from few examples
+<Cite id="chollet2019arc" />. Searching for a program in a language of grid operations is one of the main approaches to
+it.
+
+## Worked example
+
+The task maps "first last" names to "Last, F.", in the language of the figure.
+
+1. **One example: "jane doe" to "Doe, J.".** The output has 7 characters, so the graph has nodes 0 to 7 and an edge for
+   each of the 28 substrings. Every edge carries the constant for its substring. Three edges carry more: "Doe" (0 to 3)
+   is also title(token 2) and title(token −1); "D" (0 to 1) is also the upper-cased first character of token 2 or
+   token −1; "J" (5 to 6) is also the upper-cased first character of token 1 or token −2.
+2. **Counting.** The recursion gives $N(1) = 3$, $N(2) = 1 + 3 = 4$, $N(3) = 3 + 3 + 4 = 10$, $N(4) = 1 + 3 + 4 + 10 =
+   18$, $N(5) = 36$, $N(6) = 36 + 3 \cdot 36 = 144$ and $N(7) = 1 + 3 + 4 + 10 + 18 + 36 + 144 = 216$. Of the 216
+   consistent programs, 1 has one atom (the constant "Doe, J."), 10 have two, and 9 have seven.
+3. **Ranking one example.** By fewest atoms, the constant wins. By the constant-penalising cost, the constant costs 8,
+   title(token 2) followed by the constant ", J." costs $1 + 5 = 6$, and the intended program title(token 2), ", ",
+   upper(first character of token 1), "." costs $1 + 3 + 1 + 2 = 7$. One example is not enough for either ranking:
+   the constant maps every name to "Doe, J.", and the cost-ranked winner maps "alan turing" to "Turing, J.".
+4. **Second example: "alan turing" to "Turing, A.".** Intersecting leaves 6 nodes, 6 edges and 8 programs. The
+   constants "Doe" and "J" fail on Turing, so the name pieces must come from tokens. Three binary choices remain:
+   token 2 or token −1 for the surname, token 1 or token −2 for the initial, and ", " as one constant or as "," followed
+   by " ". The best program under either ranking takes token 2 and token 1.
+5. **A held-out input: "grace brewster hopper".** Token 2 is "brewster", so the top program outputs "Brewster, G.",
+   wrong. The two examples had two tokens each, where token 2 and token −1 coincide.
+6. **Third example: "grace brewster hopper" to "Hopper, G.".** Token 2 and the initial of token −2 now fail. Two
+   programs remain, and they differ only in how the separator is split, so they compute the same function. The program
+   title(token −1), ", ", upper(first character of token 1), "." maps "john von neumann" to "Neumann, J.".
+
+<StringSynthesis />
+
+## Assumptions
+
+- **The target is in the language.** A synthesiser returns a consistent program from its language or nothing. A name
+  format that needs "the token before the comma" is outside a language of numbered tokens.
+- **The examples are correct.** Every program in the version space reproduces every example, so one typo in an output
+  either empties the version space or forces a program that copies the typo through a constant.
+- **The ranking matches the user's intent.** When the examples leave several programs, the answer is decided by the
+  ranking alone, and two programs that agree on the examples can disagree on every other input.
+
+## Pitfalls
+
+- **Coincidences in the examples.** Inputs that are alike in some respect, such as names of two words, leave the
+  programs that exploit the coincidence in the version space. Examples that differ in structure, such as a three-word
+  name, are worth more than many examples of one shape. A synthesiser can point to an input on which the remaining
+  programs disagree and ask for its output, which is query selection over a version space.
+- **Equivalent programs inflate the count.** In the date task of the figure, upper and lower case leave digits
+  unchanged, so hundreds of syntactically different programs compute one function. The count of consistent programs
+  overstates the remaining ambiguity; the outputs on unlabelled inputs measure it.
+- **Exponential search beyond toy languages.** Loops, conditionals and arithmetic make the space grow much faster than
+  concatenation does. Enumeration with observational equivalence reaches programs of a few dozen nodes, and larger
+  programs need deductive pruning, a learned library or neural guidance.
+- **Overfitting by constants.** A language with arbitrary constants always contains a program that memorises the
+  examples. Rankings that ignore constant length return it.

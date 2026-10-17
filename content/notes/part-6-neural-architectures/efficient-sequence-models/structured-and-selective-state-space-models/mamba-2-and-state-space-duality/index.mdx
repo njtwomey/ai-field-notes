@@ -1,0 +1,216 @@
+---
+title: 'Mamba-2 and state space duality'
+kind: concept
+summary: 'With a scalar-times-identity state matrix, a selective SSM equals masked linear attention whose mask is a 1-semiseparable matrix of cumulative decays. Mamba-2 computes it in chunks, attention-like matrix products within chunks and a recurrence between them.'
+tags: [state-space-models, sequence-models, attention, worked-example]
+aliases: [Mamba-2, state space duality, structured state space duality, semiseparable matrix]
+requires: [mamba, linear-attention]
+related:
+  [
+    gated-linear-recurrence,
+    parallel-scan,
+    rwkv-and-retentive-networks,
+    hybrid-sequence-models,
+    long-range-and-recall-benchmarks,
+    flash-attention,
+  ]
+references: [dao2024, gu2023mamba, sun2023retnet]
+status: draft
+updated: 2026-10-17
+---
+
+import { SemiseparableMask } from './SemiseparableMask'
+
+<Definition>
+A **state space duality** (SSD) layer is a selective state space whose transition is a scalar times the identity. For
+one head, with inputs $\xvec_t \in \reals^P$, input and output maps $\bvec_t, \cvec_t \in \reals^N$ and a decay
+$a_t \in (0, 1)$ computed from the token at position $t$,
+
+$$
+\Hmat_t = a_t\Hmat_{t-1} + \bvec_t\xvec_t^\tr, \qquad \yvec_t = \Hmat_t^\tr\cvec_t, \qquad \Hmat_0 = \zeros,
+$$
+
+with state $\Hmat_t \in \reals^{N \times P}$. Stacking the $T$ outputs as rows of $\Ymat \in \reals^{T \times P}$, the
+same map is $\Ymat = (\Lmat \circ \Cmat\Bmat^\tr)\Xmat$, where $\Lmat$ is the **1-semiseparable mask**
+$L_{ji} = a_j a_{j-1} \cdots a_{i+1}$ for $j \ge i$ and $0$ for $j < i$. **Mamba-2** is the network built from SSD
+layers, and computes them in chunks <Cite id="dao2024" />.
+</Definition>
+
+## Intuition
+
+<NoteLink to="mamba">Mamba</NoteLink> trains with a parallel scan. A scan is fast in memory traffic but does few
+operations per byte, and it cannot use the matrix-multiply units that make up most of a modern <Gloss name="gpu" />'s
+arithmetic throughput. Attention is the opposite: quadratic in the sequence length, but built from matrix products.
+
+SSD shows that one restricted selective state space has both forms. Unrolling the recurrence writes each output as a
+weighted sum of earlier inputs, with weights $\cvec_j^\tr\bvec_i$ times the decay accumulated between the two positions.
+That is causal <NoteLink to="linear-attention">linear attention</NoteLink> with queries $\cvec$, keys $\bvec$, values
+$\xvec$, and a decay mask in place of the 0/1 <NoteLink to="causal-masking">causal mask</NoteLink>. The recurrence costs
+$O(T)$ and needs a sequential scan; the masked matrix product costs $O(T^2)$ and is all matrix multiplication. Mamba-2
+splits the sequence into chunks and uses each form where it is cheap: the matrix form inside a chunk, the recurrence
+between chunks <Cite id="dao2024" />.
+
+The restriction that makes this work is the scalar transition. In Mamba each of the $N$ state dimensions of a channel
+decays at its own rate $e^{\Delta_t A_n}$. In SSD all $N \times P$ entries of a head's state decay together by $a_t$,
+so the decay factors out of the product $\cvec_j^\tr\bvec_i$ as one number per pair of positions.
+
+## The duality
+
+Unroll the recurrence from $\Hmat_0 = \zeros$. Each step multiplies the existing state by $a_t$ and adds one outer
+product, so the outer product added at step $i$ has been multiplied by every decay after it:
+
+$$
+\Hmat_j = \sum_{i=1}^{j}\paren{a_j a_{j-1} \cdots a_{i+1}}\,\bvec_i\xvec_i^\tr = \sum_{i \le j} L_{ji}\,\bvec_i\xvec_i^\tr.
+$$
+
+The empty product for $i = j$ is 1. Reading out with $\cvec_j$,
+
+$$
+\yvec_j = \Hmat_j^\tr\cvec_j = \sum_{i \le j} L_{ji}\,\paren{\cvec_j^\tr\bvec_i}\,\xvec_i.
+$$
+
+The weight of input $i$ in output $j$ is $M_{ji} = L_{ji}\,\cvec_j^\tr\bvec_i$, so $\Ymat = \Mmat\Xmat$ with
+$\Mmat = \Lmat \circ \Cmat\Bmat^\tr$, where the rows of $\Bmat, \Cmat \in \reals^{T \times N}$ are the $\bvec_t^\tr$ and
+$\cvec_t^\tr$ and $\circ$ is the elementwise product <Cite id="dao2024" />.
+
+Three special cases place SSD among its relatives.
+
+- **$a_t = 1$ for all $t$.** $\Lmat$ is the causal mask of ones, and SSD is causal linear attention with the identity
+  <NoteLink to="convolutional-layer">feature map</NoteLink>.
+- **$a_t = \gamma$, a constant.** $L_{ji} = \gamma^{j-i}$, the decay mask of retention in
+  <NoteLink to="rwkv-and-retentive-networks">RetNet</NoteLink> <Cite id="sun2023retnet" />.
+- **$a_t$ computed from the token.** The mask changes with the input. This is Mamba-2, with
+  $a_t = e^{\Delta_t A}$ for a learned scalar $A < 0$ per head and an input-dependent step $\Delta_t$.
+
+### Semiseparable matrices
+
+A lower-triangular matrix is **$N$-semiseparable** if every submatrix taken from on or below the diagonal has rank at
+most $N$ <Cite id="dao2024" />. The mask $\Lmat$ is 1-semiseparable. Take any rows $j \ge k$ and any columns $i \le k$,
+for a split point $k$. Then $L_{ji} = (a_j \cdots a_{k+1})(a_k \cdots a_{i+1})$ is a product of a factor that depends
+only on $j$ and a factor that depends only on $i$, so the block is an outer product, of rank 1.
+
+$\Mmat$ is $N$-semiseparable for the same reason. Its block entries are
+$M_{ji} = \cvec_j^\tr (a_j \cdots a_{k+1})(a_k \cdots a_{i+1})\bvec_i$, an inner product of an $N$-vector depending on
+$j$ with one depending on $i$, so the block has rank at most $N$. The factorisation passes through the state at
+position $k$: everything from before $k$ that reaches after $k$ goes through $N$ numbers per value channel. This is
+what makes the chunked algorithm possible.
+
+In code, the mask is computed from cumulative sums of $\log a_t$: with $S_t = \sum_{s \le t}\log a_s$,
+$L_{ji} = \exp(S_j - S_i)$. Products of many small decays would underflow; differences of sums do not.
+
+## The chunked algorithm
+
+Split the $T$ positions into chunks of length $Q$. The $T \times T$ matrix $\Mmat$ becomes a $(T/Q) \times (T/Q)$
+grid of $Q \times Q$ blocks. Mamba-2 computes $\Ymat = \Mmat\Xmat$ in four steps <Cite id="dao2024" />.
+
+1. **Diagonal blocks.** Within each chunk, compute the outputs from a zero starting state by the quadratic form
+   $(\Lmat \circ \Cmat\Bmat^\tr)\Xmat$ restricted to the chunk. All chunks run in parallel, as batched matrix products.
+2. **Chunk states.** For each chunk, compute its final state from a zero start,
+   $\sum_{i \in \text{chunk}} (\text{decay from } i \text{ to the chunk end})\,\bvec_i\xvec_i^\tr$: one matrix product
+   per chunk.
+3. **State passing.** Run the recurrence over chunks: the true state at the end of chunk $c$ is the chunk's total decay
+   times the true state at the end of chunk $c - 1$, plus chunk $c$'s own state. This is a scan of length $T/Q$.
+4. **Carried contributions.** For each output in a chunk, add $\cvec_t^\tr$ times the decay since the chunk start times
+   the carried state: one matrix product per chunk.
+
+Steps 2 to 4 compute the off-diagonal blocks through their rank-$N$ factorisation, without forming them. With
+$P = N$ and $Q$ of the order of $N$, training costs $O(TN^2)$ operations and $O(TN)$ memory, generation costs $O(N^2)$
+per token with an $O(N^2)$ state, and nearly all the work is matrix multiplication <Cite id="dao2024" />. The chunk
+length interpolates between the two dual forms: $Q = 1$ is the pure recurrence with $T$ sequential steps, and $Q = T$
+is the pure quadratic form.
+
+The dedicated SSD kernel is 2 to 8 times faster than Mamba's selective scan, overtakes FlashAttention-2 at sequence
+length 2K and is 6 times faster at 16K <Cite id="dao2024" />.
+
+## The Mamba-2 block
+
+Mamba-2 keeps the outline of the Mamba block, a gated branch around a short convolution and the sequence layer, and
+changes three things <Cite id="dao2024" />.
+
+- **Parallel projections.** $\xvec$, the gate, $\bvec$, $\cvec$ and $\Delta$ are all produced by one projection at the
+  start of the block, instead of $\bvec$, $\cvec$ and $\Delta$ being computed from the SSM's own input. The block then
+  splits across devices like an attention block, with no communication inside it.
+- **Heads.** The model width is split into heads of dimension $P$, typically 64 or 128, each with its own scalar $A$.
+  The maps $\bvec_t$ and $\cvec_t$ are shared across heads, as keys and queries are shared in multi-value attention.
+- **Extra normalisation.** A normalisation layer before the output projection stabilises training of large models.
+
+The state size per head grows from Mamba's $N = 16$ to 64 or more at little cost, because the extra state enters as
+matrix-product dimensions. On <NoteLink to="long-range-and-recall-benchmarks">multi-query associative recall</NoteLink>,
+raising $N$ from 16 to 64 and to 256 improved accuracy each time <Cite id="dao2024" />. A 2.7-billion-parameter Mamba-2
+trained on 300 billion tokens of the Pile outperformed Mamba-2.8B and Pythia-2.8B and also Pythia-6.9B
+<Cite id="dao2024" />.
+
+## Worked example
+
+Take $T = 6$, one state and one value channel ($N = P = 1$), $\bvec_t = \cvec_t = 1$, decays
+$a = (0.9, 0.5, 1, 0.8, 0.2, 0.9)$ and inputs $x = (1, 0, 2, 0, 0, 1)$.
+
+**The mask.** Each entry multiplies the decays strictly after the column index up to the row index. The first decay
+$a_1$ never appears, because it would multiply the zero initial state.
+
+$$
+\Lmat = \begin{pmatrix}
+1 \\
+0.5 & 1 \\
+0.5 & 1 & 1 \\
+0.4 & 0.8 & 0.8 & 1 \\
+0.08 & 0.16 & 0.16 & 0.2 & 1 \\
+0.072 & 0.144 & 0.144 & 0.18 & 0.9 & 1
+\end{pmatrix}
+$$
+
+For example $L_{41} = a_4a_3a_2 = 0.8 \times 1 \times 0.5 = 0.4$ and $L_{63} = a_6a_5a_4 = 0.9 \times 0.2 \times 0.8 =
+0.144$. The small decay $a_5 = 0.2$ is a near-reset: every entry that spans position 5, in rows 5 and 6 and columns 1
+to 4, is at most $0.2$.
+
+**The quadratic form.** With $\bvec = \cvec = 1$, $\Mmat = \Lmat$ and $y = \Lmat x$:
+$y = (1,\ 0.5,\ 2.5,\ 2.0,\ 0.4,\ 1.36)$. For instance $y_6 = 0.072 \times 1 + 0.144 \times 2 + 1 \times 1 = 1.36$.
+
+**Chunks of length 3.** The lower-left block, rows 4 to 6 and columns 1 to 3, is an outer product:
+
+$$
+\begin{pmatrix} 0.4 & 0.8 & 0.8 \\ 0.08 & 0.16 & 0.16 \\ 0.072 & 0.144 & 0.144 \end{pmatrix}
+= \begin{pmatrix} 0.8 \\ 0.16 \\ 0.144 \end{pmatrix}\begin{pmatrix} 0.5 & 1 & 1 \end{pmatrix}.
+$$
+
+The column holds the decays from the chunk start to each row, $(a_4,\ a_4a_5,\ a_4a_5a_6)$; the row holds the decays
+from each column to the chunk end, $(a_2a_3,\ a_3,\ 1)$.
+
+1. Chunk 1 by its own quadratic form gives $(1, 0.5, 2.5)$.
+2. Chunk 1's final state is $(0.5, 1, 1) \cdot (1, 0, 2) = 2.5$.
+3. There is no earlier chunk, so the carried state into chunk 2 is $2.5$.
+4. Chunk 2 alone, from a zero state, gives $(0, 0, 1)$. The carried state adds $(0.8, 0.16, 0.144) \times 2.5 =
+   (2.0, 0.4, 0.36)$, so chunk 2's outputs are $(2.0, 0.4, 1.36)$.
+
+The chunked result equals the quadratic form, and only one number crossed the chunk boundary.
+
+<SemiseparableMask />
+
+The figure builds the mask for 24 positions from per-token decays, with a few near-resets, and runs SSD with $N = 4$
+states and $P = 2$ channels. Each reset cuts the mask to near zero in a rectangle below and to the left of its diagonal
+position, because almost nothing older than the reset survives it. Dragging $Q$ moves the chunk grid: the multiplies in
+diagonal blocks grow with $Q$, the sequential steps fall as $T/Q$, and the work through chunk states stays the same. The
+quadratic form, the chunked algorithm and the engine's selective scan, run with $\Delta_t = -\log a_t$, agree to about
+$10^{-15}$.
+
+## Assumptions
+
+- **A scalar transition per head.** All state entries of a head decay together. Mamba's diagonal transition lets each
+  state dimension forget at its own rate, which SSD gives up for speed and compensates with a larger $N$.
+- **Decays in $(0, 1]$.** The log-sum form of the mask needs positive decays; $a_t = e^{\Delta_t A}$ with $A < 0$ and
+  $\Delta_t > 0$ guarantees it.
+- **Linearity in the state.** As in every layer of this family, the decays and maps depend on the input, not on the
+  state, which is what allows both the scan and the matrix form.
+
+## Pitfalls
+
+- **Forming the mask from products.** Multiplying hundreds of decays underflows to zero and loses gradients; compute
+  $\exp(S_j - S_i)$ from cumulative log-decays instead.
+- **Chunk length and hardware.** Very small chunks leave the matrix units idle and the inter-chunk scan long; very
+  large chunks pay the quadratic cost. The practical choice is a chunk length close to the state and head sizes.
+- **A fixed-size memory.** SSD keeps $N \times P$ numbers per head, however long the context. Exact recall of many
+  earlier tokens still favours attention, and many current models are
+  <NoteLink to="hybrid-sequence-models">hybrids</NoteLink> that add a few attention layers to SSD layers.
+- **The duality is not with <NoteLink to="scaled-dot-product-attention">softmax attention</NoteLink>.** SSD equals a
+  masked linear attention. Softmax attention has no finite-state recurrent form, and the duality does not make an SSD
+  layer equivalent to it.

@@ -1,0 +1,152 @@
+---
+title: 'Graph construction for semi-supervised learning'
+kind: concept
+summary: 'Graph methods depend more on the graph than on the propagation rule. The choices are the neighbourhood rule ($k$-nearest neighbours, $\epsilon$-ball, b-matching), the edge weights (a Gaussian kernel width) and sparsification; a bad choice joins the classes through a few short edges.'
+tags: [semi-supervised, graphs, nonparametric, worked-example]
+aliases: ['similarity graph construction', 'b-matching graph']
+requires: [label-propagation]
+related:
+  [
+    graph-construction,
+    k-nearest-neighbours,
+    spectral-clustering,
+    label-spreading,
+    manifold-regularisation,
+    approximate-nearest-neighbour-search,
+    metric-learning,
+  ]
+references: [jebara2009bmatching, desousa2013graph, vonluxburg2007, zelnikmanor2004selftuning, zhu2005survey]
+status: draft
+updated: 2026-10-17
+---
+
+import { GraphBuilder } from './GraphBuilder'
+
+<Definition>
+**Graph construction** for <NoteLink to="semi-supervised-learning">semi-supervised learning</NoteLink> turns $n$
+labelled and unlabelled inputs $\xvec_1, \dots, \xvec_n \in \reals^d$ into a weighted graph, the input of label
+propagation, <NoteLink to="label-spreading">label spreading</NoteLink> and
+<NoteLink to="manifold-regularisation">manifold regularisation</NoteLink>. It makes two choices: a **neighbourhood
+rule** that decides which pairs are joined, and a **weighting** that gives each edge a weight $W_{ij} \ge 0$. The result
+is a symmetric affinity matrix $\Wmat$ ($n \times n$, zero diagonal, $W_{ij} = 0$ for pairs that are not joined).
+</Definition>
+
+## Intuition
+
+Every graph method moves label information along edges and penalises disagreement across them. A propagation rule cannot
+recover a boundary that the graph does not show. If the graph has no edge between two dense regions, labels stay on
+their side; if a few edges join two classes, labels leak across them whatever the rule. Zhu's survey of the field holds
+that constructing a good graph matters more than choosing among the graph methods <Cite id="zhu2005survey" />, and
+comparisons of construction methods find that accuracy depends heavily on the graph <Cite id="jebara2009bmatching" />
+<Cite id="desousa2013graph" />.
+
+A good graph for semi-supervised learning has three properties:
+
+- **Strong edges within classes.** Points of the same class are joined by paths of strong edges, so a few labels reach
+  the whole class.
+- **Weak or absent edges across classes.** The class boundary runs through the low-density gap, where the edges are
+  few and weak, so cutting them is cheap.
+- **Every component labelled.** A connected component with no labelled point receives no score at all.
+
+The first and third ask for a dense graph; the second asks for a sparse one. The construction choices below trade one
+against the other. The general construction of graphs from data, beyond semi-supervised learning, is covered in
+<NoteLink to="graph-construction">graph construction</NoteLink>.
+
+## Details
+
+### Neighbourhood rules
+
+Let $\Ncal_k(i)$ be the set of the $k$ points nearest to $\xvec_i$, by Euclidean distance unless a better metric is
+known <Cite id="vonluxburg2007" />.
+
+- **Symmetrised $k$-nearest-neighbour graph.** Join $i$ and $j$ when $j \in \Ncal_k(i)$ or $i \in \Ncal_k(j)$. Every
+  point has at least $k$ edges, so the graph is rarely disconnected. A point near many others, a hub, can collect far
+  more than $k$ edges.
+- **Mutual $k$-nearest-neighbour graph.** Join $i$ and $j$ only when both $j \in \Ncal_k(i)$ and $i \in \Ncal_k(j)$.
+  Edges into sparse regions are dropped, which removes many bridges between classes, and isolated outliers become
+  separate components.
+- **$\varepsilon$-ball graph.** Join $i$ and $j$ when $\norm{\xvec_i - \xvec_j} \le \varepsilon$. One radius serves the
+  whole space, so dense regions get many edges and sparse regions few or none.
+- **b-matching.** Choose the edges so that every point has exactly $b$ of them and the total length of the chosen edges
+  is smallest. Jebara, Wang and Chang solve this by <Gloss name="bp">belief propagation</Gloss> and find it more robust
+  than $k$-nearest neighbours, because no point can become a hub <Cite id="jebara2009bmatching" />. The figure below
+  uses a greedy approximation: add the shortest pairs in order while both ends have fewer than $b$ edges.
+- **Full graph.** Join every pair. The weights alone then decide the structure, and the cost of storing and solving
+  grows as $n^2$ and $n^3$.
+
+### Edge weights
+
+- **Binary.** $W_{ij} = 1$ for every edge. An edge across a gap counts as much as an edge inside a cluster.
+- **Gaussian (heat kernel).** $W_{ij} = \exp(-\norm{\xvec_i - \xvec_j}^2/2\sigma^2)$, with bandwidth $\sigma > 0$ in
+  the units of the inputs. Long edges get small weights, so the graph energy barely charges for cutting them. A
+  $\sigma$ much larger than the distances makes all weights close to 1, the binary case; a $\sigma$ much smaller than
+  the nearest-neighbour distances makes all weights close to 0 and the propagation numerically fragile.
+- **Local scaling.** $W_{ij} = \exp(-\norm{\xvec_i - \xvec_j}^2/(\sigma_i\sigma_j))$, with $\sigma_i$ the distance from
+  $\xvec_i$ to its $m$-th nearest neighbour ($m = 7$ in the original proposal), adapts the bandwidth to the local
+  density <Cite id="zelnikmanor2004selftuning" />.
+
+### Sparsification and scale
+
+A sparse graph keeps memory at $O(nk)$ and an iteration of propagation at $O(nk)$ for $n$ points and $k$ edges each.
+Exact $k$-nearest-neighbour search costs $O(n^2d)$ for $n$ points in $d$ dimensions; for large $n$ the graph is built
+with <NoteLink to="approximate-nearest-neighbour-search">approximate nearest-neighbour search</NoteLink>. Sparsification
+also removes most long edges, which are the edges that cross classes.
+
+## Worked example
+
+Six points lie on a line: class A at $0, 0.4, 0.8$ and class B at $1.5, 1.9, 2.3$. The gap between the classes, 0.7,
+is less than twice the spacing within a class, 0.4. The point at 0 is labelled A and the point at 1.9 is labelled B.
+Each graph below is followed by the harmonic solution of <NoteLink to="label-propagation">label propagation</NoteLink>,
+written as the score for A at the unlabelled points $0.4, 0.8, 1.5, 2.3$; a score above $1/2$ means A.
+
+**1-nearest-neighbour graph, binary weights.** Each point's nearest neighbour is 0.4 away, inside its class. The edges
+are $0 - 0.4$, $0.4 - 0.8$, $1.5 - 1.9$ and $1.9 - 2.3$: two components, one per class, each with one label. The scores
+are $1, 1, 0, 0$, all correct. One more class-A point without the label at 0 would leave its whole component
+unassigned.
+
+**Mutual 2-nearest-neighbour graph, binary weights.** The two <NoteLink to="nearest-neighbours">nearest
+neighbours</NoteLink> of 0.8 are 0.4 (distance 0.4) and 1.5 (distance 0.7), and those of 1.5 are 1.9 and 0.8. The pair
+$0.8 - 1.5$ is mutual, so one edge crosses the gap. The graph is a path of five unit edges, and the harmonic solution
+interpolates linearly along it: $0.75, 0.50, 0.25, 0$. Point 0.8 is a tie. The $\varepsilon$-ball graph with
+$\varepsilon = 0.75$ is the same path.
+
+**3-nearest-neighbour graph, binary weights.** Eleven edges, five of them across the classes ($0 - 1.5$, $0.4 - 1.5$,
+$0.8 - 1.5$, $0.8 - 1.9$, $0.8 - 2.3$). The scores are $0.667, 0.500, 0.500, 0.333$: points 0.8 and 1.5 are ties, and
+45% of the edge weight crosses the classes.
+
+**The same 3-nearest-neighbour graph, Gaussian weights with $\sigma = 0.4$.** An edge of length 0.4 gets weight
+$e^{-0.5} = 0.607$; the gap edge of length 0.7 gets $e^{-1.53} = 0.216$; the edge from 0 to 1.5 gets $0.001$. The
+share of weight across the classes falls from 45% to 9%. The scores become $0.834, 0.692, 0.177, 0.033$, all correct.
+
+The four graphs use the same points, the same labels and the same propagation rule. The answers range from exact to
+two ties. The figure repeats the experiment in two dimensions with each rule.
+
+<GraphBuilder />
+
+## Assumptions
+
+- **Distance reflects class.** Every rule above starts from distances in input space. If the class depends on a few of
+  many features, or the features have different units, the nearest neighbours are of the wrong kind. Standardising
+  the inputs, learning a metric (<NoteLink to="metric-learning">metric learning</NoteLink>) or building the graph on the
+  embeddings of a pretrained network fixes the distance before the graph is built.
+- **Classes are separated by low density.** Sparse graphs and Gaussian weights cut long edges. That helps only when the
+  class boundary runs through a gap. When two classes overlap in a dense region, no construction separates them, and
+  the graph joins them by many short edges.
+- **The unlabelled points come from the same distribution as the test points.** The graph models the density of the
+  points it contains.
+
+## Pitfalls
+
+- **Tuning without labels.** The number of neighbours, the radius and $\sigma$ are chosen with only a handful of labels
+  for validation. De Sousa, Rezende and Batista found that accuracy depends heavily on these parameters, with no setting
+  that worked across data sets; in their comparison, mutual $k$-nearest-neighbour graphs with Gaussian weights did best
+  but became unstable for small $k$ <Cite id="desousa2013graph" />.
+- **Disconnection.** The mutual and $\varepsilon$ rules, and small $k$, leave unlabelled components. Their points get
+  no score, and an accuracy that counts them as errors falls sharply.
+- **Hubs.** In high dimensions some points appear among the nearest neighbours of many others. In a symmetrised
+  $k$-nearest-neighbour graph a hub collects many edges and spreads its label widely. Mutual neighbours and b-matching
+  bound the degree <Cite id="jebara2009bmatching" />.
+- **Binary weights with large $k$.** Each extra neighbour adds edges of growing length. Without distance weights, the
+  long edges across the gap carry as much label as the short ones inside a class.
+- **Too small a bandwidth.** With $\sigma$ well below the typical neighbour distance, every weight underflows towards
+  zero and the linear systems become ill-conditioned.

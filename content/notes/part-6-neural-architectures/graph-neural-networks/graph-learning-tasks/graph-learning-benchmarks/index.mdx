@@ -1,0 +1,165 @@
+---
+title: 'Graph learning benchmarks and their pitfalls'
+kind: concept
+summary: 'Cora, Citeseer and Pubmed, the Open Graph Benchmark, ZINC, TUDatasets and the Long Range Graph Benchmark test different graph tasks. Fixed small splits, leakage between splits, tuned baselines and homophily explain many reported gains.'
+tags: [graph-neural-networks, evaluation, worked-example]
+aliases: ['Open Graph Benchmark', 'OGB', 'Long Range Graph Benchmark', 'LRGB', 'TUDataset']
+requires: [graphs-as-neural-network-inputs]
+related:
+  [
+    graph-benchmark-datasets,
+    graph-splits-and-sampling,
+    graph-neural-networks-under-heterophily,
+    scaffold-and-similarity-splits,
+    link-prediction-with-graph-neural-networks,
+    oversquashing-and-graph-rewiring,
+  ]
+references:
+  [
+    yang2016planetoid,
+    kipf2017,
+    shchur2018pitfalls,
+    errica2020fair,
+    hu2020ogb,
+    dwivedi2020benchmarking,
+    morris2020tudataset,
+    dwivedi2022lrgb,
+    tonshoff2023lrgb,
+    zhu2020h2gcn,
+    platonov2023heterophily,
+    li2023linkpitfalls,
+    wu2018moleculenet,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { SplitVariance } from './SplitVariance'
+
+<Definition>
+A **graph learning benchmark** fixes a graph dataset, a prediction task at the level of nodes, edges or whole graphs, a
+split into training, validation and test parts, and a metric, so that methods can be compared on equal terms. The
+common suites are the Planetoid citation graphs (Cora, Citeseer, Pubmed), the Open Graph Benchmark (OGB), the
+TUDataset collection, ZINC and the other datasets of the Benchmarking-GNNs suite, and the Long Range Graph Benchmark
+(LRGB). A reported gain on a benchmark is evidence about a method only after accounting for the variance across
+splits, leakage between splits, the tuning given to baselines and the homophily of the graph.
+</Definition>
+
+## Intuition
+
+A benchmark result is one number from one experiment, and graph experiments are small and correlated. A citation
+graph is a single graph, so the "data set" is one sample. The test set of the standard Cora split has 1000 nodes,
+which bounds how precisely an accuracy can be measured. Test nodes are linked to training nodes, so information flows
+between the parts unless the split prevents it. And whether edges help at all depends on the graph: on a homophilous
+graph almost any method that averages neighbours improves on one that ignores them, which says little about the
+method's design.
+
+Several careful re-evaluations found that once those effects are controlled, simple models match or beat complex ones
+on the standard suites <Cite id="shchur2018pitfalls" /> <Cite id="errica2020fair" /> <Cite id="tonshoff2023lrgb" />.
+The suites built since 2020 try to remove the causes: larger graphs, splits that mimic deployment, and tasks where the
+graph structure is needed. The <NoteLink to="graph-benchmark-datasets">graph benchmarks</NoteLink> note in the data part
+catalogues the datasets; this note covers what they test and how results on them go wrong.
+
+## What the suites test
+
+**Planetoid: <NoteLink to="semi-supervised-node-classification">semi-supervised node classification</NoteLink>.** Cora
+(2,708 papers, 7 classes), Citeseer (3,327 papers, 6 classes) and Pubmed (19,717 papers, 3 classes) are citation graphs
+with bag-of-words features. The Planetoid split labels 20 nodes per class and fixes 500 validation and 1000 test nodes
+<Cite id="yang2016planetoid" /> <Cite id="kipf2017" />. All three graphs are strongly homophilous: their edge homophily
+is 0.81, 0.74 and 0.80 <Cite id="zhu2020h2gcn" />.
+
+**Heterophilous <NoteLink to="graphs-as-neural-network-inputs">node classification</NoteLink>.** Texas, Wisconsin and
+Cornell (web pages of university departments, 183 to 251 nodes), Actor, Chameleon and Squirrel have edge homophily
+between 0.11 and 0.30 <Cite id="zhu2020h2gcn" />. Their small size and, for Chameleon and Squirrel, duplicated nodes
+make them unreliable; newer heterophilous datasets replace them <Cite id="platonov2023heterophily" />
+(<NoteLink to="graph-neural-networks-under-heterophily">graph neural networks under heterophily</NoteLink>).
+
+**Open Graph Benchmark.** OGB groups tasks by level, `ogbn-` for nodes, `ogbl-` for links and `ogbg-` for graphs, with
+graphs from $10^4$ to $10^8$ nodes, a fixed metric per task and splits chosen to resemble use
+<Cite id="hu2020ogb" />. `ogbn-arxiv` splits papers by publication year, `ogbn-products` by sales rank, and the
+molecular tasks `ogbg-molhiv` and `ogbg-molpcba` by molecular scaffold, so the test set holds structurally new
+molecules (<NoteLink to="scaffold-and-similarity-splits">scaffold and similarity splits</NoteLink>). Link tasks report
+Hits@$K$ or <Gloss name="mrr">mean reciprocal rank</Gloss> against fixed negative candidates.
+
+**TUDataset: small-graph classification.** A collection of over 120 datasets of small graphs, molecules (MUTAG, NCI1),
+proteins (PROTEINS, ENZYMES) and social ego networks (IMDB-BINARY, REDDIT-BINARY), each with a graph label
+<Cite id="morris2020tudataset" />. Most have a few hundred to a few thousand graphs and are evaluated by 10-fold
+cross-validation.
+
+**Benchmarking <Gloss name="gnn" plural /> and ZINC.** Dwivedi et al. assembled medium-sized tasks with fixed splits and
+fixed parameter budgets of about 100 thousand and 500 thousand, so that architectures are compared at equal size
+<Cite id="dwivedi2020benchmarking" />. Its ZINC subset of 12 thousand molecules, a regression of a constrained
+solubility score, became the standard test of expressive graph-level models.
+
+**Long Range Graph Benchmark.** Five tasks, two image-superpixel graphs (PascalVOC-SP, COCO-SP), a contact-prediction
+task (PCQM-Contact) and two peptide tasks (Peptides-func, Peptides-struct), chosen so that the prediction depends on
+nodes far apart <Cite id="dwivedi2022lrgb" />. It tests whether a model overcomes
+<NoteLink to="oversquashing-and-graph-rewiring">oversquashing</NoteLink>, the motivation for
+<NoteLink to="graph-transformer">graph transformers</NoteLink>.
+
+## How results go wrong
+
+**Variance across splits.** A test set of $m$ nodes measures an accuracy $p$ with <NoteLink to="standard-error">standard
+error</NoteLink> $\sqrt{p(1 - p)/m}$, before any variation from training or from the choice of labelled nodes. Shchur et
+al. trained <Gloss name="gcn" />, <Gloss name="gat" /> and other models on many random splits of the same graphs with
+equal tuning and found that the ranking of the models changed from one split to the next
+<Cite id="shchur2018pitfalls" />. A ranking on the single Planetoid split can be an artefact of that split.
+
+**Leakage.** Information about test targets reaches training through duplicated nodes, through held-out edges left in
+the message passing graph, or through near-identical molecules on both sides of a random split. Each inflates the
+test score of models that memorise. Chameleon and Squirrel contain many duplicate nodes
+<Cite id="platonov2023heterophily" />; scaffold splits exist because random splits of molecules leak scaffolds
+<Cite id="wu2018moleculenet" />.
+
+**Untuned or missing baselines.** Errica et al. re-ran graph-classification models under one protocol, with
+<NoteLink to="model-selection">model selection</NoteLink> inside each cross-validation fold, and found that baselines
+that ignore the graph structure were competitive on several TUDatasets <Cite id="errica2020fair" />. Tönshoff et al.
+tuned plain message passing networks on LRGB, and the gap to graph transformers shrank substantially and on several
+datasets vanished <Cite id="tonshoff2023lrgb" />. Li et al. found the same for
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink>, together with negatives so easy
+that they hide differences between methods <Cite id="li2023linkpitfalls" />.
+
+**Homophily as a confounder.** On a homophilous graph, averaging over neighbours removes feature noise, so any
+architecture that averages beats any that does not, and a gain over a feature-only baseline measures the graph more
+than the method. On a heterophilous graph the same averaging can lose to the baseline. The figure below shows both
+effects on one synthetic family.
+
+## Worked example
+
+**How precise is a Cora accuracy?** A model reaches 81.5% on the 1000 Planetoid test nodes. The standard error is
+$\sqrt{0.815 \cdot 0.185 / 1000} = 0.0123$, so a 95% interval from the test set alone is $81.5 \pm 2.4$ points. Two
+models 1 point apart on this split are not distinguishable from test noise, before training seeds or the choice of
+labelled nodes are varied.
+
+**How much does the split move a gain?** Take a two-class stochastic block model with 100 nodes per class, expected
+degree 6 and edge homophily 0.8, and fit two <NoteLink to="logistic-regression">logistic regressions</NoteLink> with 10
+labelled nodes per class: one on the node features, one on each node's mean over itself and its neighbours (a linear
+graph convolution). Over 40 random choices of the labelled nodes in the figure, the features-only model scores
+$75.5\% \pm 2.9$ and the graph model $87.7\% \pm 2.8$ (mean and standard deviation over splits). The graph model wins on
+every split, by between 2.2 and 19.4 points. At homophily 0.6 the same comparison gives $75.5\%$ against $73.5\%$, and
+the graph model wins on 10 of the 40 splits, by up to 6.7 points: a paper reporting one lucky split would conclude the
+opposite of the average.
+
+<SplitVariance />
+
+## Assumptions
+
+- The benchmark task stands for the use the method is meant for. Planetoid accuracy with 20 labels per class says
+  little about a production graph with millions of labelled nodes.
+- The split mimics deployment: random splits for interpolation within one graph, time or scaffold splits for new
+  nodes or molecules.
+- Every method gets the same tuning budget and the same model selection protocol, inside the training data.
+
+## Pitfalls
+
+- **Reporting one split or one seed.** Report the mean and standard deviation over many splits and seeds, and the
+  number of each.
+- **Tuning on the test set.** Selecting hyperparameters or epochs by test accuracy, common on Planetoid, inflates
+  results. Select on a validation set inside the training data.
+- **Leaving test edges or duplicates in.** Check for duplicated nodes and graphs, remove held-out edges from the
+  message passing graph, and use scaffold splits for molecules.
+- **Skipping the structure-agnostic baseline.** An <Gloss name="mlp" /> on node features, a fingerprint model on
+  molecules, and the common-neighbour heuristic on links show how much of a score the graph and the architecture account
+  for.
+- **Comparing across protocols.** Numbers from papers with different splits, metrics or parameter budgets cannot be
+  compared; OGB and the Benchmarking-GNNs suite fix these to make comparison possible.

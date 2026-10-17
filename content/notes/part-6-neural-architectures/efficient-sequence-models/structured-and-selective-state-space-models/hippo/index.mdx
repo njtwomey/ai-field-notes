@@ -1,0 +1,251 @@
+---
+title: 'HiPPO'
+kind: concept
+summary: 'HiPPO derives the matrices $(\Amat,\Bmat)$ of a linear system whose state holds the coefficients of the best polynomial approximation of the input history under a measure: scaled Legendre (LegS) for the whole past, translated Legendre (LegT) for a sliding window.'
+tags: [state-space-models, sequence-models, approximation-theory, worked-example]
+aliases:
+  [
+    HiPPO matrix,
+    high-order polynomial projection operator,
+    HiPPO-LegS,
+    HiPPO-LegT,
+    online function approximation,
+    Legendre memory unit,
+    LMU,
+  ]
+requires: [state-space-representation, linear-systems-and-the-matrix-exponential]
+related:
+  [
+    structured-state-space-models,
+    linear-recurrent-unit-and-s5,
+    orthogonal-projection,
+    fourier-series,
+    polynomial-interpolation-and-runge,
+    vanishing-and-exploding-gradients,
+  ]
+references: [gu2020hippo, gu2023hippo, gu2022s4, smith2023s5]
+status: draft
+updated: 2026-10-17
+---
+
+import { HippoMemory } from './HippoMemory'
+
+<Definition>
+**HiPPO** (high-order polynomial projection operators) is a rule for choosing the matrices of a linear system
+$\dot\hvec(t) = \Amat(t)\hvec(t) + \Bmat(t)u(t)$, with state $\hvec(t) \in \reals^N$ and scalar input $u(t)$, so that
+at every time $t$ the state holds the $N$ coefficients of the best approximation of the input history
+$\{u(s) : s \le t\}$ by a polynomial of degree $N - 1$. "Best" is least squares under a measure $\mu^{(t)}$ that says
+how much each past instant counts. The uniform measure on a sliding window $[t - \theta, t]$ gives **HiPPO-LegT**
+(translated Legendre); the uniform measure on the whole history $[0, t]$ gives **HiPPO-LegS** (scaled Legendre)
+<Cite id="gu2020hippo" />.
+</Definition>
+
+## Intuition
+
+A recurrent network must compress everything it has read into a fixed-size state. A
+<NoteLink to="recurrent-neural-network">recurrent network</NoteLink> with random weights does this badly: the influence
+of an input decays or grows geometrically with its age, and its <NoteLink
+to="vanishing-and-exploding-gradients">gradients vanish or explode</NoteLink> over long spans. HiPPO asks what a
+memory of $N$ numbers should hold and answers with approximation theory.
+
+A function on an interval is well summarised by its first $N$ coefficients in an orthogonal polynomial basis, as a
+periodic function is by its first <NoteLink to="fourier-series">Fourier coefficients</NoteLink>. The coefficients are
+inner products, an <NoteLink to="orthogonal-projection">orthogonal projection</NoteLink> onto the span of the first
+$N$ polynomials. As time advances, the history grows by one instant and the interval moves or stretches. The
+coefficients change, and HiPPO shows that for Legendre polynomials on these intervals they change by a linear
+differential equation driven by the newest input. That equation is a state-space system, so a linear recurrent layer
+can maintain the projection online, one input at a time, with no record of the past beyond the $N$ coefficients.
+
+## The projection
+
+Let $P_n$ be the Legendre polynomial of degree $n$ on $[-1, 1]$: $P_0(z) = 1$, $P_1(z) = z$ and
+$(n+1)P_{n+1}(z) = (2n+1)zP_n(z) - nP_{n-1}(z)$. The $P_n$ are orthogonal on $[-1, 1]$ with
+$\int_{-1}^{1} P_n P_k\,dz = 2\delta_{nk}/(2n+1)$, and $P_n(1) = 1$, $P_n(-1) = (-1)^n$.
+
+At time $t$, let the history window be $[a_t, t]$ with length $\ell_t = t - a_t$: $a_t = t - \theta$ for LegT and
+$a_t = 0$ for LegS. Map the window onto $[-1, 1]$ by $z = 2(s - a_t)/\ell_t - 1$, and define the basis
+
+$$
+g_n^{(t)}(s) = \sqrt{2n+1}\,P_n\!\paren{\frac{2(s - a_t)}{\ell_t} - 1}, \qquad n = 0, \dots, N - 1.
+$$
+
+Under the uniform measure $d\mu^{(t)}(s) = ds/\ell_t$ on the window these functions are orthonormal: the factor
+$2n+1$ cancels the norm $2/(2n+1)$, and the change of variable contributes $\ell_t/2$, which the measure divides by
+$\ell_t$. The best approximation is therefore given by inner products,
+
+$$
+h_n(t) = \frac{1}{\ell_t}\int_{a_t}^{t} u(s)\,g_n^{(t)}(s)\,ds, \qquad
+u(s) \approx \sum_{n=0}^{N-1} h_n(t)\,g_n^{(t)}(s) \ \text{ for } s \in [a_t, t].
+$$
+
+The vector $\hvec(t) = (h_0(t), \dots, h_{N-1}(t))$ is the memory. $h_0(t)$ is the mean of $u$ over the window, $h_1$
+measures its trend, and higher coefficients carry finer detail.
+
+## The sliding window: LegT
+
+Differentiate $h_n(t)$ with $\ell_t = \theta$ fixed. Both ends of the integral move, and the basis moves with them:
+
+$$
+\dot h_n(t) = \frac{1}{\theta}\Big[u(t)\,g_n^{(t)}(t) - u(t - \theta)\,g_n^{(t)}(t - \theta)\Big]
++ \frac{1}{\theta}\int_{t-\theta}^{t} u(s)\,\frac{\partial g_n^{(t)}(s)}{\partial t}\,ds.
+$$
+
+Each piece is a combination of the coefficients or of the input.
+
+1. **The new input.** At $s = t$ the argument is $z = 1$, so $g_n^{(t)}(t) = \sqrt{2n+1}$. The first term is
+   $\sqrt{2n+1}\,u(t)/\theta$.
+2. **The input leaving the window.** At $s = t - \theta$, $z = -1$ and $g_n^{(t)}(t - \theta) = \sqrt{2n+1}(-1)^n$.
+   The value $u(t - \theta)$ is no longer stored, so HiPPO replaces it by its reconstruction from the state,
+   $u(t - \theta) \approx \sum_k h_k(t)\sqrt{2k+1}(-1)^k$ <Cite id="gu2020hippo" />.
+3. **The moving basis.** $z$ falls at the rate $2/\theta$ as $t$ grows, so
+   $\partial g_n^{(t)}/\partial t = -(2/\theta)\sqrt{2n+1}\,P_n'(z)$. The derivative of a Legendre polynomial is a sum
+   of lower ones, $P_n' = \sum_{k < n,\ n - k \text{ odd}} (2k+1)P_k$, so the integral is
+   $-(2/\theta)\sqrt{2n+1}\sum_{k<n,\ n-k \text{ odd}} \sqrt{2k+1}\,h_k(t)$.
+
+Collecting the coefficient of $h_k$ from pieces 2 and 3 gives $\dot\hvec = \Amat\hvec + \Bmat u$ with
+
+$$
+A_{nk} = -\frac{\sqrt{2n+1}\sqrt{2k+1}}{\theta}\begin{cases} 1 & k < n, \\ (-1)^{n-k} & k \ge n, \end{cases}
+\qquad B_n = \frac{\sqrt{2n+1}}{\theta}.
+$$
+
+For $k < n$ the two pieces combine: $(-1)^{n+k} + 2 = 1$ when $n - k$ is odd, and $(-1)^{n+k} = 1$ when it is even.
+The system is time-invariant. It is the Legendre memory unit of Voelker and colleagues written in an orthonormal basis,
+and HiPPO's derivation explains where that unit's matrices come from <Cite id="gu2020hippo" />.
+
+## The whole history: LegS
+
+For LegS the window is $[0, t]$ and stretches as $t$ grows. The same three-step calculation, with the stretch in place
+of the slide, gives a system whose matrices are divided by $t$ <Cite id="gu2020hippo" />:
+
+$$
+\dot\hvec(t) = \frac{1}{t}\Amat\hvec(t) + \frac{1}{t}\Bmat u(t), \qquad
+A_{nk} = -\begin{cases} \sqrt{2n+1}\sqrt{2k+1} & n > k, \\ n + 1 & n = k, \\ 0 & n < k, \end{cases}
+\qquad B_n = \sqrt{2n+1}.
+$$
+
+The matrix $\Amat$ is lower triangular, so its eigenvalues are its diagonal entries $-1, -2, \dots, -N$. No input
+leaves the window, so LegS needs no reconstruction step and its online state equals the projection up to
+discretisation error.
+
+<Derivation title="Deriving the LegS system">
+With $\ell_t = t$ and $a_t = 0$, $h_n(t) = \frac{1}{t}\int_0^t u(s)\,g_n^{(t)}(s)\,ds$ and $z = 2s/t - 1$. The product
+rule gives three terms:
+
+$$
+\dot h_n = -\frac{1}{t}h_n + \frac{1}{t}u(t)\,g_n^{(t)}(t) + \frac{1}{t}\int_0^t u(s)\,\frac{\partial g_n^{(t)}(s)}{\partial t}\,ds.
+$$
+
+The second term is $\sqrt{2n+1}\,u(t)/t$, since $z = 1$ at $s = t$. For the third, $\partial z/\partial t = -2s/t^2
+= -(z+1)/t$, so $\partial g_n^{(t)}/\partial t = -\frac{1}{t}\sqrt{2n+1}\,(z+1)P_n'(z)$. The identity
+$(z+1)P_n'(z) = nP_n(z) + \sum_{k<n}(2k+1)P_k(z)$ follows from $P_n' = \sum_{k<n,\,n-k\text{ odd}}(2k+1)P_k$ and
+$zP_n' = nP_n + P_{n-1}'$. Substituting $P_k = g_k/\sqrt{2k+1}$ turns the integral into
+$-\frac{1}{t}\paren{n\,h_n + \sum_{k<n}\sqrt{2n+1}\sqrt{2k+1}\,h_k}$. Adding the three terms,
+
+$$
+\dot h_n = \frac{1}{t}\Big[-(n+1)h_n - \sum_{k<n}\sqrt{2n+1}\sqrt{2k+1}\,h_k + \sqrt{2n+1}\,u(t)\Big],
+$$
+
+which is row $n$ of the LegS system.
+</Derivation>
+
+## Properties of LegS
+
+- **No timescale to tune.** If the input is played faster, $v(s) = u(\alpha s)$, then the state follows the same path
+  faster, $\hvec_v(t) = \hvec_u(\alpha t)$. LegS has no window length and no step size that must match the data
+  <Cite id="gu2020hippo" />.
+- **Gradients decay polynomially.** The sensitivity of the state at time $t_1$ to the input at $t_0 < t_1$ is
+  $\Theta(1/t_1)$, not geometric in $t_1 - t_0$ as for a contracting recurrence <Cite id="gu2020hippo" />.
+- **Error falls with $N$.** For an input with Lipschitz constant $L$, the approximation error on $[0, t]$ is
+  $O(tL/\sqrt{N})$; with $k$ bounded derivatives it is $O(t^k N^{-k+1/2})$ <Cite id="gu2020hippo" />.
+
+## Worked example
+
+Take LegS with $N = 4$ and a step input: $u(s) = 0$ for $s < 1$ and $u(s) = 1$ for $s \ge 1$. Read the state at
+$t = 2$.
+
+**The matrices.** With $\sqrt3 = 1.732$, $\sqrt5 = 2.236$, $\sqrt7 = 2.646$,
+
+$$
+\Amat = -\begin{pmatrix} 1 & 0 & 0 & 0 \\ 1.732 & 2 & 0 & 0 \\ 2.236 & 3.873 & 3 & 0 \\ 2.646 & 4.583 & 5.916 & 4
+\end{pmatrix}, \qquad \Bmat = \begin{pmatrix} 1 \\ 1.732 \\ 2.236 \\ 2.646 \end{pmatrix}.
+$$
+
+The entry $3.873$ is $\sqrt{3}\sqrt{5}$, $4.583$ is $\sqrt{3}\sqrt{7}$ and $5.916$ is $\sqrt{5}\sqrt{7}$.
+
+**The coefficients.** At $t = 2$ the map is $z = s - 1$, so the step sits at $z = 0$ and $u = 1$ on $z \in [0, 1]$.
+With $ds = dz$ and $\ell_t = 2$, $h_n = \tfrac12\sqrt{2n+1}\int_0^1 P_n(z)\,dz$. The four integrals are
+$\int_0^1 1\,dz = 1$, $\int_0^1 z\,dz = \tfrac12$, $\int_0^1 \tfrac12(3z^2 - 1)\,dz = 0$ and
+$\int_0^1 \tfrac12(5z^3 - 3z)\,dz = -\tfrac18$. So
+
+$$
+\hvec(2) = \paren{0.5,\ \tfrac{\sqrt3}{4},\ 0,\ -\tfrac{\sqrt7}{16}} = (0.5,\ 0.433,\ 0,\ -0.165).
+$$
+
+Running the LegS recurrence over 2000 samples (step $0.001$, bilinear rule) gives the same four numbers to within
+$2 \times 10^{-4}$.
+
+**A check on the dynamics.** Row 0 of the system reads $\dot h_0 = \frac1t(-h_0 + u(t))$. At $t = 2$ this is
+$\frac12(-0.5 + 1) = 0.25$. Directly, $h_0(t) = (t-1)/t$ is the fraction of the history after the step, and its
+derivative $1/t^2$ is $0.25$ at $t = 2$.
+
+**The reconstruction.** $u(s) \approx \sum_n h_n\sqrt{2n+1}P_n(z) = 0.5 + 0.75\,z - 0.4375\,P_3(z)$, with
+$P_3(z) = \tfrac12(5z^3 - 3z)$.
+
+| $s$ | $z$ | $P_3(z)$ | reconstruction | input |
+| --- | --- | --- | --- | --- |
+| 0 | $-1$ | $-1$ | $0.188$ | 0 |
+| 0.5 | $-0.5$ | $0.4375$ | $-0.066$ | 0 |
+| 1 | 0 | 0 | $0.5$ | jump |
+| 1.5 | $0.5$ | $-0.4375$ | $1.066$ | 1 |
+| 2 | 1 | 1 | $0.813$ | 1 |
+
+Four numbers locate the jump at its midpoint value $0.5$. The cubic overshoots on both sides of the discontinuity,
+the polynomial analogue of the Gibbs phenomenon of a <NoteLink to="fourier-series">Fourier series</NoteLink>.
+
+<HippoMemory />
+
+The figure runs the same computation on longer inputs. With LegS the decoded curve always spans $[0, t]$, so dragging
+$t$ to the right spreads the same $N$ coefficients over a longer history and the reconstruction of early detail
+blurs. With LegT the decoded curve covers only the last $\theta$, at a resolution that stays fixed as $t$ moves, and
+everything older is forgotten. Raising $N$ sharpens both. On the step input the bottom panel shows coefficients of
+alternating sign that decay slowly with $n$, the signature of a discontinuity in the window.
+
+## From HiPPO to S4
+
+HiPPO was first used inside a gated recurrent cell, where the LegS memory reached 98.3% test accuracy on permuted
+sequential <Gloss name="mnist" /> <Cite id="gu2020hippo" />. A <NoteLink to="structured-state-space-models">structured
+state-space layer</NoteLink> (S4) instead uses the LegS matrices in a time-invariant system $\dot\hvec = \Amat\hvec +
+\Bmat u$, without the factor $1/t$, discretised with a learned step $\Delta$ <Cite id="gu2022s4" />. Gu and colleagues
+later showed that this time-invariant system projects the history onto Legendre polynomials in an exponentially warped
+time, so recent inputs are resolved finely and old ones coarsely, and that $\Delta$ sets the length of history the
+warp covers <Cite id="gu2023hippo" />.
+
+Two consequences shaped later models. The LegS matrix is not diagonalisable in a numerically useful basis, which led
+S4 to its normal-plus-low-rank kernel algorithm <Cite id="gu2022s4" />. And the normal part of LegS, the matrix
+**HiPPO-N** obtained by adding back a rank-one term, equals $-\tfrac12\eye$ plus a skew-symmetric matrix. Its
+eigenvalues all have real part $-\tfrac12$, and it diagonalises stably. Diagonal layers such as S4D, S5 and the
+<NoteLink to="linear-recurrent-unit-and-s5">linear recurrent unit</NoteLink> start from its eigenvalues or from rings
+of eigenvalues that imitate them <Cite id="smith2023s5" />.
+
+## Assumptions
+
+- **A continuous input sampled finely.** The derivation treats $u$ as a function of continuous time. A sequence is read
+  as samples $u_k = u(k\Delta t)$, and the discretised system approximates the continuous projection.
+- **A uniform measure.** LegT and LegS weight the window uniformly. Other measures give other systems: an exponentially
+  decaying measure gives HiPPO-LagT with Laguerre polynomials <Cite id="gu2020hippo" />.
+- **Smooth histories compress well.** The error bounds depend on the smoothness of $u$. A history full of
+  discontinuities needs many coefficients.
+
+## Pitfalls
+
+- **Stiffness.** LegS has eigenvalues down to $-N$. The eigenvalues of LegT grow in proportion to $N/\theta$, with
+  moduli up to $58.5/\theta$ for $N = 32$. Forward Euler with too large a step diverges. The bilinear rule and the
+  <NoteLink to="state-space-representation">zero-order hold</NoteLink> are stable for any step
+  <Cite id="gu2020hippo" />.
+- **LegT forgets approximately.** The input leaving the window is reconstructed from the state, not known, so LegT's
+  state is only close to the windowed projection, and its error grows near discontinuities.
+- **LegS blurs the past.** A fixed $N$ spread over a growing interval loses resolution on old inputs at rate $1/t$.
+  Tasks that need sharp recall of one distant token need a larger $N$ or a different mechanism.
+- **The time-invariant variant is a different system.** S4's use of the LegS matrices without $1/t$ does not hold the
+  uniform projection of the history. Its state is the warped projection described above.

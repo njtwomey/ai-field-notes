@@ -1,0 +1,184 @@
+---
+title: 'Propositionalisation and relational learning'
+kind: concept
+summary: 'Propositionalisation turns relational data, such as customers with many orders, into one feature vector per example by constructing first-order features, so an attribute-value learner applies. RSD and Wordification build such features.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['propositionalization', 'relational feature construction', 'Wordification', 'RSD', 'RELAGGS', 'LINUS']
+requires: [inductive-logic-programming]
+related: [relational-feature-aggregation, tabular-and-relational-data, multi-table-data, multiple-instance-learning, subgroup-discovery, decision-lists-and-rule-sets, automated-feature-engineering, graph-neural-networks, knowledge-graph-embeddings]
+references: [kramer2001propositionalisation, lavrac1991linus, zelezny2006rsd, krogel2001relaggs, perovsek2015wordification, krogel2003comparative, lavrac2020embeddings, dietterich1997, deraedt2008, fey2024]
+status: draft
+updated: 2026-10-17
+---
+
+import { RelationalFlattening } from './RelationalFlattening'
+
+<Definition>
+**Propositionalisation** transforms a <NoteLink to="multi-table-data">relational learning</NoteLink> problem into an
+attribute-value one. The examples are **individuals**, such as customers, each linked to any number of rows in other
+tables, such as orders. A set of **first-order features** is constructed, each a query with one free variable for the
+individual, such as $f(I) \leftarrow \text{order}(I, O) \land \text{late}(O) \land \text{high}(O)$. Evaluating every
+feature on every individual gives a table with one row per individual and one column per feature, on which any
+propositional learner can be trained <Cite id="kramer2001propositionalisation" />.
+</Definition>
+
+## Intuition
+
+A churn model predicts, for each customer, whether the customer leaves. The evidence sits in a second table: one
+customer has two orders, another has three, a third has one. A <NoteLink to="decision-tree">decision tree</NoteLink>, a
+<NoteLink to="logistic-regression">logistic regression</NoteLink> or a gradient-boosted ensemble needs a fixed number of
+columns per customer. The orders do not fit that shape.
+
+Joining the two tables gives one row per order, with the customer's label copied onto each row. That table has the
+wrong unit. A customer who left because of one bad order contributes a good order labelled "churned" as well, and a
+model trained on the rows learns that good orders cause churn.
+
+<NoteLink to="inductive-logic-programming">Inductive logic programming</NoteLink> keeps the orders as facts and learns
+clauses over them. Propositionalisation keeps the propositional learner and moves the relational work into
+<NoteLink to="feature-construction">feature construction</NoteLink>. It asks questions about each customer's set of
+orders: "does the customer have a late order?", "how many orders were placed online?", "does the customer have an order
+that was both late and expensive?". Each answer is one column. Once the columns exist, any tabular learner applies, with
+its tuning tools and its speed.
+
+The last question differs from the first two in a way that decides what can be learnt. "Has a late order and has an
+expensive order" can be true of a customer whose late order was cheap and whose expensive order was on time. "Has an
+order that was late and expensive" requires both properties of the same order. A feature that names the order with a
+variable, $O$, and tests it twice expresses the second. A per-attribute count or a pair of per-attribute features
+cannot.
+
+## Details
+
+### Individuals and their parts
+
+Propositionalisation applies to **individual-centred** problems: each example is one object of a target table, and the
+other tables describe its parts or its history through a chain of foreign keys. Customers and their orders, molecules
+and their atoms, patients and their visits are individual-centred. A problem whose target relates two objects, such as
+<NoteLink to="knowledge-graph-rule-mining">link prediction in a knowledge graph</NoteLink>, is not: there is no single
+individual to describe.
+
+Each individual owns a set of rows in each child table, of varying size. The same structure appears in
+<NoteLink to="multiple-instance-learning">multiple-instance learning</NoteLink>, where each example is a bag of
+instances <Cite id="dietterich1997" />. An existential feature "some row of the bag passes these tests" is the standard
+multiple-instance assumption written as a feature. Attribute-value, multiple-instance and relational representations
+form a hierarchy of increasing expressiveness, and propositionalisation maps a problem one or two levels down it
+<Cite id="deraedt2008" />.
+
+### First-order features
+
+A first-order feature is a conjunction of literals with one global variable $I$, the individual, and local variables
+for its parts. The feature $f(I) \leftarrow \text{order}(I, O) \land \text{late}(O) \land \text{high}(O)$ has one local
+variable, $O$, and is true of a customer when some order of the customer is late and of high value. A feature is
+**minimal** when it cannot be split into two features that share no local variable. The conjunction
+$\text{order}(I, O_1) \land \text{late}(O_1) \land \text{order}(I, O_2) \land \text{high}(O_2)$ splits into "has a late
+order" and "has a high-value order", so it is two features, not one <Cite id="lavrac2020embeddings" />.
+
+For one child table with $m$ categorical attributes of $v$ values each, a feature that tests $j$ distinct attributes
+of one row is fixed by choosing the attributes and their values. With at most $k$ tests per feature there are
+
+$$
+\sum_{j=1}^{k} \binom{m}{j} v^{j}
+$$
+
+candidate features. Three binary attributes and $k = 2$ give $3 \cdot 2 + 3 \cdot 4 = 18$. The count grows
+exponentially in $k$, and longer chains of foreign keys (orders, then the items of each order) multiply it again.
+
+### Constructions
+
+The systems differ in which features they generate and how they filter them <Cite id="krogel2003comparative" />.
+
+| Construction | Features | Example system |
+| --- | --- | --- |
+| Attribute tests | tests on the individual's own arguments, with no local variables and no joins | LINUS <Cite id="lavrac1991linus" /> |
+| Existential conjunctions | every minimal conjunction allowed by mode declarations, above a support threshold | RSD <Cite id="zelezny2006rsd" /> |
+| Aggregation | counts, sums, means, minima and maxima over each child table | RELAGGS <Cite id="krogel2001relaggs" /> |
+| Words | `table_attribute_value` items and conjunctions of two items of one row, weighted like text | Wordification <Cite id="perovsek2015wordification" /> |
+
+LINUS, an early system, transformed an <Gloss name="ilp" /> problem into a table, ran a propositional rule learner, and
+translated the rules back into clauses. Its features could not introduce local variables or join literals, so a
+customer's many orders were out of reach <Cite id="lavrac2020embeddings" />. RSD generates every feature that the user's
+mode declarations allow up to a given length, keeps the minimal ones that hold for enough individuals, and passes the
+table to <NoteLink to="subgroup-discovery">subgroup discovery</NoteLink> or any other learner. RELAGGS summarises child
+tables by aggregate functions, the same operation as <NoteLink to="relational-feature-aggregation">relational and
+aggregate features</NoteLink> in <NoteLink to="feature-engineering">feature engineering</NoteLink>. Wordification turns
+each individual into a document whose words are its attribute values and pairs of values from one row, and weights them
+by <NoteLink to="term-frequency-inverse-document-frequency">TF-IDF</NoteLink>, so text-classification tools apply
+<Cite id="lavrac2020embeddings" />.
+
+### Propositionalisation against direct clause learning
+
+An ILP learner such as <NoteLink to="foil">FOIL</NoteLink> searches clauses and evaluates each against the examples as
+it goes. Propositionalisation is a static step: it generates the features once, without the labels, and leaves the
+search to the propositional learner. A clause whose body is one minimal feature corresponds to a single column. A clause
+whose body combines several features corresponds to a conjunction of columns, which a rule or tree learner finds. The
+two coincide whenever the target is a <Gloss name="dnf" /> of features that the generator produced. They part when the
+target needs a feature longer than the generator's bound, or a relation between two parts, such as two orders placed on
+the same day: the generator must have produced that exact feature, while a clause learner can build it from the
+literals.
+
+### Practice
+
+Relational data in industry is usually flattened by hand-written aggregates or by deep feature synthesis
+(<NoteLink to="automated-feature-engineering">automated feature discovery</NoteLink>). Existential features of the RSD
+kind matter where the target depends on a combination of properties of one part, which aggregates of single columns
+miss. Lavrač, Škrlj and Robnik-Šikonja show that propositionalisation and
+<NoteLink to="dimensionality-reduction">embedding methods</NoteLink> are two forms of one transformation into a table,
+and combine Wordification with learned embeddings <Cite id="lavrac2020embeddings" />. Relational deep learning goes
+further and trains a <NoteLink to="graph-neural-networks">graph neural network</NoteLink> on the database's row graph,
+which learns its own aggregations <Cite id="fey2024" />.
+
+## Worked example
+
+The database in the figure has eight customers, each with a plan (basic or premium) and a label, churned or not, and
+fifteen orders, each with a delivery (late or on time), a value (high or low) and a channel (web or store). The labels
+follow one rule: a customer churned exactly when one of their orders was late and of high value. Amy, Dan and Fin
+churned.
+
+1. **The joined table.** Joining orders to customers gives 15 rows. Amy's two orders are (late, high, web) and
+   (on time, low, store); both rows carry Amy's label, churned, so the on-time, low-value order is a positive example.
+2. **Single-test features.** With one test per feature there are $3 \cdot 2 = 6$ candidates, such as "has a late
+   order". "Has a low-value order" holds of exactly the customers who have a web order, so the coverage filter drops
+   it, and 5 remain. Ben's orders are (late, low, store) and (on time, high, web). Amy and Ben both have a late, an
+   on-time, a high-value, a low-value, a web and a store order, and both are on the basic plan. Their rows are
+   identical, their labels differ, and no learner on this table classifies both correctly.
+3. **Counts.** RELAGGS-style counts give Amy and Ben the same vector: 2 orders, 1 late, 1 on time, 1 high, 1 low, 1 web
+   and 1 store. Counting each attribute separately loses which values occur together in one order.
+4. **Two-test features.** With up to two tests, the $3 \cdot 4 = 12$ pairs join the 6 single tests, and all 12 survive
+   the filters, for 17 features. The feature "has an order with delivery = late and value = high" is 1 for Amy, Dan
+   and Fin and 0 for the other five: it equals the label. Ben's late order is cheap and his expensive order was on
+   time, so the feature is 0 for him.
+5. **The learner.** A <NoteLink to="decision-lists-and-rule-sets">decision list</NoteLink> learnt by
+   <NoteLink to="sequential-covering">sequential covering</NoteLink> on the 17 features plus the plan needs one rule: if
+   the late-and-high feature is 0, the customer stays; otherwise the customer churns. It makes no training error. On the
+   single-test table it makes at least one error, at Amy or Ben.
+6. **Wordification.** With pairs of words, each customer's document contains `order_delivery_late__order_value_high`
+   once for each late high-value order. The vocabulary has 18 words, and the same one-rule list is learnt.
+
+<RelationalFlattening />
+
+## Assumptions
+
+- **The problem is individual-centred.** Each example is one object whose parts hang off it. Targets that relate two
+  objects, or recursive targets such as ancestor, have no such form.
+- **The target is a combination of bounded features.** A generator with at most $k$ tests per feature can only supply
+  conjunctions of $k$ tests on one part. A target such as "two orders on consecutive days" needs a feature with two
+  local variables and a relation between them.
+- **Attributes are categorical or discretised.** Equality tests on numbers produce one feature per value. Numeric
+  attributes are binned first, or summarised by aggregates.
+
+## Pitfalls
+
+- **Feature explosion.** The candidate count grows as $v^k$ per attribute combination, and most features hold for few
+  individuals. With many features and few individuals a propositional learner finds spurious conjunctions; support
+  thresholds and <NoteLink to="feature-selection">feature selection</NoteLink> are needed.
+- **Aggregates lose co-occurrence.** Counts of single attribute values cannot tell Amy from Ben. Aggregating over
+  conditions, such as the count of late high-value orders, recovers it, but that condition is itself a first-order
+  feature that someone had to construct.
+- **Joining before aggregating multiplies rows.** Two child tables joined to the customer before aggregation give one
+  row per pair of child rows, and every sum is inflated
+  (<NoteLink to="relational-feature-aggregation">relational and aggregate features</NoteLink>).
+- **Leakage through child rows.** Features computed from orders placed after the moment of prediction leak the future
+  into training (<NoteLink to="data-leakage">data leakage</NoteLink>). Every child table needs a time cutoff per
+  example.
+- **Static features miss the target.** The generator runs before the learner and does not see the labels, so a feature
+  one test longer than the bound is never produced. A learner that searches clauses directly, such as
+  <NoteLink to="inverse-entailment-and-progol">Progol</NoteLink>, extends its hypotheses where the data demand it.

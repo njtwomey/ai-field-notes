@@ -1,0 +1,93 @@
+---
+title: 'Depth and long-range information in graph networks'
+kind: overview
+summary: 'Two limits of deep message passing: repeated averaging makes node features alike (oversmoothing), and information from many distant nodes is squeezed through few edges (oversquashing). Residual and jumping-knowledge connections, rewiring and graph transformers address them.'
+tags: [graph-neural-networks, deep-learning, overview]
+aliases: []
+requires: [graph-convolutional-network]
+related: [graph-neural-networks, expressiveness-of-graph-neural-networks, message-passing-layers, graph-learning-tasks]
+references: [chen2020gcnii, rusch2023oversmoothing, topping2022curvature, muller2024attending]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+This chapter covers what happens to a <Gloss name="gnn">graph neural network</Gloss> as it gets deeper and as the
+nodes that must interact get further apart. A message passing network with $L$ layers lets each node read its $L$-hop
+neighbourhood, so long-range tasks seem to need deep networks. Two effects stop that from working: features converge
+to one profile with depth, and information from distant nodes is compressed through the graph's bottlenecks. The notes
+derive both effects and the architectures that counter them.
+</Definition>
+
+## What it is for
+
+Many <NoteLink to="graphs-as-neural-network-inputs">graph tasks</NoteLink> depend on nodes far apart: whether two atoms
+at opposite ends of a protein fragment are in contact, which function a peptide of a hundred residues has, or how a
+signal spreads across a road network. A <NoteLink to="graph-convolutional-network">graph convolutional
+network</NoteLink> with two or three layers sees only two or three hops. Stacking more layers of the same kind usually
+makes accuracy worse, not better. On the Cora citation graph the accuracy of a plain GCN falls from 81.1% at 2 layers to
+28.7% at 64 <Cite id="chen2020gcnii" />.
+
+The chapter explains that failure in terms a practitioner can measure, the spectrum of the propagation matrix and the
+sensitivity of one node's output to another node's input, and it compares the fixes by what they change and what they
+cost.
+
+## Main ideas
+
+**Repeated averaging converges.** A graph convolution multiplies the features by a normalised adjacency matrix whose
+top eigenvalue is 1 and whose others have magnitude below 1. Repeated multiplication keeps only the top eigenvector, so
+every node's features approach one shared vector scaled by its degree. The Dirichlet energy, the degree-normalised
+squared difference across edges, falls at least geometrically, at a rate set by the second-largest eigenvalue
+magnitude. <NoteLink to="oversmoothing" /> derives the rate, shows that a few layers help before many layers hurt, and
+defines PairNorm, which holds the spread of the features fixed.
+
+**Skip paths change the limit.** A plain residual connection only slows the convergence. A connection back to the
+input changes where the features converge: with restart weight $\alpha$, propagation converges to personalised
+PageRank features, which still depend on the input. GCNII adds this initial residual and an identity mapping to every
+layer and trains at 64 layers. Jumping knowledge lets each node combine the outputs of all its layers.
+<NoteLink to="residual-and-jumping-knowledge-graph-networks" /> covers these designs, DropEdge, and their costs.
+
+**Bottlenecks throttle long-range signal.** The influence of node $u$'s input on node $v$'s output after $r$ layers is
+bounded by the $(v, u)$ entry of the $r$-th power of the normalised adjacency <Cite id="topping2022curvature" />. That
+entry is a sum over paths of products of inverse square-root degrees, small when few paths join the two nodes. The
+Cheeger constant, the spectral gap, negative edge curvature and effective resistance all measure such bottlenecks.
+<NoteLink to="oversquashing-and-graph-rewiring" /> derives the bound and computes it on a barbell graph.
+
+**Rewiring adds routes.** Adding edges across bottlenecks, by curvature (SDRF), by the first-order change of the
+spectral gap (FoSR) or by a virtual node joined to every node, shortens the paths between distant nodes. Rewiring also
+raises the spectral gap and so speeds up oversmoothing: the two effects pull in opposite directions, and a good design
+balances them.
+
+**Global attention is the extreme rewiring.** A <NoteLink to="graph-transformer" /> lets every node attend to every
+other node, so every pair is one hop apart, and supplies the graph through <NoteLink to="positional-encoding">positional
+encodings</NoteLink>, a learned bias per shortest-path distance or a message passing branch beside the attention. It
+costs $O(N^2)$ per layer in the number of nodes $N$, so large graphs need sparse or
+<NoteLink to="linear-attention">linear attention</NoteLink> <Cite id="muller2024attending" />.
+
+## How the notes fit together
+
+- Start with <NoteLink to="oversmoothing" />. The spectral argument there underlies every other note in the chapter.
+- <NoteLink to="residual-and-jumping-knowledge-graph-networks" /> uses the same example graph and asks which
+  connections stop the collapse.
+- <NoteLink to="oversquashing-and-graph-rewiring" /> moves from depth to distance: networks deep enough to reach a node
+  that still cannot hear it.
+- <NoteLink to="graph-transformer" /> takes rewiring to the complete graph and covers how the structure is put back.
+
+All four notes measure a network by quantities of the weight-free propagation matrix, so their figures can be compared:
+the energy decay of oversmoothing, the matrix powers of oversquashing and the distance bias of attention. Preventing
+oversmoothing alone does not make a deep network useful <Cite id="rusch2023oversmoothing" />; the notes give the
+evidence for and against depth in each case.
+
+## Prerequisites and next steps
+
+The chapter assumes the <NoteLink to="graph-convolutional-network" /> and the
+<NoteLink to="graph-laplacian-and-graph-fourier-transform" />, whose eigenvalues carry most of the arguments. The
+<NoteLink to="message-passing-neural-network" /> note gives the general layer, and
+<NoteLink to="positional-and-structural-encodings" /> gives the encodings that graph transformers rely on.
+
+Depth is one limit of message passing; expressiveness is another, covered in
+<NoteLink to="expressiveness-of-graph-neural-networks" />. The tasks where long-range information matters, molecules,
+benchmarks with long-range dependencies and <NoteLink to="graph-neural-networks-under-heterophily">heterophilous
+graphs</NoteLink>, are in <NoteLink to="graph-learning-tasks" />. The same tension between depth and smoothing appears
+in <NoteLink to="label-spreading" /> for <NoteLink to="semi-supervised-learning">semi-supervised learning</NoteLink>,
+and the attention mechanisms come from the <NoteLink to="transformer" />.

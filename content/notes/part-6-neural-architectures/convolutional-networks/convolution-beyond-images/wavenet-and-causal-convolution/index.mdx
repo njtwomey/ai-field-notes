@@ -1,0 +1,232 @@
+---
+title: 'WaveNet and causal convolution'
+kind: concept
+summary: 'A causal convolution reads only the current and earlier inputs. Doubling the dilation at each layer gives a receptive field of $2^L$ steps from $L$ layers with kernel 2. WaveNet stacks such layers with gated activations to model raw audio one sample at a time.'
+tags: [convolutional-networks, sequence-models, generative-models, deep-learning, worked-example]
+aliases: ['WaveNet', 'causal convolution', 'dilated causal convolution', 'gated activation unit']
+requires: [one-dimensional-convolutional-networks, receptive-field-and-dilated-convolution]
+related: [temporal-convolutional-networks, autoregressive-generative-models, causal-masking, pixelcnn-and-masked-convolution, teacher-forcing-and-exposure-bias, long-convolution-models, mamba, mel-spectrogram, residual-network]
+references: [oord2016c, yu2016, itu1988g711, paine2016, oord2017parallel, kalchbrenner2018wavernn, kong2020hifigan, shen2018tacotron2, bai2018, kalchbrenner2016bytenet, gu2023mambacode, defossez2022encodec]
+status: draft
+updated: 2026-10-17
+---
+
+import { CausalDilationLadder } from './CausalDilationLadder'
+import { WaveNetBlock } from './WaveNetBlock'
+
+<Definition>
+A **causal convolution** is a one-dimensional convolution whose output at time $t$ depends only on the inputs at times
+$t, t - 1, \dots$. With kernel size $k$ and dilation $d$ it computes $y_t = \sum_{i=0}^{k-1} w_i\, x_{t - id}$. A stack
+of $L$ such layers with dilations $d_1, \dots, d_L$ has a receptive field of $1 + (k - 1)\sum_l d_l$ steps; with $k = 2$
+and $d_l = 2^{l-1}$ that is $2^L$. **WaveNet** is an <Gloss name="ar">autoregressive model</Gloss> of raw audio,
+$p(\xvec) = \prod_t p(x_t \mid x_1, \dots, x_{t-1})$, built from stacks of dilated causal convolutions with gated
+activations, residual and skip connections, and a softmax over 256 quantised amplitude levels at every step
+<Cite id="oord2016c" />.
+</Definition>
+
+## Intuition
+
+An autoregressive model generates a sequence one value at a time, each drawn from a distribution conditioned on the
+values before it. Training such a model means fitting $p(x_t \mid x_{<t})$ at every $t$ of every training sequence. A
+convolutional network can compute all those conditionals in one parallel pass if no output reads an input from its own
+future. A causal convolution enforces that rule by placing every tap at or before the output's time step. It plays the
+role that the <NoteLink to="causal-masking">causal mask</NoteLink> plays in a transformer decoder and that masked
+kernels play in <NoteLink to="pixelcnn-and-masked-convolution">PixelCNN</NoteLink>.
+
+Raw audio makes the receptive field the central problem. Speech is sampled at 16,000 values per second or more, and a
+phoneme lasts about a tenth of a second, so a model that hears one phoneme back must see over a thousand samples. A
+stack of undilated causal layers with kernel size 2 adds one step per layer, so a 1,000-step field would need 1,000
+layers. A <NoteLink to="receptive-field-and-dilated-convolution">dilated convolution</NoteLink> spaces its taps $d$
+steps apart. Doubling the dilation at every layer doubles the field with every layer, so ten layers see 1,024 steps
+with ten pairs of weights per channel pair.
+
+## Details
+
+### Causal convolution
+
+A library convolution with kernel size $k$, dilation $d$ and no padding has output $t$ read inputs
+$t, t + d, \dots, t + (k - 1)d$. Padding the sequence with $(k - 1)d$ zeros on the left only, and none on the right,
+shifts every window back so that output $t$ reads inputs $t - (k - 1)d, \dots, t$. The output then has the input's
+length, and output $t$ sits at time $t$. Writing the taps in reverse order of time gives the form
+$y_t = \sum_{i=0}^{k-1} w_i\, x_{t - id}$, where $w_0$ multiplies the current input. A layer that predicts $x_{t+1}$
+from $y_t$ reads $x_t$ and earlier; a model that predicts $x_t$ itself shifts the targets by one step, so the first
+layer never sees the value it predicts.
+
+Symmetric padding, the default "same" padding of most libraries, puts half the zeros on the right. Output $t$ then reads
+inputs up to $\lceil (k - 1)d/2 \rceil$ steps ahead, which breaks causality silently: the shapes are unchanged and
+the training loss falls, because the network can copy the answer from the future.
+
+### Dilation and the receptive field
+
+Consider a unit at time $s$ in layer $L$ of a stack of causal layers with kernel size $k$. Layer $L$ reads layer
+$L - 1$ at times $s - i_L d_L$ for $i_L \in \set{0, \dots, k - 1}$. Each of those reads layer $L - 2$ at a further
+offset $i_{L-1} d_{L-1}$, and so on down to the input. The unit therefore depends on the inputs at
+
+$$
+s - \sum_{l=1}^{L} i_l\, d_l, \qquad i_l \in \set{0, 1, \dots, k - 1}.
+$$
+
+The smallest offset is 0, with every $i_l = 0$. The largest is $(k - 1)\sum_l d_l$, with every $i_l = k - 1$. The span
+of inputs from the earliest to the current one is the receptive field,
+
+$$
+R = 1 + (k - 1)\sum_{l=1}^{L} d_l.
+$$
+
+Without dilation, $d_l = 1$ and $R = 1 + L(k - 1)$: one step per layer for $k = 2$. With $d_l = 2^{l-1}$ the sum is a
+geometric series, $\sum_{l=1}^{L} 2^{l-1} = 2^L - 1$, so $R = 1 + (k - 1)(2^L - 1)$, which is $2^L$ for $k = 2$. The
+weights grow linearly in $L$ and the field exponentially.
+
+The span does not guarantee that every input inside it is read. For $k = 2$ and doubling dilations the offsets are
+$\sum_l i_l 2^{l-1}$ with each $i_l \in \set{0, 1}$: the binary representations of $0, 1, \dots, 2^L - 1$. Every input
+in the span is read, through exactly one path. Dilation 2 in every layer reaches only even offsets, and dilations
+$1, 4, 16$ with $k = 2$ reach offsets $\set{0, 1, 4, 5, 16, 17, 20, 21}$ and leave gaps.
+
+<Derivation title="When a dilation schedule leaves no gaps">
+Let $S_l = (k - 1)\sum_{j \le l} d_j$ be the largest offset after $l$ layers. Suppose the offsets reachable after
+$l - 1$ layers are all of $\set{0, 1, \dots, S_{l-1}}$. Layer $l$ adds $i\, d_l$ for $i = 0, \dots, k - 1$, so the
+reachable set after $l$ layers is the union of the intervals $[i\, d_l,\ i\, d_l + S_{l-1}]$. Consecutive intervals
+touch or overlap when $d_l \le S_{l-1} + 1$, and then the union is all of $\set{0, \dots, S_l}$. The first layer reaches
+$\set{0, \dots, (k - 1)d_1}$ without gaps when $d_1 = 1$. By induction, a schedule with $d_1 = 1$ and
+$d_l \le 1 + (k - 1)\sum_{j < l} d_j$ for every $l$ has no gaps. Doubling satisfies it for every $k \ge 2$, because
+$2^{l-1} \le 1 + (k - 1)(2^{l-1} - 1)$. Quadrupling with $k = 2$ violates it at $l = 2$, since $4 > 1 + 1$.
+</Derivation>
+
+WaveNet doubles the dilation up to a limit and then starts again: $1, 2, 4, \dots, 512, 1, 2, 4, \dots, 512, \dots$
+<Cite id="oord2016c" />. One block of ten layers has $R = 1 + (1 + 2 + \dots + 512) = 1024$, the span of a single
+1,024-tap filter, with ten two-tap filters and a nonlinearity after each. Each further block adds 1,023 steps, so three
+blocks see $1 + 3 \times 1023 = 3070$ samples. Repeating blocks adds depth and nonlinearity without letting the
+dilation outgrow the sequence. The same schedule on images, with centred kernels, is the context module of Yu and
+Koltun <Cite id="yu2016" />.
+
+<CausalDilationLadder />
+
+### WaveNet
+
+WaveNet models a waveform $x_1, \dots, x_T$ by the <NoteLink to="conditional-probability">chain rule of
+probability</NoteLink>. A stack of dilated causal convolutions maps the waveform to a
+<NoteLink to="categorical-distribution">categorical distribution</NoteLink> over the next sample at every time step, and
+training maximises the log-likelihood of the observed samples <Cite id="oord2016c" />. During training the true past is
+fed in, so all $T$ conditionals come from one parallel pass, as in
+<NoteLink to="teacher-forcing-and-exposure-bias">teacher forcing</NoteLink>.
+
+**Quantisation.** Audio is stored as 16-bit integers, and a softmax over 65,536 values per step is costly and
+data-hungry. WaveNet first compresses the amplitude $x \in (-1, 1)$ by μ-law companding <Cite id="itu1988g711" />,
+
+$$
+f(x) = \sgn(x)\, \frac{\ln(1 + \mu \abs{x})}{\ln(1 + \mu)}, \qquad \mu = 255,
+$$
+
+and quantises $f(x) \in (-1, 1)$ to 256 equal steps. The logarithm spends most levels on quiet sounds: the levels near
+0 are about $1.7 \times 10^{-4}$ apart in $x$ and those near $\pm 1$ about $0.043$ apart, a ratio of $1 + \mu = 256$.
+A softmax over 256 classes makes no assumption about the shape of the distribution, which can be skewed or have
+several modes.
+
+**Gated activation.** Each layer computes two dilated convolutions of its input $\hvec$, a filter and a gate, and
+multiplies them elementwise:
+
+$$
+\zvec = \tanh(\Wmat_{f} * \hvec) \odot \sigma(\Wmat_{g} * \hvec),
+$$
+
+where $*$ is the dilated causal convolution, $\odot$ the elementwise product and $\sigma$ the logistic sigmoid. The
+gate, between 0 and 1, decides how much of each filter channel passes. The authors found it modelled audio better than a
+<Gloss name="relu" /> <Cite id="oord2016c" />. The same gating appears in the
+<NoteLink to="gated-feed-forward-layers">gated linear units</NoteLink> of later <Gloss name="language-model">language
+models</Gloss>.
+
+**Residual and skip connections.** A $1 \times 1$ convolution of $\zvec$ is added to the layer's input and passed to
+the next layer, a <NoteLink to="residual-network">residual connection</NoteLink>. A second $1 \times 1$ convolution
+sends a copy to a skip sum. The output head adds the skip outputs of every layer, applies a ReLU, a $1 \times 1$
+convolution, a ReLU and another $1 \times 1$ convolution, and ends with the softmax.
+
+**Conditioning.** A conditional WaveNet models $p(\xvec \mid \hvec)$. A global condition, such as a speaker embedding,
+is projected and added inside the filter and the gate at every time step. A local condition, such as linguistic features
+or a <NoteLink to="mel-spectrogram">mel spectrogram</NoteLink> at a lower rate, is upsampled to the audio rate and added
+the same way. Tacotron 2 used a WaveNet conditioned on predicted mel spectrograms as its vocoder and reached a
+<NoteLink to="learned-speech-quality-metrics">mean opinion score</NoteLink> of 4.53, against 4.58 for recorded speech
+<Cite id="shen2018tacotron2" />.
+
+<WaveNetBlock />
+
+### Generation
+
+Generation is sequential. Each sample is drawn from the softmax, appended to the input, and the network runs again for
+the next. One second of 16 kHz audio takes 16,000 network evaluations, one after another.
+
+Recomputing the whole receptive field for every new sample wastes work. For one block with $k = 2$ and $L$ layers, the
+output unit at time $t$ needs 2 units of layer $L - 1$, 4 of layer $L - 2$ and $2^{L-1}$ of layer 1: $2^L - 1$ unit
+evaluations, 1,023 for $L = 10$. All but one unit per layer were already computed at earlier steps. Fast WaveNet keeps,
+for each layer, a queue of the last $d_l$ activations of the layer below, so each new sample costs one unit per layer:
+$L$ evaluations, 10 instead of 1,023 <Cite id="paine2016" />. The queues hold
+$\sum_l (k - 1) d_l = R - 1$ activations per channel.
+
+Even with caching, sample-by-sample generation is slow on parallel hardware. Parallel WaveNet trains a feed-forward
+student, an <NoteLink to="autoregressive-flows">inverse autoregressive flow</NoteLink>, to match a trained WaveNet, and
+generates speech more than 20 times faster than real time <Cite id="oord2017parallel" />. WaveRNN replaced the stack
+with a single recurrent layer optimised for sequential sampling <Cite id="kalchbrenner2018wavernn" />. Adversarially
+trained vocoders such as HiFi-GAN generate all samples in parallel from a mel spectrogram, 167.9 times faster than real
+time on one V100 <Gloss name="gpu" /> in their paper <Cite id="kong2020hifigan" />. Today's speech systems mostly use
+such vocoders, or neural audio codecs whose discrete tokens a language model predicts <Cite id="defossez2022encodec" />.
+
+### Beyond audio
+
+Dilated causal convolution is a general sequence layer. The <Gloss name="tcn" /> keeps the dilated causal stack and the
+<NoteLink to="residual-connections">residual connections</NoteLink> and drops the gating and skip connections; it
+matched or beat <NoteLink to="recurrent-networks">recurrent networks</NoteLink> of similar size on standard sequence
+benchmarks <Cite id="bai2018" />. See <NoteLink to="temporal-convolutional-networks">temporal convolutional
+networks</NoteLink> for its use in forecasting. ByteNet stacked dilated convolutions for
+<Gloss name="machine-translation">machine translation</Gloss>, with a <NoteLink to="decoder-only-transformers">causal
+decoder</NoteLink> over characters <Cite id="kalchbrenner2016bytenet" />. State-space blocks such as
+<NoteLink to="mamba">Mamba</NoteLink> place a short causal convolution, width 4 in the reference code, before their
+recurrence <Cite id="gu2023mambacode" />. <NoteLink to="long-convolution-models">Long convolution models</NoteLink> take
+the opposite extreme, with one causal filter as long as the sequence.
+
+Against attention, a causal convolution stack has a fixed receptive field and a cost linear in the sequence length. A
+causal transformer has an unbounded field and a cost quadratic in the length. A convolution that must see further has
+to be rebuilt with more layers or larger dilations.
+
+## Worked example
+
+Take four causal layers with kernel size 2 and dilations $1, 2, 4, 8$, one channel, and in every layer the taps
+$w_0 = 1$ on $x_t$ and $w_1 = 0.5$ on $x_{t-d}$, with no bias and no nonlinearity. So layer $l$ computes
+$h^{(l)}_t = h^{(l-1)}_t + 0.5\, h^{(l-1)}_{t - d_l}$.
+
+1. **Receptive field.** $R = 1 + (2 - 1)(1 + 2 + 4 + 8) = 16$. The output at $t = 15$ reads inputs $x_0$ to $x_{15}$.
+2. **Paths.** Input $x_{15 - o}$ reaches $y_{15}$ by taking the delayed tap in exactly the layers whose dilations add
+   up to $o$. For $o = 5 = 4 + 1$, the path takes the delayed tap in the layers with dilations 1 and 4 and the direct
+   tap in the layers with dilations 2 and 8. Its coefficient is $0.5 \cdot 1 \cdot 0.5 \cdot 1 = 0.25$.
+3. **All coefficients.** The coefficient of $x_{15 - o}$ is $0.5^{b(o)}$, where $b(o)$ is the number of ones in the
+   binary representation of $o$. For $o = 0, 1, \dots, 15$ the coefficients are
+   $1, 0.5, 0.5, 0.25, 0.5, 0.25, 0.25, 0.125, 0.5, 0.25, 0.25, 0.125, 0.25, 0.125, 0.125, 0.0625$. Their sum is
+   $(1 + 0.5)^4 = 5.0625$, one factor per layer.
+4. **Causality check.** Raise $x_{12}$ by 1 and leave the rest. Outputs $y_{12}, y_{13}, y_{14}, y_{15}$ change by
+   the coefficients at offsets $0, 1, 2, 3$: $1, 0.5, 0.5, 0.25$. Output $y_{11}$ and every earlier output are
+   unchanged, because no path runs from a later input to an earlier output.
+5. **Weights.** The stack holds $4 \times 2 = 8$ weights. One causal filter with the same 16-step span would hold 16,
+   and an undilated stack with $k = 2$ would need 15 layers.
+6. **Quantisation.** An amplitude $x = 0.01$ gives $f(x) = \ln(1 + 2.55)/\ln 256 = 1.267/5.545 = 0.2285$. Mapping
+   $(-1, 1)$ to levels $0, \dots, 255$ by $(f + 1)/2 \times 255 = 156.63$ and rounding gives level 157. Decoding level
+   157 gives $x = 0.0102$, within 2.3% of the input. Linear 8-bit quantisation has a step of $2/255 = 0.0078$, 78% of
+   the amplitude itself.
+
+## Assumptions
+
+- The sequence is ordered and values depend on the past. Causality is a modelling choice for generation and
+  forecasting; a classifier that sees the whole sequence gains nothing from it.
+- A fixed context of $R$ steps suffices. WaveNet's speech models had receptive fields of about 240 to 300 milliseconds
+  <Cite id="oord2016c" />, which limits them to the last few phonemes; their prosody needed extra conditioning.
+- The sampling grid is regular. A dilation of $d$ means a lag of $d$ samples only when samples are equally spaced.
+
+## Pitfalls
+
+- **Symmetric padding.** A library's "same" padding reads the future. The loss looks good in training and generation
+  fails. Pad on the left only, and test by perturbing one input and checking that no earlier output changes.
+- **Off-by-one targets.** If output $t$ reads $x_t$, it must predict $x_{t+1}$. Predicting $x_t$ from a stack whose
+  first layer reads $x_t$ lets the network copy its input.
+- **Gaps in the dilation schedule.** Constant dilations above 1, or dilations that grow faster than the field, leave
+  inputs that no path reaches.
+- **Slow generation.** Without cached activations, each new sample costs work exponential in the number of layers.
+  Even with caching, generation runs one network evaluation per sample.
+- **Field versus use.** A long receptive field does not mean the model uses distant inputs. Inputs reached by one path
+  through several delayed taps can carry little weight, as the coefficients in the worked example show.

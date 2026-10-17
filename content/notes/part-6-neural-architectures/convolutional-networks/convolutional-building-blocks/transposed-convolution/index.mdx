@@ -1,0 +1,171 @@
+---
+title: 'Transposed convolution and upsampling'
+kind: concept
+summary: 'A transposed convolution multiplies by the transpose of a convolution''s matrix, so it maps a small map to a large one; stride $s$ inserts $s-1$ zeros between inputs. Uneven overlap of the kernel causes checkerboard artefacts, which resize-then-convolve avoids.'
+tags: [convolutional-networks, deep-learning, worked-example]
+aliases: ['transposed convolution', 'deconvolution layer', 'fractionally strided convolution', 'checkerboard artefacts', 'learned upsampling']
+requires: [convolutional-layer, pooling-and-strides]
+related: [fully-convolutional-network-and-u-net, semantic-segmentation, decimation-and-interpolation, generative-adversarial-network, segmentation-decoders]
+references: [dumoulin2016, zeiler2010, long2015, ronneberger2015, odena2016, shi2016subpixel]
+status: draft
+updated: 2026-10-17
+---
+
+import { Checkerboard } from './Checkerboard'
+
+<Definition>
+A strided <NoteLink to="convolutional-layer">convolution</NoteLink> is a linear map from an input of length $m$ to an
+output of length $n < m$, so it is multiplication by an $n \times m$ matrix $\Cmat$. A **transposed convolution** with
+the same kernel, stride and padding is multiplication by $\Cmat^\top$: it maps length $n$ back to length $m$. Each input
+value is multiplied by the kernel and added into the output at a window that moves $s$ positions per input. In one
+dimension, $y_r = \sum_i x_i\, w_{r - si + p}$, with $w_u = 0$ outside $0 \le u < k$.
+</Definition>
+
+## Intuition
+
+Classification networks shrink their feature maps; segmentation, depth estimation, image generation and decoders of
+<NoteLink to="autoencoder">autoencoders</NoteLink> must grow them back. Fixed interpolation, such as bilinear
+upsampling, can do it, but it cannot learn what detail to add. A transposed convolution is a learned upsampler.
+
+The ordinary convolution gathers: each output reads a window of $k$ inputs. The transposed convolution scatters: each
+input writes a copy of the kernel, scaled by its value, into a window of $k$ outputs. With stride $s$ the windows start
+$s$ positions apart, so $n$ inputs fill about $sn$ outputs. Where windows overlap, their contributions add.
+
+The name says what the layer is. It reverses the shape of a convolution, not its values: $\Cmat^\top\Cmat \ne \eye$ in
+general. The older name "deconvolution layer", taken from the deconvolutional networks of Zeiler et al.
+<Cite id="zeiler2010" />, suggests an inverse that it does not compute. Dumoulin and Visin call it a fractionally
+<NoteLink to="pooling-and-strides">strided convolution</NoteLink>, because it equals an ordinary stride-1 convolution of
+the input with $s - 1$ zeros inserted between its samples <Cite id="dumoulin2016" />.
+
+<Checkerboard />
+
+## Details
+
+### The matrix
+
+Write a one-dimensional strided convolution with kernel $(w_0, \dots, w_{k-1})$, stride $s$ and no padding as
+$z_i = \sum_u w_u\, x_{si + u}$. Row $i$ of its matrix $\Cmat$ holds the kernel starting in column $si$, and the rows
+are shifted copies $s$ columns apart. The transpose $\Cmat^\top$ has the kernel down each column instead, starting in
+row $si$ of column $i$. Multiplying by it gives
+
+$$
+y_r = (\Cmat^\top x)_r = \sum_i x_i\, w_{r - si},
+$$
+
+which is the scatter rule of the definition. The transposed convolution is also the map that carries gradients
+backwards through the strided convolution: the gradient of a loss with respect to the convolution's input is
+$\Cmat^\top$ applied to the gradient with respect to its output. Deep-learning libraries compute the transposed layer
+with the same code as that backward pass.
+
+### Output size
+
+A transposed convolution of length-$n$ input with kernel $k$, stride $s$, padding $p$ and dilation $d$ has output
+length
+
+$$
+m = (n - 1)s - 2p + d(k - 1) + 1 + a.
+$$
+
+The first input's window starts at 0 and the last input's at $(n - 1)s$, ending $d(k - 1)$ later. Padding $p$ removes
+$p$ positions from each end of the result, and $a$ is the output padding below <Cite id="dumoulin2016" />. The formula
+inverts the size of the forward convolution: a convolution with the same $k$, $s$, $p$ and $d$ maps length $m$ to
+length $n$.
+
+The inversion is not unique. A stride-2 convolution with $k = 3$ and $p = 1$ maps both length 7 and length 8 to length
+4, because of the floor in its size formula. The transposed layer from length 4 gives $3 \cdot 2 - 2 + 3 = 7$. The
+output padding $a \in \set{0, \dots, s - 1}$ adds positions at the end to pick the other size, here $a = 1$ for 8.
+
+In two dimensions every formula applies per axis. With channels, the kernel tensor of a transposed layer from $C$ to
+$C'$ channels has $k^2 C C'$ weights, the same count as the convolution from $C'$ to $C$ that it transposes.
+
+### Checkerboard artefacts
+
+Consider a constant input. Every output position $r$ receives one contribution from each input window that covers it,
+weighted by the kernel tap that lands there. With stride $s$, positions $r$ with the same remainder modulo $s$ see the
+same set of taps: the taps $u \equiv r \pmod s$. The output on a constant input is therefore periodic with period $s$,
+and its value at phase $q$ is the sum of the taps $w_q, w_{q+s}, w_{q+2s}, \dots$.
+
+When $k$ is not a multiple of $s$, the phases contain different numbers of taps. For $k = 3$ and $s = 2$, even
+positions receive taps $w_0$ and $w_2$ and odd positions receive $w_1$ alone. Unless training makes $w_0 + w_2 = w_1$
+exactly, a flat region of the input becomes a stripe pattern in one dimension and a checkerboard in two, where the
+stripes of the rows and the columns multiply. Odena, Dumoulin and Olah traced the checkerboard patterns in generated
+images to this uneven overlap, and found that stacked layers compound it <Cite id="odena2016" />.
+
+Three remedies are in use:
+
+- **Divisible kernels.** Choose $k$ a multiple of $s$, such as $k = 4$ with $s = 2$. Every phase then has $k/s$ taps.
+  The overlap is even in count, but learned taps can still differ in sum.
+- **Resize, then convolve.** Upsample by nearest-neighbour or bilinear interpolation, which has no uneven overlap, then
+  apply an ordinary stride-1 convolution. Odena et al. recommend this, and it is the common choice in decoders today
+  <Cite id="odena2016" />.
+- **Sub-pixel convolution.** Compute $s^2 C$ channels at the low resolution with an ordinary convolution, then
+  rearrange each group of $s^2$ channels into an $s \times s$ block of pixels. Every output phase has its own kernel,
+  and there is no overlap to be uneven <Cite id="shi2016subpixel" />.
+
+### Where it is used
+
+Long, Shelhamer and Darrell upsampled coarse score maps with transposed convolutions initialised to bilinear
+interpolation and then learned <Cite id="long2015" />. U-Net's "up-convolutions" are $2 \times 2$ transposed
+convolutions with stride 2, an even overlap <Cite id="ronneberger2015" />. Generators of adversarial networks built
+images from a small vector with stacks of transposed convolutions; see
+<NoteLink to="generative-adversarial-network">generative adversarial networks</NoteLink>.
+<NoteLink to="fully-convolutional-network-and-u-net">Fully convolutional network and U-Net</NoteLink> and
+<NoteLink to="segmentation-decoders">segmentation decoders</NoteLink> give the architectures. In
+<NoteLink to="signal-processing">signal processing</NoteLink> the same operation is interpolation: insert $s - 1$ zeros
+between samples, then filter; see <NoteLink to="decimation-and-interpolation">decimation and interpolation</NoteLink>.
+
+## Worked example
+
+Take a length-4 input $x = (1, 2, 3, 4)$, kernel $w = (0.5, 1, 0.5)$, stride 2 and no padding. The output length is
+$(4 - 1) \cdot 2 + 3 = 9$.
+
+**As a scatter.** Each input writes $x_i w$ into positions $2i$ to $2i + 2$:
+
+- $x_0 = 1$ writes $(0.5, 1, 0.5)$ into positions 0 to 2.
+- $x_1 = 2$ writes $(1, 2, 1)$ into positions 2 to 4.
+- $x_2 = 3$ writes $(1.5, 3, 1.5)$ into positions 4 to 6.
+- $x_3 = 4$ writes $(2, 4, 2)$ into positions 6 to 8.
+
+Adding the overlaps at positions 2, 4 and 6 gives
+
+$$
+y = (0.5,\ 1,\ 1.5,\ 2,\ 2.5,\ 3,\ 3.5,\ 4,\ 2).
+$$
+
+**As a matrix product.** The $9 \times 4$ matrix has $w$ down each column, two rows lower per column:
+
+$$
+\begin{bmatrix} y_0 \\ y_1 \\ y_2 \\ y_3 \\ y_4 \\ y_5 \\ y_6 \\ y_7 \\ y_8 \end{bmatrix} =
+\begin{bmatrix}
+0.5 & 0 & 0 & 0 \\ 1 & 0 & 0 & 0 \\ 0.5 & 0.5 & 0 & 0 \\ 0 & 1 & 0 & 0 \\ 0 & 0.5 & 0.5 & 0 \\
+0 & 0 & 1 & 0 \\ 0 & 0 & 0.5 & 0.5 \\ 0 & 0 & 0 & 1 \\ 0 & 0 & 0 & 0.5
+\end{bmatrix}
+\begin{bmatrix} 1 \\ 2 \\ 3 \\ 4 \end{bmatrix}.
+$$
+
+Row 2 reads $0.5 \cdot 1 + 0.5 \cdot 2 = 1.5$, the overlap of the first two windows. The transpose of this matrix is the
+$4 \times 9$ matrix of the stride-2 convolution with the same kernel, which maps 9 samples to 4.
+
+**Why this kernel shows no checkerboard.** The odd output positions receive the tap $w_1 = 1$, and the even interior
+positions receive $w_0 + w_2 = 0.5 + 0.5 = 1$. Both phases sum to 1, so a constant input gives a constant interior
+output, and this layer is linear interpolation: every odd output repeats an input value and every even output averages
+two neighbours. With $w = (1, 1, 1)$ the phases sum to 2 and 1, and a constant input of ones gives
+$(1, 1, 2, 1, 2, 1, 2, 1, 1)$, the one-dimensional checkerboard.
+
+## Assumptions
+
+- The upsampled map is meant to be a learned function of the coarse map alone. Detail that the coarse map does not
+  contain must come from elsewhere, such as the <NoteLink to="residual-network">skip connections</NoteLink> of a U-Net.
+- The kernel's phases are balanced, by the choice of $k$ and $s$ or by training. Unbalanced phases leave a periodic
+  pattern of period $s$.
+
+## Pitfalls
+
+- **Not an inverse.** A transposed convolution does not undo the convolution it transposes. It restores the shape, not
+  the values.
+- **Checkerboards from uneven overlap.** A kernel size not divisible by the stride, such as $3 \times 3$ with stride 2,
+  produces a checkerboard on flat regions that stacked layers amplify <Cite id="odena2016" />.
+- **Ambiguous output size.** Without output padding, a decoder may produce a map one pixel smaller than the encoder map
+  it must be concatenated with.
+- **Border taps.** Outputs within $k - 1$ positions of the border receive fewer contributions than interior ones, so the
+  edges of the upsampled map are darker unless padding trims them.

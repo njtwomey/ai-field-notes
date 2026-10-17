@@ -1,0 +1,146 @@
+---
+title: 'Physics-informed network for Burgers'' equation'
+kind: example
+summary: 'The viscous Burgers equation $u_t+uu_x=\nu u_{xx}$ develops a steep front. A physics-informed network trained on it is compared with the Cole-Hopf exact solution, and its error concentrates at the front.'
+tags: [scientific-machine-learning, differential-equations, worked-example]
+aliases: ['Burgers PINN', 'viscous Burgers equation', "Burgers' equation"]
+requires: [physics-informed-neural-networks, partial-differential-equations]
+related: [loss-balancing-for-physics-informed-networks, inverse-problems-with-physics-informed-networks, fourier-neural-operator, failure-modes-of-physics-informed-networks, hard-constraints-for-physics-informed-networks, transport-and-continuity-equations, heat-equation, physics-informed-network-for-the-heat-equation]
+references: [raissi2019, hopf1950, cole1951, wu2023rad]
+status: draft
+updated: 2026-10-17
+---
+
+import { BurgersPinn } from './BurgersPinn'
+
+<Definition>
+Solve the viscous Burgers equation
+
+$$
+u_t + u\,u_x = \nu\,u_{xx}, \qquad x \in [-1, 1], \quad t \in [0, 1],
+$$
+
+with initial profile $u(x, 0) = -\sin \pi x$, end values $u(-1, t) = u(1, t) = 0$ and viscosity
+$\nu = 0.01/\pi \approx 0.00318$, by a <NoteLink to="physics-informed-neural-networks">physics-informed
+network</NoteLink> trained without any observations inside the domain. Compare the network with the exact solution given
+by the Cole-Hopf transform, and find where its error lies. This is the first benchmark of Raissi, Perdikaris and
+Karniadakis <Cite id="raissi2019" />.
+</Definition>
+
+## Setup
+
+- $u(x, t)$ is a velocity: positive moves material to the right. The term $u\,u_x$ carries each value of $u$ at its own
+  speed $u$. The term $\nu u_{xx}$ is viscous diffusion with viscosity $\nu > 0$.
+- The initial profile $-\sin \pi x$ is positive on $[-1, 0)$ and negative on $(0, 1]$, so material on both sides moves
+  towards $x = 0$.
+- The network $u_{\thetavec}(x, t)$ is a <Gloss name="mlp">multilayer perceptron</Gloss> with inputs $(x, t)$ scaled to
+  $[-1, 1]^2$, hyperbolic tangent hidden units and one output.
+- The loss is the mean squared residual $r = u_t + u u_x - \nu u_{xx}$ at $N_r$ collocation points, a scrambled Sobol
+  set in the domain, plus $w$ times the mean squared misfits at evenly spaced points on the initial line and on each end
+  (40 and 20 in the figure, 100 and 50 in the longer runs quoted below). The derivatives are the network's own, by
+  <NoteLink to="automatic-differentiation">automatic differentiation</NoteLink> in $x$ and $t$.
+- Training is <NoteLink to="adam">Adam</NoteLink> at <Gloss name="learning-rate">learning rate</Gloss> 0.005, then
+  full-batch <Gloss name="l-bfgs" />.
+
+## Solution
+
+**Steepening.** Without viscosity, $u_t + u u_x = 0$ keeps $u$ constant along the characteristics
+$\mathrm{d}x/\mathrm{d}t = u$ (<NoteLink to="transport-and-continuity-equations">transport equations</NoteLink>). The
+characteristic from $x_0$ is the straight line $x = x_0 - t \sin \pi x_0$. Two neighbouring characteristics meet when
+$1 + t\, u_0'(x_0) = 0$, which first happens where the initial slope is most negative. The slope $u_0'(x) = -\pi \cos
+\pi x$ is $-\pi$ at $x = 0$, so the inviscid profile breaks at
+
+$$
+t_b = \frac{1}{\pi} \approx 0.318 .
+$$
+
+**The viscous front.** Viscosity stops the breaking and leaves a steep front at $x = 0$. Near the front the solution
+is close to the steady profile that balances the two terms: $u\,u_x = \nu u_{xx}$ with $u \to \pm U$ on either side
+integrates to $\nu u_x = (u^2 - U^2)/2$, whose solution is
+
+$$
+u(x) = -U \tanh\paren{\frac{U x}{2\nu}}, \qquad u_x(0) = -\frac{U^2}{2\nu}.
+$$
+
+The front's width is about $2\nu / U$. At $t = 0.5$ the exact solution has $U \approx 0.98$ just beside the front, so
+the predicted slope is $-0.98^2 / (2 \times 0.00318) \approx -151$; the exact slope there is $-152$, against $-\pi$ at
+$t = 0$. The front is about $0.0065$ wide.
+
+**Cole-Hopf.** The substitution $u = -2\nu\, \phi_x / \phi$ turns Burgers' equation into the
+<NoteLink to="heat-equation">heat equation</NoteLink> $\phi_t = \nu \phi_{xx}$ <Cite id="hopf1950" />
+<Cite id="cole1951" />. The initial profile becomes $\phi(x, 0) = \exp\paren{-\cos(\pi x)/(2\pi\nu)}$ up to a constant
+factor, and convolving it with the heat kernel gives
+
+$$
+u(x, t) = -\frac{\displaystyle\int \sin \pi(x - \eta)\, f(x - \eta)\, e^{-\eta^2 / 4\nu t}\, \mathrm{d}\eta}
+  {\displaystyle\int f(x - \eta)\, e^{-\eta^2 / 4\nu t}\, \mathrm{d}\eta}, \qquad f(y) = e^{-\cos(\pi y) / 2\pi\nu}.
+$$
+
+The solution is odd in $x$, so it is zero at $x = 0$ and, by periodicity, at $x = \pm 1$ for all $t$. The figure
+evaluates the integrals by the trapezoid rule.
+
+**What the network must resolve.** The front is 0.0065 wide and lives at $x = 0$ for $t \gtrsim 0.4$. With 1024
+collocation points spread evenly over an area of 2, the expected number inside the strip $\abs{x} < 0.0065$,
+$t > 0.4$ is $1024 \times (0.013 \times 0.6) / 2 \approx 4$. Almost every collocation point lies where the solution is
+smooth.
+
+## Simulation
+
+The figure trains the network in the compute worker and streams snapshots every 50 steps. Its defaults are cheap,
+about two seconds: two hidden layers of 16 units (337 parameters), 256 collocation points, $w = 1$, 200 Adam steps and
+100 L-BFGS steps, with the error measured on a $61 \times 31$ grid.
+
+<BurgersPinn />
+
+The default run ends with a relative $L_2$ error of 48%, a rough fit. Its largest pointwise error, 0.96, sits at
+$x = -0.03$, $t = 0.47$, on the front, and the region $\abs{x} \le 0.1$, $t \ge 0.4$, about 7% of the grid, holds 34% of
+the squared error. With 256 points the strip of the front holds on average one collocation point.
+
+Longer runs show how the error falls with budget. With three hidden layers of 20 units (921 parameters), 1024
+collocation points, 1000 Adam steps and 500 L-BFGS steps, about 100 seconds on a laptop processor, the error is 24%
+on a $101 \times 51$ grid. The largest pointwise error, 0.91, is again on the front, at $x = 0.02$, $t = 0.48$: the
+network places the front but not its steepness. The region $\abs{x} < 0.1$, $t \ge 0.4$ is 6% of the domain and holds
+37% of the squared error.
+
+| Change from the longer run | Relative error |
+| --- | --- |
+| none | 24% |
+| 2048 collocation points | 10% |
+| 2000 L-BFGS steps | 16% |
+| $\nu = 0.01$ | 7.6% |
+| $\nu = 0.05$ | 0.39% |
+
+The viscosity sets the difficulty. At $\nu = 0.05$ the front is about 0.1 wide and the same network reaches 0.39%; at
+$\nu = 0.01$ it is about 0.02 wide, the error is 7.6% and 86% of the squared error lies in the front region. Raissi et
+al. reached a relative error of $6.7 \times 10^{-4}$ with eight hidden layers of 20 units (3021 parameters), 10,000
+collocation points from a Latin hypercube and L-BFGS run to convergence on a <Gloss name="gpu" />
+<Cite id="raissi2019" />. The gap is training budget and point density, not a different method.
+
+## What it illustrates
+
+- **Collocation points must be dense where the solution changes fast.** Doubling the points cuts the error from 24% to
+  10% here, because the front is narrower than their spacing. Residual-based adaptive sampling puts the points there
+  instead of everywhere <Cite id="wu2023rad" />; the
+  <NoteLink to="loss-balancing-for-physics-informed-networks">loss-balancing</NoteLink> note shows it on a steep layer.
+- **<NoteLink to="implicit-neural-representation">Spectral bias</NoteLink>.** A network fits the smooth parts of the
+  solution first and the front last, which is one of the
+  <NoteLink to="failure-modes-of-physics-informed-networks">failure modes</NoteLink> of physics-informed networks.
+- **A loss that is small is not an error that is small.** The residual is large only in the thin front, so its mean
+  over the collocation points can be small while the pointwise error there is of the size of the solution.
+- **Classical structure helps check the network.** The breaking time, the front's slope $-U^2/2\nu$ and the Cole-Hopf
+  solution give three independent checks that need no network at all.
+
+## Variations
+
+- **Smaller viscosity.** The front's width scales with $\nu$, so halving $\nu$ halves the width and doubles the
+  number of points needed across it. In the inviscid limit the front becomes a shock, and the strong-form residual is
+  undefined there.
+- **Unknown viscosity.** Making $\nu$ trainable and adding observations turns the example into an
+  <NoteLink to="inverse-problems-with-physics-informed-networks">inverse problem</NoteLink>. The front's width carries
+  most of the information about $\nu$, so observations must sample it.
+- **Hard conditions.** The trial function $u = -\sin \pi x + t(1 - x^2) N_{\thetavec}(x, t)$ meets the initial profile
+  and both end values exactly (<NoteLink to="hard-constraints-for-physics-informed-networks">hard
+  constraints</NoteLink>).
+- **Many initial profiles.** A physics-informed network solves one initial profile per training run. A
+  <NoteLink to="fourier-neural-operator">Fourier neural operator</NoteLink> learns the map from initial profile to
+  solution and answers a new profile in one forward pass.

@@ -1,0 +1,85 @@
+---
+title: 'Sparse, linear and low-rank attention'
+kind: overview
+summary: 'Ways to cut the $O(n^2)$ cost of attention while keeping its form: attend only within windows, fixed patterns or learned blocks; replace the softmax kernel by a feature map so attention becomes a linear recurrence; or project and hash keys and values.'
+tags: [attention, long-context, overview]
+aliases: []
+requires: [scaled-dot-product-attention]
+related:
+  [
+    efficient-and-state-space-sequence-models,
+    linear-recurrent-models,
+    structured-and-selective-state-space-models,
+    comparing-and-combining-sequence-models,
+    flash-attention,
+  ]
+references: [tay2022, beltagy2020, katharopoulos2020, wang2020linformer, yuan2025nsa]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+**Sparse, linear and low-rank attention** are the variants of <NoteLink to="scaled-dot-product-attention">scaled
+dot-product attention</NoteLink> that keep queries, keys, values and a weighted sum over keys, but avoid scoring all
+$n^2$ query–key pairs of a sequence of $n$ tokens. Sparse attention scores a subset of pairs, linear attention replaces
+the softmax by a kernel with a finite <NoteLink to="convolutional-layer">feature map</NoteLink>, and low-rank and
+hashing attention approximate the attention matrix by thin factors or by buckets of similar vectors
+<Cite id="tay2022" />.
+</Definition>
+
+## What it is for
+
+A self-attention head costs $O(n^2 d)$ time for head width $d$, and the standard algorithm stores an $n \times n$
+matrix of scores. At $n = 32{,}768$ that matrix takes 2 GiB per head in 16-bit precision. A decoder also reads a cache
+of every past key and value for each token it generates. These costs limit how long a document, conversation, codebase
+or genome a transformer can read. The methods in this topic change the attention layer itself, so that a model can be
+trained and run on long sequences at a cost closer to linear in $n$.
+
+## Main ideas
+
+**The quadratic cost and its fixes.** <NoteLink to="efficient-attention" /> counts the three costs that grow with
+$n$: arithmetic, score memory and the generation cache. It compares the families by what each gives up, and places
+exact tiled attention, <NoteLink to="flash-attention">FlashAttention</NoteLink>, which removes the memory cost but
+keeps the arithmetic, beside them.
+
+**Attend to fewer keys.** <NoteLink to="sliding-window-and-sparse-attention" /> fixes the keys of each query in
+advance: a local window, dilated or strided positions, global tokens and random keys <Cite id="beltagy2020" />. The
+softmax stays exact over the kept keys, and stacked layers carry information beyond one window. Current decoders
+interleave windowed layers with full ones. <NoteLink to="trainable-sparse-attention" /> lets each query choose its
+blocks of keys from cheap block scores, as in native sparse attention and MoBA, and trains the model with the
+selection <Cite id="yuan2025nsa" />.
+
+**Reassociate the product.** <NoteLink to="linear-attention" /> writes the similarity as
+$\phi(\qvec)^\tr\phi(\kvec)$ for a feature map $\phi$, so the attention product can be computed right to left in time
+linear in $n$ <Cite id="katharopoulos2020" />. In causal form it is a recurrent network whose state is a fixed-size
+matrix, which removes the growing cache. Random positive features (the Performer) make the kernel an unbiased estimate
+of softmax.
+
+**Approximate the matrix.** <NoteLink to="low-rank-and-hashing-attention" /> exploits two regularities of attention
+matrices. Their rows are often alike, so projecting keys and values along the sequence (Linformer) or rebuilding the
+matrix from landmarks (Nyströmformer) gives a low-rank stand-in <Cite id="wang2020linformer" />. Each row usually
+concentrates on similar keys, so hashing queries and keys into buckets (Reformer) finds them without scoring the rest.
+
+**What is lost.** Every approximate method weakens exact retrieval of one specific distant token. A fixed pattern may
+not cover it, a learned selection may score its block low, and a low-rank or kernel summary blurs it. Exactness on the
+kept keys, and a few full-attention layers in the stack, are the usual answers.
+
+## How the notes fit together
+
+Start with <NoteLink to="efficient-attention" />, which sets out the costs and the families. Read
+<NoteLink to="sliding-window-and-sparse-attention" /> before <NoteLink to="trainable-sparse-attention" />, which
+replaces its fixed patterns by learned ones. <NoteLink to="linear-attention" /> stands on its own and leads to the next
+topic, <NoteLink to="linear-recurrent-models" />, where decay, gates and the
+<NoteLink to="delta-rule-and-test-time-training">delta rule</NoteLink> are added to its state update.
+<NoteLink to="low-rank-and-hashing-attention" /> comes last; it needs <NoteLink to="locality-sensitive-hashing" /> for
+its hashing half.
+
+## Prerequisites and next steps
+
+The notes assume <NoteLink to="scaled-dot-product-attention" />, <NoteLink to="causal-masking" /> and the
+<NoteLink to="key-value-cache" />, and for the low-rank methods the
+<NoteLink to="singular-value-decomposition" />. The recurrent view of linear attention continues in
+<NoteLink to="linear-recurrent-models" /> and <NoteLink to="structured-and-selective-state-space-models" />, and
+<NoteLink to="comparing-and-combining-sequence-models" /> compares these layers with attention and mixes them in
+hybrid stacks. Other routes to long context, through position schemes and extrapolation, are in
+<NoteLink to="long-context-methods" />.

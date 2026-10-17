@@ -1,0 +1,410 @@
+---
+title: 'Light bending around a black hole'
+kind: concept
+summary: 'Around a non-spinning black hole of mass $M$, light aimed with impact parameter below $3\sqrt{3}\,GM/c^2$ falls in and leaves a dark shadow. Rays just outside circle the photon sphere; the rest are bent, which makes Einstein rings and lifts the far side of a disc over the hole.'
+tags: [astrophysics, general-relativity, ray-tracing, worked-example]
+aliases: [Schwarzschild lensing, black hole shadow, photon sphere, photon ring, Einstein ring, gravitational light deflection, critical impact parameter]
+requires: [kepler-orbits, ordinary-differential-equations]
+related: [why-rotating-clouds-flatten-into-discs, keplerian-shear, numerical-ode-solvers, cubic-spline-interpolation]
+references: [misner1973, hartle2003, luminet1979, james2015, eht2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { PhotonPaths } from './PhotonPaths'
+import { LensedSky } from './LensedSky'
+import { ThinDisc } from './ThinDisc'
+
+<Definition>
+Light passing a non-spinning (Schwarzschild) black hole of mass $M$ moves in a plane through the hole and follows the
+**photon orbit equation** $\mathrm{d}^2u/\mathrm{d}\varphi^2 = 3u^2 - u$, where $u = 1/r$ is the inverse distance from
+the hole in units of $GM/c^2$ and $\varphi$ is the azimuth in the ray's plane. A ray whose **impact parameter** $b$
+(its offset from the hole far away) is below $b_c = 3\sqrt3 \approx 5.196$ crosses the event horizon at $r = 2$. A ray
+with $b$ just above $b_c$ circles the **photon sphere** at $r = 3$ before it escapes. Every other ray is deflected by an
+angle that tends to $4/b$ for large $b$. Seen from far away, these rules make the black hole's **shadow**, a sequence of
+**photon rings** round it, **Einstein rings** of sources behind it, and the arched image of an accretion disc
+<Cite id="luminet1979" />.
+</Definition>
+
+## Intuition
+
+Gravity bends light. Far from a mass the bend is small: starlight grazing the Sun turns by 1.75 arcseconds. Near a
+black hole the bend can be any size. A ray aimed a little off-centre turns through a right angle, a ray aimed closer
+turns through half a circle and heads back, and a ray aimed closer still loops round the hole once or several times
+before it leaves. A ray aimed closer than a critical distance never leaves: it spirals in through the horizon.
+
+The picture of a black hole that many people know comes from the film *Interstellar* (2014): a black disc, a thin
+bright ring hugging it, and a flat accretion disc whose far side appears to arch over the top and under the bottom of
+the hole. Every part of that picture follows from the bending of rays. The black disc is the set of directions in
+which an observer's line of sight, traced backwards, ends on the horizon. Its radius is $b_c \approx 5.2$, more than
+two and a half times the horizon's radius of 2. The thin ring is light that circled the photon sphere. The arch is the
+back of the disc, seen along rays that bend over the top of the hole and down onto it.
+
+The film's black hole spins: its images were computed for a spinning (Kerr) hole with spin $a/M = 0.6$
+<Cite id="james2015" />. A non-spinning (Schwarzschild) hole is simpler, because each of its rays obeys one
+<Gloss name="ode">ordinary differential equation</Gloss> in one variable. Jean-Pierre Luminet published the non-spinning
+picture, disc and shadow included, in 1979 <Cite id="luminet1979" />. In 2019 the Event Horizon Telescope imaged the
+observed counterpart: a bright ring of diameter 42 microarcseconds round a dark centre in the galaxy M87, whose black
+hole has a mass of $6.5 \times 10^9$ solar masses <Cite id="eht2019" />.
+
+## Light orbits
+
+### Units and conserved quantities
+
+Lengths are measured in units of $GM/c^2$, where $G$ is the gravitational constant, $c$ the speed of light and $M$ the
+mass of the hole: this is the choice $G = c = M = 1$. For a hole of one solar mass the unit is 1.48 km. The
+Schwarzschild radial coordinate $r$ is defined so that a circle at radius $r$ has circumference $2\pi r$. The horizon
+is at $r = 2$.
+
+The geometry outside the hole is the same at every time and in every direction. These two symmetries give a light ray
+two conserved quantities, its energy $E$ and its angular momentum $L$ about the hole, as they do for a planet in
+<NoteLink to="kepler-orbits" />. The angular momentum fixes a plane through the hole, and the ray stays in it. In that
+plane the ray's position is $(r, \varphi)$. The only combination that shapes the path is the ratio $b = L/E$, the
+**impact parameter**: the distance by which the ray would miss the hole if it went straight.
+
+### The effective potential for light
+
+In general relativity a light ray in the Schwarzschild geometry obeys an energy equation of the same form as a planet's
+in Newtonian gravity <Cite id="misner1973" /> <Cite id="hartle2003" />:
+
+$$
+\paren{\frac{\mathrm{d}r}{\mathrm{d}\lambda}}^2 + \frac{L^2}{r^2}\paren{1 - \frac{2}{r}} = E^2,
+\qquad
+\frac{\mathrm{d}\varphi}{\mathrm{d}\lambda} = \frac{L}{r^2}.
+$$
+
+Here $\lambda$ is a parameter that increases along the ray (the affine parameter, which plays the role of time). The
+second term is an effective potential: the centrifugal barrier $L^2/r^2$ of Newtonian mechanics, multiplied by
+$1 - 2/r$, which pulls it to zero at the horizon. Both equations follow from the Schwarzschild line element and its
+two symmetries.
+
+<Derivation title="The energy equation from the Schwarzschild line element">
+The Schwarzschild geometry has the line element, in units $G = c = M = 1$,
+
+$$
+\mathrm{d}s^2 = -\paren{1 - \frac{2}{r}} \mathrm{d}t^2 + \paren{1 - \frac{2}{r}}^{-1} \mathrm{d}r^2
++ r^2 \paren{\mathrm{d}\theta^2 + \sin^2\theta\, \mathrm{d}\varphi^2}.
+$$
+
+Light moves along null paths, $\mathrm{d}s^2 = 0$. Put the ray in the plane $\theta = \pi/2$ and write dots for
+derivatives with respect to the affine parameter $\lambda$. The coefficients do not depend on $t$ or $\varphi$, so the
+geodesic equations conserve $E = (1 - 2/r)\,\dot t$ and $L = r^2 \dot\varphi$ <Cite id="hartle2003" />. Substituting
+$\dot t = E / (1 - 2/r)$ into $\mathrm{d}s^2 = 0$ gives
+
+$$
+0 = -\frac{E^2}{1 - 2/r} + \frac{\dot r^2}{1 - 2/r} + \frac{L^2}{r^2}.
+$$
+
+Multiplying by $1 - 2/r$ gives $\dot r^2 + (L^2/r^2)(1 - 2/r) = E^2$.
+</Derivation>
+
+Divide the energy equation by $(\mathrm{d}\varphi/\mathrm{d}\lambda)^2 = L^2/r^4$ to remove the parameter:
+
+$$
+\frac{1}{r^4} \paren{\frac{\mathrm{d}r}{\mathrm{d}\varphi}}^2 + W(r) = \frac{1}{b^2},
+\qquad
+W(r) = \frac{1}{r^2}\paren{1 - \frac{2}{r}}.
+$$
+
+The function $W(r)$ is the **effective potential for light**. A ray at radius $r$ moves only where $W(r) \le 1/b^2$, and
+it turns round (its distance stops falling) where $W(r) = 1/b^2$. Substitute $u = 1/r$. Then
+$\mathrm{d}u/\mathrm{d}\varphi = -r^{-2}\, \mathrm{d}r/\mathrm{d}\varphi$ and $W = u^2 - 2u^3$, so the energy equation
+becomes the **first integral**
+
+$$
+\paren{\frac{\mathrm{d}u}{\mathrm{d}\varphi}}^2 = \frac{1}{b^2} - u^2 + 2u^3.
+$$
+
+Differentiate both sides with respect to $\varphi$ and divide by $2\, \mathrm{d}u/\mathrm{d}\varphi$:
+
+$$
+\frac{\mathrm{d}^2u}{\mathrm{d}\varphi^2} = 3u^2 - u.
+$$
+
+This is the photon orbit equation. The impact parameter has dropped out: it returns only through the initial
+condition. A ray arriving from infinity starts at $u = 0$ with $\mathrm{d}u/\mathrm{d}\varphi = 1/b$.
+
+### Comparison with Newtonian orbits
+
+Written as $u'' + u = 3u^2$, the equation has the form of Binet's orbit equation $u'' + u = 1/h^2$ for a planet of
+specific angular momentum $h$ in <NoteLink to="kepler-orbits" />. Light carries no rest mass, and the $1/h^2$ term,
+which comes from the Newtonian attraction on a massive body, is absent. Without the right-hand side the equation is
+$u'' + u = 0$, whose solution $u = \sin\varphi / b$ is a straight line at distance $b$ from the hole. The whole bending
+of light comes from the term $3u^2$, which is the relativistic correction. For a planet the same correction adds
+$3u^2$ to Binet's equation, and it makes the perihelion of Mercury precess <Cite id="hartle2003" />.
+
+### The photon sphere and the critical impact parameter
+
+The potential $W(r) = (1 - 2/r)/r^2$ is zero at the horizon, rises to a single peak and falls to zero far out. Its
+derivative is $W'(r) = -2/r^3 + 6/r^4$, which vanishes at $r = 3$. The peak value is $W(3) = (1/9)(1/3) = 1/27$. The
+radius $r = 3$ is the **photon sphere**: a ray with $1/b^2 = 1/27$ can circle the hole there, on a circular orbit of
+light. The orbit equation agrees, since $u'' = 0$ at $u = 1/3$, where $3u^2 = u$. The orbit is unstable, because it sits
+on a peak of the potential: a ray nudged inwards spirals into the hole, and a ray nudged outwards escapes.
+
+The peak sets the **critical impact parameter** $b_c = \sqrt{27} = 3\sqrt3 \approx 5.196$. Two cases follow:
+
+- A ray with $b > b_c$ has $1/b^2 < 1/27$. It meets the barrier at the outer root $r_0$ of $W(r_0) = 1/b^2$, its
+  closest approach, and leaves. In terms of $r_0$, the impact parameter is $b^2 = r_0^3/(r_0 - 2)$.
+- A ray with $b < b_c$ passes over the peak, never turns round, and crosses the horizon at $r = 2$.
+
+A ray with $b$ slightly above $b_c$ turns round just outside $r = 3$, where the potential is almost flat, so it spends
+many radians of azimuth near the photon sphere before it leaves.
+
+### The horizon and the innermost stable circular orbit
+
+The horizon at $r = 2$ is the surface from inside which nothing escapes. Massive particles obey a different effective
+potential, and circular orbits of matter are stable only for $r \ge 6$ <Cite id="hartle2003" />. This radius is the
+<Gloss name="isco" />. Gas in a thin accretion disc spirals slowly inwards through circular orbits until it reaches the
+<Gloss name="isco" /> and then falls in, so the <Gloss name="isco" /> marks the inner edge of the disc
+<Cite id="luminet1979" />.
+
+### The deflection angle
+
+A ray from infinity with $b > b_c$ sweeps the azimuth from the incoming direction down to its closest approach and the
+same again on the way out, since the path is symmetric about the closest approach. A straight ray sweeps exactly $\pi$.
+The **deflection** $\alpha$ is the excess:
+
+$$
+\alpha(b) = 2\int_0^{u_0} \frac{\mathrm{d}u}{\sqrt{1/b^2 - u^2 + 2u^3}} - \pi,
+$$
+
+where $u_0 = 1/r_0$ is the smallest positive root of $1/b^2 - u^2 + 2u^3$. Without the $2u^3$ term the integral is
+$\arcsin(1) = \pi/2$ per half, and the deflection is zero.
+
+Two limits give $\alpha(b)$ in closed form:
+
+- **Weak field**, $b \gg b_c$: $\alpha \approx 4/b$ <Cite id="misner1973" />. In ordinary units this is
+  $4GM/(c^2 b)$, which gives the 1.75 arcseconds for starlight grazing the Sun.
+- **Strong field**, $b$ just above $b_c$: $b - b_c \approx 3.4823\, e^{-\alpha}$ <Cite id="luminet1979" />, so
+  $\alpha \approx \ln\paren{3.4823 / (b - b_c)}$. Each extra turn of $2\pi$ round the hole needs $b - b_c$ smaller by
+  the factor $e^{2\pi} \approx 535$.
+
+<Derivation title="The weak-field deflection 4/b">
+For large $b$ the term $3u^2$ is small, since $u$ stays near $1/b$ or below. Write $u = \sin\varphi / b + v(\varphi)$,
+the straight line plus a correction $v$ of order $1/b^2$. To first order in $1/b$, $v'' + v = 3\sin^2\varphi / b^2 =
+(3/(2b^2))(1 - \cos 2\varphi)$. A particular solution is $v = 3/(2b^2) + \cos(2\varphi)/(2b^2) =
+(1 + \cos^2\varphi)/b^2$, so
+
+$$
+u(\varphi) = \frac{\sin\varphi}{b} + \frac{1 + \cos^2\varphi}{b^2}.
+$$
+
+The ray reaches infinity where $u = 0$. Near $\varphi = 0$ write $\varphi = -\delta$ with $\delta$ small: then
+$-\delta/b + 2/b^2 \approx 0$, so $\delta = 2/b$. By symmetry the outgoing asymptote is at $\varphi = \pi + 2/b$. The
+azimuth swept is $\pi + 4/b$, so $\alpha = 4/b$.
+</Derivation>
+
+The figure integrates the photon orbit equation with <Gloss name="rk4" /> in $\varphi$, from $u = 0$ and
+$\mathrm{d}u/\mathrm{d}\varphi = 1/b$, until the ray returns to $u = 0$ (it escapes) or reaches $u = 1/2$ (it crosses
+the horizon). The engine's event detection locates both ends between steps.
+
+<PhotonPaths />
+
+## The shadow and the photon rings
+
+An observer far from the hole sees light that arrives along rays ending at the observer. Traced backwards from the
+observer, a ray with impact parameter $b < b_c$ ends on the horizon, so it carries no light from the sky behind. The
+observer therefore sees a dark disc of radius $b_c \approx 5.196$ in impact-parameter units, the **shadow**. The shadow
+is $b_c / 2 \approx 2.6$ times as wide as the horizon, because light bends towards the hole: rays that would have missed
+the horizon by up to $3.2$ units still fall in.
+
+A ray traced back with $b$ just above $b_c$ circles the photon sphere before it leaves, so it ends in a direction far
+from the one it started in. Rays in a thin annulus outside the shadow reach every direction of the sky. A distant source
+that a ray reaches by a deflection $\alpha$ is also reached by rays deflected by $\alpha + 2\pi$, by $\alpha + 4\pi$,
+and so on, each looping once more round the hole. By the strong-field law the $n$-th of these images sits at
+
+$$
+b_n = b_c + 3.4823\, e^{-(\alpha + 2\pi n)}, \qquad n = 0, 1, 2, \ldots
+$$
+
+<Cite id="luminet1979" />. Each image is $e^{-2\pi} \approx 1/535$ as wide as the one before it, so the **photon rings**
+crowd onto the shadow's edge. For light sent back towards its source, $\alpha = \pi$: the asymptotic law puts the
+outermost ring at $b_0 = 5.347$, against Luminet's exact $5.341$, and the next at $b_1 - b_c = 0.00028$
+<Cite id="luminet1979" />.
+
+## Einstein rings
+
+A point source exactly behind the hole, on the line from the observer through the hole, is seen along every ray whose
+deflection carries it from the observer's line of sight to the source. By the symmetry about that line the rays form a
+cone, and the image is a ring, the **Einstein ring**. A source slightly off the line has two bright arcs instead, one
+outside the ring and one inside it on the opposite side of the hole.
+
+The ring's size depends on the distances. For a source at infinity and an observer at distance $r_{\text{obs}}$ from the
+hole, a ray that leaves the observer at angle $\theta$ to the hole has $b \approx r_{\text{obs}}\theta$ for small
+$\theta$. It reaches the source if its deflection turns it back onto the line, $\alpha \approx \theta$. With the
+weak-field $\alpha = 4/b$ this gives $4/b = b/r_{\text{obs}}$, so
+
+$$
+b_E \approx 2\sqrt{r_{\text{obs}}}.
+$$
+
+For $r_{\text{obs}} = 60$ the estimate is $b_E \approx 15.5$. The exact sweep of the orbit equation from the observer
+puts the ring at $b_E = 17.0$, mainly because the deflection near $b = 16$ exceeds $4/b$ by about a quarter.
+
+### Ray tracing the sky
+
+A picture of the lensed sky needs one ray per pixel. Spherical symmetry makes this cheap. Each backward ray stays in the
+plane through the hole and its own direction, and its path depends only on $b$. So a table of one function suffices:
+the azimuth $\Phi(b)$ that a ray sweeps from the observer to infinity. In flat space $\Phi = \pi - \theta$, and the
+ray leaves in its starting direction. The figure builds the table once for 240 values of $b$, integrating from the
+observer at $u = 1/r_{\text{obs}}$ inwards with an adaptive Dormand–Prince solver to the escape. The table is splined in
+$\ln(b - b_c)$, the variable in which $\Phi$ is nearly linear near the shadow. Each pixel then takes four steps:
+
+1. Its angle $\theta$ to the hole gives $b = r_{\text{obs}} \sin\theta / \sqrt{1 - 2/r_{\text{obs}}}$, the impact
+   parameter of a ray leaving an observer at rest at radius $r_{\text{obs}}$.
+2. A pixel with $b < b_c$ is in the shadow and gets no light.
+3. Otherwise the spline gives $\Phi(b)$. The ray's direction at infinity is $\cos\Phi\, \evec_1 + \sin\Phi\, \evec_2$,
+   where $\evec_1$ points from the hole to the observer and $\evec_2$ is the unit vector in the ray's plane
+   perpendicular to it, on the pixel's side.
+4. The pixel takes the brightness of the background sky in that direction.
+
+<LensedSky />
+
+## A thin accretion disc
+
+Gas that falls towards a black hole with angular momentum settles into a thin disc
+(<NoteLink to="why-rotating-clouds-flatten-into-discs" />), whose rings orbit at nearly Keplerian speeds
+(<NoteLink to="keplerian-shear" />). Luminet's question was what a black hole surrounded by such a disc looks like
+<Cite id="luminet1979" />.
+The disc lies in the hole's equatorial plane, from the <Gloss name="isco" /> at $r = 6$ outwards, and the gas on it
+moves on circular orbits. A distant observer views the disc at inclination $i$, the angle between the line of sight and
+the disc's axis: $i = 0$ is face-on and $i = 90°$ is edge-on.
+
+### Where a ray meets the disc
+
+A pixel sits at impact parameter $b$ and position angle $\psi$ on the observer's image, measured from the horizontal
+image axis, which lies in the disc's plane. Traced backwards, its ray moves in the plane spanned by the line of sight
+$\ovec$ (the unit vector from the hole to the observer) and the image direction
+$\evec = \cos\psi\, \evec_x + \sin\psi\, \evec_y$. Here $\evec_x$ and $\evec_y$ are the image's horizontal and vertical
+unit vectors. At azimuth $\varphi$ along the ray, measured from $\ovec$, the ray's position points along
+$\cos\varphi\, \ovec + \sin\varphi\, \evec$. Let $\hat{\zvec}$ be the disc's axis, so that
+$\ovec \cdot \hat{\zvec} = \cos i$ and $\evec \cdot \hat{\zvec} = \sin\psi \sin i$. The ray is in the disc's plane where
+the position has no $\hat{\zvec}$-component:
+
+$$
+\cos\varphi \cos i + \sin\varphi \sin\psi \sin i = 0
+\quad\Longrightarrow\quad
+\cos\varphi_0 = \frac{-\sin\psi \sin i}{\sqrt{\sin^2\psi \sin^2 i + \cos^2 i}}, \qquad 0 < \varphi_0 < \pi.
+$$
+
+This is Luminet's relation <Cite id="luminet1979" />. The ray crosses the plane again at $\varphi_0 + \pi$,
+$\varphi_0 + 2\pi$, and so on, until it escapes or falls in. At each crossing its radius is $r = 1/u(\varphi_n)$ from
+the orbit equation with that $b$. The first crossing with $6 \le r \le 20$ lands on the disc, which is opaque, and gives
+the pixel its light. A crossing outside that range lets the ray pass through the plane and go on.
+
+- The **primary image** is the first crossing, $\varphi_0$. For a pixel above the hole ($\sin\psi > 0$),
+  $\varphi_0 > \pi/2$: the ray passes over the hole and lands on the far side of the disc. Near edge-on, $\varphi_0$
+  approaches $\pi$, and the far side of the disc appears as an arch over the shadow.
+- The **secondary image** is the second crossing, $\varphi_0 + \pi$. For a pixel below the hole the ray first passes
+  the disc's plane in front of the hole, misses the disc, goes under the hole and meets the underside of the far side.
+  This is the arch under the shadow.
+
+A figure that traced every pixel's ray would integrate tens of thousands of rays per frame. The figure instead
+integrates 360 rays from infinity once, with impact parameters packed densely near $b_c$, and stores $u(\varphi)$ on a
+grid of step $0.02$ in $\varphi$. A pixel's crossing radius is then a table lookup in $b$ and $\varphi$.
+
+### Brightness and the redshift factor
+
+Each element of the disc emits the flux $F(r)$ of a steady thin disc in the Schwarzschild geometry, the Page–Thorne
+flux, which Luminet writes in closed form <Cite id="luminet1979" />. It is zero at the <Gloss name="isco" />, peaks at
+$r = 9.55$ and falls as $r^{-3}$ far out.
+
+The gas moves at a large fraction of the speed of light, so the observed light is shifted in frequency. Luminet's
+redshift factor for gas on circular Keplerian orbits, seen at the image point $(b, \psi)$, is
+<Cite id="luminet1979" />
+
+$$
+1 + z = \frac{1 + \Omega\, b \cos\psi \sin i}{\sqrt{1 - 3/r}},
+\qquad
+\Omega = r^{-3/2},
+$$
+
+where $\Omega$ is the orbit's angular velocity, the same as Kepler's in these coordinates, and $b\cos\psi$ is the
+pixel's horizontal image coordinate. The factor $1/\sqrt{1 - 3/r}$ combines the gravitational redshift with the slowing
+of the moving gas's clocks. The factor $1 + \Omega\, b \cos\psi \sin i$ is the Doppler shift: it is below 1 on the side
+moving towards the observer and above 1 on the receding side. Write $g = 1/(1 + z)$ for the ratio of observed to
+emitted frequency. The observed brightness is $g^4 F(r)$: one factor of $g$ for the energy of each photon, one for the
+rate at which photons arrive and two for the change of solid angle <Cite id="luminet1979" />.
+
+<Derivation title="The redshift factor of a circular orbit">
+The ray's conserved energy $E$ and the $\hat{\zvec}$-component $L_z$ of its angular momentum fix the frequency that any
+observer measures. A distant observer at rest measures $E$. An emitter on a circular orbit with angular velocity
+$\Omega = \mathrm{d}\varphi/\mathrm{d}t$ measures $(E - \Omega L_z)\, \mathrm{d}t/\mathrm{d}\tau$, where $\tau$ is the
+emitter's own time. For a circular orbit $\mathrm{d}\tau^2 = (1 - 2/r)\,\mathrm{d}t^2 - r^2 \mathrm{d}\varphi^2$ from
+the line element, and $\Omega^2 = 1/r^3$, so $\mathrm{d}\tau/\mathrm{d}t = \sqrt{1 - 3/r}$. The ratio of emitted to
+observed frequency is
+
+$$
+1 + z = \frac{1 - \Omega L_z/E}{\sqrt{1 - 3/r}}.
+$$
+
+At the distant observer the ray arrives along $\ovec$ at offset $b\evec$, so its angular momentum per unit energy is
+$b\, \evec \times \ovec$. With $\evec_x$ in the disc's plane and the disc turning counter-clockwise about $\hat{\zvec}$,
+the component along $\hat{\zvec}$ is $L_z/E = -b\cos\psi\sin i$, which gives Luminet's form. Spherical symmetry
+conserves the whole angular-momentum vector, so the same expression holds at the emitter for both images.
+</Derivation>
+
+<ThinDisc />
+
+The figure shows the features of the *Interstellar* image that do not need spin. At $i = 80°$ the far side of the disc
+rises over the shadow, its underside hangs below it, and the near side crosses in front of the shadow's lower half. The
+shadow's edge, the dashed circle, is not the image of the disc's inner edge: the image of $r = 6$ lies outside the
+shadow above the hole and crosses inside it below. For gas at $r = 10$ seen at $b\cos\psi = \pm 10$ with $i = 80°$, the
+redshift factor gives $g = 1.22$ on the approaching side and $g = 0.64$ on the receding side. The frequency shift
+therefore makes the approaching side $g^4 = 2.2$ times brighter and the receding side $g^4 = 0.17$ times as bright. For
+the film, the brightness changes were left out and the spin lowered to $a/M = 0.6$, to keep the picture readable
+<Cite id="james2015" />.
+
+## Worked example
+
+Units are $G = c = M = 1$: $b$ and $r$ in units of $GM/c^2$, angles in radians. The task is the deflection of the rays
+with $b = 10$ and $b = 6$, from the integral, against the weak-field $4/b$.
+
+1. **Closest approach for $b = 10$.** The turning point solves $1/b^2 = u_0^2 - 2u_0^3$, that is
+   $0.01 = u_0^2 (1 - 2u_0)$. The smallest positive root is $u_0 = 0.11378$. Check: $0.11378^2 = 0.012946$ and
+   $1 - 2 \times 0.11378 = 0.77244$, whose product is $0.010000$. The closest approach is $r_0 = 1/u_0 = 8.789$, 12%
+   inside the straight-line miss distance of 10.
+2. **The integral for $b = 10$.** The integrand $1/\sqrt{0.01 - u^2 + 2u^3}$ blows up at $u_0$. The substitution
+   $u = u_0(1 - t^2)$, with $\mathrm{d}u = -2u_0 t\, \mathrm{d}t$, removes the singularity, and the midpoint rule on
+   $t \in [0, 1]$ then converges. The azimuth swept is $2\int_0^{u_0} \ldots = 3.7320$, so
+   $\alpha = 3.7320 - \pi = 0.5904$ rad $= 33.8°$. Integrating the orbit equation with Dormand–Prince to a relative
+   tolerance of $10^{-10}$ gives the same digits.
+3. **Weak field for $b = 10$.** $4/b = 0.4$ rad $= 22.9°$. The exact deflection is 1.48 times larger. At $b = 10$ the
+   ray comes within 8.8 units, where the $3u^2$ term is not small next to $u$: $3u_0 = 0.34$.
+4. **Closest approach for $b = 6$.** Now $1/36 = 0.027778 = u_0^2(1 - 2u_0)$, with root $u_0 = 0.22455$, so
+   $r_0 = 4.453$. The ray clears the photon sphere at $r = 3$ by 1.45 units.
+5. **The integral for $b = 6$.** The azimuth swept is $4.8610$, so $\alpha = 1.7194$ rad $= 98.5°$: the ray leaves at
+   more than a right angle to its arrival. The weak-field value is $4/6 = 0.667$ rad $= 38.2°$, 2.6 times too small.
+6. **Strong field for $b = 6$.** $b - b_c = 6 - 5.1962 = 0.8038$, and $\ln(3.4823/0.8038) = \ln 4.332 = 1.466$ rad, 15%
+   below the exact value. The logarithm is good only close to $b_c$: at $b = 5.2$ it gives $6.808$ against the exact
+   $6.810$, a deflection of more than one full turn.
+
+The photon-path figure reproduces steps 2 and 5: type $b = 10$ or $b = 6$ and read the deflection.
+
+## Assumptions
+
+- **No spin and no charge.** The hole is Schwarzschild. A spinning hole drags light round with it: its shadow is
+  flattened on one side and its photon orbits depend on the direction of travel <Cite id="james2015" />.
+- **Geometric optics.** Light travels along rays. Wave effects matter only for wavelengths comparable to the hole's
+  size.
+- **A thin, opaque disc on circular orbits.** The disc has no thickness, emits from its surface, and absorbs any ray
+  that hits it. Its gas follows circular geodesics, which needs $r \ge 6$.
+- **Static, distant observers.** The lensed sky assumes an observer at rest at $r_{\text{obs}} = 60$. The disc image
+  assumes an observer far enough away that the image coordinates are the impact parameter and position angle. A moving
+  observer would see the sky aberrated and Doppler-shifted as well.
+
+## Pitfalls
+
+- **The shadow is not the horizon.** The dark disc has radius $b_c \approx 5.196$, not 2. It is the set of lines of
+  sight that end on the horizon, magnified by the bending.
+- **The photon sphere is unstable.** Light does not collect at $r = 3$. Rays near $b_c$ spend a few turns there and
+  leave or fall in, and the time they spend grows only as the logarithm of $1/(b - b_c)$.
+- **$4/b$ is a weak-field law.** It is 32% low at $b = 10$ and fails completely near $b_c$, where the deflection
+  diverges. The Sun's 1.75 arcseconds is $4/b$ at $b \approx 4.7 \times 10^5$, the Sun's radius in units of
+  $GM_\odot/c^2$.
+- **Tables near $b_c$ need care.** The deflection diverges as $-\ln(b - b_c)$, so a table evenly spaced in $b$ misses
+  the photon rings. The figures space the table in $\ln(b - b_c)$ or in $\sinh^{-1}((b - b_c)/0.02)$, which puts most
+  entries near $b_c$.
+- **Sequential colour hides the dynamic range.** With the frequency shift on, the disc's brightness spans a factor of
+  more than 10 between its two sides, and the receding side almost disappears on a linear scale. The disc figure offers
+  a square-root scale for this reason.

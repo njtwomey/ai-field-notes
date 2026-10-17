@@ -1,0 +1,177 @@
+---
+title: 'Tri-training and disagreement methods'
+kind: technique
+summary: 'Disagreement methods let several learners label data for each other without separate views. In tri-training a point is labelled for one learner when the other two agree on it; co-forest extends this to random forests and democratic co-learning to different algorithms.'
+tags: [semi-supervised, ensembles, worked-example]
+aliases: ['tri-training', 'co-forest', 'democratic co-learning', 'disagreement-based semi-supervised learning']
+requires: [co-training]
+related: [random-forest, bagging, self-training, pseudo-labelling, learning-with-noisy-labels]
+references: [zhou2005tritraining, zhou2010disagreement, li2007coforest, zhou2004democratic, nigam2000cotraining, breiman1996]
+status: draft
+updated: 2026-10-17
+---
+
+import { TriTrainingVotes } from './TriTrainingVotes'
+
+<Definition>
+**Disagreement methods** train several learners on the same features and let them label unlabelled data for each
+other; the learners' differences take the place of co-training's views <Cite id="zhou2010disagreement" />. In
+**tri-training**, three classifiers start from bootstrap samples of the labelled set. In each round a classifier is
+retrained on the labelled set plus the unlabelled points on which the other two agree, labelled with their common
+prediction, whenever a bound on the noise of those labels says that the extra data will help
+<Cite id="zhou2005tritraining" />. The final prediction is the majority vote of the three.
+</Definition>
+
+## Problem
+
+<NoteLink to="co-training">Co-training</NoteLink> needs two views, each sufficient for the class and independent of
+the other given the class. Most datasets come as a single feature vector. Splitting its features at random can work
+when the features are many and redundant <Cite id="nigam2000cotraining" />, but often leaves each half too weak.
+Co-training also needs each classifier to rank points by confidence, which some learners do badly.
+
+Disagreement methods keep co-training's exchange of labels and drop both requirements. The learners differ because
+they are trained on different samples or with different algorithms, not because they see different features. Agreement
+replaces confidence: a point is trusted for one learner when the others agree on it. The idea is the same as in
+<NoteLink to="bagging">bagging</NoteLink>, where learners fitted to bootstrap samples make partly independent errors
+<Cite id="breiman1996" />, applied to labelling rather than to prediction.
+
+## Mechanism
+
+### Tri-training
+
+Let $L$ be the labelled set, $U$ the unlabelled set and Learn any learning algorithm.
+
+1. For $i = 1, 2, 3$, draw a bootstrap sample $S_i$ of $L$ and train $h_i = \text{Learn}(S_i)$. Set $e'_i = 0.5$ and
+   $l'_i = 0$.
+2. Repeat until no classifier changes. For each $i$, with $j$ and $k$ the other two:
+   1. Estimate the error of the pair, $e_i$: among labelled points on which $h_j$ and $h_k$ agree, the fraction they
+      both get wrong.
+   2. If $e_i < e'_i$, let $L_i$ be the unlabelled points with $h_j(\xvec) = h_k(\xvec)$, labelled with that class.
+   3. Decide whether to use $L_i$ by the condition below; if it is met, mark $h_i$ for update.
+3. Retrain every marked $h_i$ on $L \cup L_i$ (not on its bootstrap sample), and set $e'_i = e_i$ and
+   $l'_i = \abs{L_i}$.
+
+The pseudo-labels are re-derived every round from the current pair, so a learner's extra data can change from round
+to round. No learner labels points for itself, which is what separates tri-training from
+<NoteLink to="self-training">self-training</NoteLink> with an ensemble.
+
+### When the extra labels help
+
+Each extra point is wrong with probability about $e_i$, so $L \cup L_i$ is a labelled set with some
+<NoteLink to="label-noise">label noise</NoteLink>. A result of Angluin and Laird, used by Zhou and Li, says how much
+data a learner needs at noise rate $\eta < 0.5$: the sample size $m$ needed for worst-case error $\epsilon$ satisfies
+$m = c / \bigl(\epsilon^2 (1 - 2\eta)^2\bigr)$ for a constant $c$ <Cite id="zhou2005tritraining" />. So $\epsilon^2$ is
+proportional to $1/u$ with
+
+$$
+u = m(1 - 2\eta)^2,
+$$
+
+and a round lowers the error when it raises $u$. With the original labels nearly noise-free and $e_i < 0.5$, the
+round-$t$ value exceeds the round-$(t-1)$ value when
+
+$$
+0 < \frac{e_i^{t}}{e_i^{t-1}} < \frac{\abs{L_i^{t-1}}}{\abs{L_i^{t}}} < 1,
+$$
+
+that is, when the pseudo-labelled set grows, $\abs{L_i^t} > \abs{L_i^{t-1}}$, while the expected number of wrong labels
+in it shrinks, $e_i^t \abs{L_i^t} < e_i^{t-1}\abs{L_i^{t-1}}$. In the algorithm $e'_i$ and $l'_i$ hold $e_i^{t-1}$ and
+$\abs{L_i^{t-1}}$.
+
+If the new set is so much larger that the second inequality fails, a random subsample of $L_i$ restores it. A
+subsample of size
+
+$$
+s = \left\lceil \frac{e'_i\, l'_i}{e_i} - 1 \right\rceil
+$$
+
+has $e_i s < e'_i l'_i$, and it is still larger than $l'_i$ when $l'_i > e_i/(e'_i - e_i)$. Before a learner's first
+update $l'_i = 0$, and it is set to $\lfloor e_i/(e'_i - e_i) + 1\rfloor$, the smallest size for which that holds.
+
+<Derivation title="From the noise bound to the update condition">
+Let $\eta_L$ be the noise rate of the original labels. In round $t$, learner $i$ trains on $m_t = \abs{L \cup L_i^t}$
+points, of which about $\eta_L\abs{L} + e_i^t\abs{L_i^t}$ are wrong, so
+
+$$
+\eta_t = \frac{\eta_L\abs{L} + e_i^t\abs{L_i^t}}{\abs{L \cup L_i^t}}, \qquad
+u_t = \abs{L \cup L_i^t}\Bigl(1 - 2\,\frac{\eta_L\abs{L} + e_i^t\abs{L_i^t}}{\abs{L \cup L_i^t}}\Bigr)^2 .
+$$
+
+Because $\epsilon^2 \propto 1/u$, the error falls when $u_t > u_{t-1}$. With $\eta_L$ near 0 and both error estimates
+below 0.5, the first factor of $u_t$ is larger than that of $u_{t-1}$ when $\abs{L_i^{t-1}} < \abs{L_i^t}$, and the
+second factor is larger when $e_i^t\abs{L_i^t} < e_i^{t-1}\abs{L_i^{t-1}}$. Requiring both gives the displayed
+condition. It is sufficient, not necessary: $u_t$ can grow with only one factor larger. The subsample size $s$ is the
+largest integer below $e'_i l'_i / e_i$, so $e_i s < e'_i l'_i$. Since $l'_i$ is an integer, $s > l'_i$ exactly
+when $e'_i l'_i / e_i - 1 > l'_i$, that is when $l'_i (e'_i - e_i) > e_i$, or $l'_i > e_i/(e'_i - e_i)$.
+</Derivation>
+
+### Other disagreement methods
+
+- **Different algorithms.** Goldman and Zhou trained two different learning algorithms on the same features and used
+  ten-fold cross-validation to decide which unlabelled points each should label for the other. **Democratic
+  co-learning** extends this to more than two algorithms, with a confidence-weighted majority vote as the final
+  prediction
+  <Cite id="zhou2004democratic" /> <Cite id="zhou2010disagreement" />.
+- **Co-forest** grows a <NoteLink to="random-forest">random forest</NoteLink> and labels points for each tree with its
+  **concomitant ensemble**, all the other trees, which predicts more reliably than any two trees and gives a confidence
+  for free <Cite id="li2007coforest" />. With many learners the majority teaches the minority until all agree and the
+  ensemble loses its diversity. Co-forest keeps it by the forest's own randomness and by labelling only a random
+  subsample of the unlabelled points in each round <Cite id="zhou2010disagreement" />. Li and Zhou applied it to
+  computer-aided diagnosis, where unlabelled cases are cheap and diagnoses are not.
+
+## Worked example
+
+**The update rule.** Ten points are labelled. Before learner $h_1$'s first update, $e'_1 = 0.5$ and $l'_1 = 0$.
+
+- **Round 1.** $h_2$ and $h_3$ agree on 8 of the labelled points and are both wrong on 1, so
+  $e_1 = 1/8 = 0.125$, below $e'_1 = 0.5$. They agree on 60 unlabelled points, so $\abs{L_1} = 60$. First
+  $l'_1 = \lfloor 0.125/(0.5 - 0.125) + 1\rfloor = \lfloor 1.33\rfloor = 1$. The set is larger than $l'_1$, but
+  $e_1\abs{L_1} = 7.5$ is not below $e'_1 l'_1 = 0.5$: 60 points at error 0.125 bring about 7.5 wrong labels, more
+  than the 0.5 allowed. Since $l'_1 = 1$ exceeds $e_1/(e'_1 - e_1) = 0.33$, a subsample of
+  $\lceil 0.5 \times 1/0.125 - 1\rceil = 3$ points is drawn, and $h_1$ is retrained on $L$ plus those 3. Now
+  $e'_1 = 0.125$ and $l'_1 = 3$.
+- **Round 2.** The pair's error falls to $e_1 = 0.1$ and it agrees on 70 points. The error has fallen ($0.1 < 0.125$),
+  but $0.1 \times 70 = 7$ is not below $0.125 \times 3 = 0.375$, and a subsample would need $l'_1 = 3 > 0.1/0.025 = 4$,
+  which fails. $h_1$ is not updated.
+- **A zero estimate.** If instead $e_1 = 0$, the condition $0 < e'_1 l'_1$ holds for any set, and $h_1$ takes all
+  agreed points at once. Once every $e'_i$ is 0, no estimate can be smaller, and the loop stops.
+
+**On two moons.** The figure runs tri-training on 300 points of two moons with four labels per class; each learner is a
+<NoteLink to="logistic-regression">logistic regression</NoteLink> on 40 <NoteLink to="random-fourier-features">random
+Fourier features</NoteLink>. With data seed 4 the three bootstrap learners have accuracies 0.85, 0.81 and 0.84 on the
+unlabelled points and their majority vote 0.877. In round 1, $h_1$ and $h_3$ find their pairs error-free on the labels
+and take 190 and 199 agreed points; $h_2$'s pair errs on one of the 8 labelled points it agrees on, $e_2 = 0.125$, and
+$h_2$ gets a subsample of 3, exactly the case above. The vote rises to 0.969. In round 2 $h_2$'s pair is error-free and
+$h_2$ takes 278 points; the vote reaches 0.979, and in round 3 nothing changes.
+
+<TriTrainingVotes />
+
+## Cost
+
+Each round retrains up to three learners on the labelled set plus up to $\abs{U}$ points, and predicts all of $U$ with
+each. Runs are short: with few labels, the error estimates reach 0 within two or three rounds and the loop stops.
+Co-forest with $N$ trees costs $N$ refits per round, each on a subsample.
+
+## Trade-offs
+
+- **No views, no confidences.** Tri-training applies to any learner, including ones whose confidences are poor, at the
+  cost of the independence that co-training's guarantee rests on. Three learners fitted to bootstrap samples of the
+  same labels make correlated mistakes.
+- **Error estimates on few labels.** The labelled set is the only place the pair's error can be measured. With ten
+  labels the estimate moves in steps of about 0.1 and is often exactly 0, which turns the careful noise condition into
+  "take everything once, then stop".
+- **Diversity against agreement.** Labelling for each other makes the learners more alike every round. Bootstrap
+  samples, random forests and random subsampling of the unlabelled data keep them apart; without that, the method
+  reduces to self-training of one model.
+- **Regression.** Regression has no class probabilities to rank by. Coreg uses two k-nearest-neighbour regressors and
+  labels, for each one's peer, the unlabelled point whose predicted value most reduces the regressor's
+  <Gloss name="mse">mean squared error</Gloss> on the labelled set <Cite id="zhou2010disagreement" />.
+
+## Pitfalls
+
+- **Bootstrap samples of tiny labelled sets.** With four labels per class a bootstrap sample can miss a class
+  altogether. The figure redraws such samples; the original algorithm, designed for larger labelled sets, does not.
+- **Shared blind spots.** If all three learners are wrong in the same region, they agree there, and the region is
+  labelled wrongly for all of them. Agreement certifies only what the learners do not share.
+- **Imbalanced agreement.** Points of an easy class are agreed on first, so the pseudo-labelled sets can be dominated
+  by one class, as in self-training.

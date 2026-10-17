@@ -1,0 +1,156 @@
+---
+title: 'Segmentation decoders'
+kind: concept
+summary: 'A segmentation decoder turns encoder features into a per-pixel map. DeepLab keeps resolution with atrous convolution and pools context with parallel dilation rates (ASPP); PSPNet pools at several grid sizes; DeepLabv3+ adds a light U-Net-style refinement.'
+tags: [convolutional-networks, computer-vision, deep-learning, worked-example]
+aliases: ['DeepLab', 'DeepLabv3', 'DeepLabv3+', 'atrous spatial pyramid pooling', 'ASPP', 'PSPNet', 'pyramid pooling module', 'segmentation head']
+requires: [fully-convolutional-network-and-u-net, receptive-field-and-dilated-convolution]
+related: [semantic-segmentation, instance-and-panoptic-segmentation, feature-pyramid-network, dice-and-segmentation-overlap]
+references: [chen2018deeplab, chen2017deeplab, chen2018deeplabv3plus, zhao2017pspnet, kirillov2019fpn, xie2021segformer, cheng2022, yu2016]
+status: draft
+updated: 2026-10-17
+---
+
+import { AsppSampling } from './AsppSampling'
+
+<Definition>
+A segmentation decoder is the part of a <NoteLink to="semantic-segmentation">semantic segmentation</NoteLink> network
+between the encoder (a classification backbone) and the per-pixel class scores. It takes one or more encoder
+<NoteLink to="convolutional-layer">feature maps</NoteLink>, at output strides such as 4, 8, 16 or 32, and returns $K$
+class scores at every pixel. Decoders differ in two choices: how they gather context wider than one feature-map cell
+(atrous convolution at several rates, pooling over grids of several sizes, or fusion of several encoder levels), and how
+they recover resolution (bilinear upsampling, or upsampling joined with fine encoder maps).
+</Definition>
+
+## Intuition
+
+A pixel's label depends on context far beyond the pixel. A patch of grey is road in one scene and sky in another; a
+boat and a car can look alike up close, and the water around the boat tells them apart. Placing the label boundary
+needs the opposite: features at high resolution.
+
+A <NoteLink to="fully-convolutional-network-and-u-net">fully convolutional network</NoteLink> gets context by
+downsampling, which costs resolution. Segmentation decoders take one of three routes out. The DeepLab family stops
+downsampling early and replaces the lost strides by atrous (dilated) convolutions, which keep the receptive field
+growing without shrinking the map. It then adds a context module that looks at the map at several scales at once. PSPNet
+pools the final map over grids of several sizes, so each pixel also sees summaries of its region and of the whole image.
+<Gloss name="seq2seq">Encoder-decoder</Gloss> designs, U-Net among them, upsample in steps and pull in fine encoder maps
+on the way. DeepLabv3+ combines a context module with one such refinement step.
+
+## Details
+
+### Output stride by atrous convolution
+
+The output stride $s$ of an encoder is the ratio of input size to feature-map size. A <Gloss name="resnet" /> has
+$s = 32$: a $513 \times 513$ input gives a $17 \times 17$ map. DeepLab removes the stride of the last stage, or of the
+last two, and multiplies the dilation of every later $3 \times 3$ convolution by 2, or by 2 and then 4
+<Cite id="chen2018deeplab" />. An atrous convolution with rate $r$ spaces its $k$ taps $r$ positions apart, so it covers
+$r(k - 1) + 1$ positions with $k$ weights <Cite id="yu2016" /> (see
+<NoteLink to="receptive-field-and-dilated-convolution" />). The pretrained weights are kept: each dilated layer sees the
+same relative pattern as before, on a map twice as dense. The map at $s = 16$ is $33 \times 33$ and at $s = 8$ is
+$65 \times 65$. The later stages then run at 4 or 16 times as many positions, which is the price.
+
+### Atrous spatial pyramid pooling
+
+Objects appear at many scales. Atrous spatial pyramid pooling (ASPP) runs several branches in parallel on the final map
+and concatenates them. In DeepLabv3 the branches are a $1 \times 1$ convolution, three $3 \times 3$ convolutions with
+rates 6, 12 and 18 at output stride 16, and an image-level branch: <NoteLink to="pooling-and-strides">global average
+pooling</NoteLink>, a $1 \times 1$ convolution, and bilinear upsampling back to the map. Each branch has 256 output
+channels with <NoteLink to="batch-normalisation">batch normalisation</NoteLink>, and a final $1 \times 1$ convolution
+fuses the $5 \times 256 = 1280$ concatenated channels to 256 <Cite id="chen2017deeplab" />. At output stride 8 the rates
+are doubled to 12, 24 and 36, so each branch spans the same number of input pixels.
+
+The image-level branch exists because of padding. A $3 \times 3$ kernel with rate $r$ centred on cell $i$ of an $n$-cell
+axis reads cells $i - r$, $i$ and $i + r$. Taps that fall outside the map read zero padding. As $r$ approaches $n$ the
+outer taps are outside almost everywhere, and the $3 \times 3$ kernel degenerates to its centre tap, a $1 \times 1$
+convolution <Cite id="chen2017deeplab" />. <NoteLink to="graph-pooling-and-readout">Global pooling</NoteLink> supplies
+the image-wide context the largest rate was meant to give.
+
+<AsppSampling />
+
+### Pyramid pooling
+
+PSPNet's pyramid pooling module average-pools the final feature map into $1 \times 1$, $2 \times 2$, $3 \times 3$
+and $6 \times 6$ bins <Cite id="zhao2017pspnet" />. A $1 \times 1$ convolution reduces each pooled map to $1/N$ of the
+input channels, with $N = 4$ levels. Each is bilinearly upsampled to the map's size and concatenated with the map
+itself. A pixel then carries its own features, a summary of the quarter, ninth and thirty-sixth of the image around it,
+and a summary of the whole image. ASPP samples context at a few spacings; pyramid pooling averages over fixed regions.
+
+### Decoders with fine encoder features
+
+DeepLabv3+ adds a decoder to DeepLabv3 <Cite id="chen2018deeplabv3plus" />. The ASPP output at stride 16 is bilinearly
+upsampled by 4. It is concatenated with the backbone's stride-4 features, first reduced by a $1 \times 1$ convolution to
+48 channels so that they do not outweigh the 256 encoder channels. Two $3 \times 3$ convolutions refine the result,
+and a final bilinear upsampling by 4 gives full resolution. The decoder improves boundaries most: the context comes from
+ASPP and the location from the stride-4 skip.
+
+Multi-scale fusion decoders take every level of a feature pyramid. The semantic branch of Panoptic FPN upsamples each
+pyramid level to stride 4, adds them, and predicts from the sum <Cite id="kirillov2019fpn" />; see
+<NoteLink to="feature-pyramid-network" />. SegFormer's decoder projects the four levels of a transformer encoder to one
+width with per-pixel linear layers, upsamples them to stride 4, concatenates and fuses them with an <Gloss name="mlp" />
+<Cite id="xie2021segformer" />. Its large encoder receptive field makes a context module unnecessary.
+
+### Practice
+
+Three designs cover most use. DeepLabv3+ with a ResNet or
+<NoteLink to="efficient-convolutional-networks">MobileNet</NoteLink> encoder at output stride 16 is the common
+convolutional baseline. A pretrained transformer or <NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink>
+backbone with a light multi-level decoder is the usual choice for accuracy on natural scenes. Mask-classification models
+such as Mask2Former predict a set of masks, each with a class, and produce semantic, instance and panoptic maps with one
+architecture <Cite id="cheng2022" />; see <NoteLink to="instance-and-panoptic-segmentation" />. In medical images the
+U-Net decoder remains the default. Output stride 16 is the usual training setting: stride 8 costs about four times as
+much in the last stages for a small gain.
+
+## Worked example
+
+**Atrous rates on a $33 \times 33$ map.** A $513 \times 513$ crop at output stride 16 gives a map of
+$(513 - 1)/16 + 1 = 33$ cells per side. One cell spans 16 input pixels. A $3 \times 3$ kernel with rate $r$ spans
+$2r + 1$ cells, so the three ASPP branches span
+
+$$
+(2 \cdot 6 + 1) \cdot 16 = 208, \quad (2 \cdot 12 + 1) \cdot 16 = 400, \quad (2 \cdot 18 + 1) \cdot 16 = 592
+$$
+
+input pixels. The last span is larger than the image.
+
+Along one axis with $n = 33$ cells indexed 0 to 32, a rate-18 kernel centred on cell $i$ reads $i - 18$ and $i + 18$.
+The first is inside when $i \ge 18$ and the second when $i \le 14$. No cell satisfies both, so at most two of the three
+taps per axis are ever inside, and at most $2 \times 2 = 4$ of the nine taps in two dimensions. On cells 15, 16 and 17
+only the centre tap is inside along that axis. Counting all $33^2 = 1089$ positions, 82.6% see exactly four taps and
+none sees nine. For rate 12, a cell sees all three taps along an axis when $12 \le i \le 20$, nine cells, so
+$9^2 = 81$ positions, 7.4%, see all nine taps. For rate 6 the count is $21^2 = 441$, 40.5%.
+
+**Cost of ASPP.** On a 2048-channel ResNet map, the $1 \times 1$ branch has $2048 \cdot 256 = 524{,}288$ weights and
+each $3 \times 3$ branch $9 \cdot 2048 \cdot 256 = 4{,}718{,}592$. The pooling branch has another 524,288 and the fusion
+$1280 \cdot 256 = 327{,}680$, for 15.5 million weights in all. The rate does not change the count. At $33 \times 33$
+the module costs 16.3 billion multiply-accumulates; at output stride 8 the same weights run on $65 \times 65 = 4225$
+positions and cost 63.4 billion, 3.9 times as much.
+
+**DeepLabv3+ decoder.** The stride-4 map of the same crop is $(513 - 1)/4 + 1 = 129$ cells per side. The ASPP output,
+256 channels at $33 \times 33$, is upsampled by 4 to $129 \times 129$ and concatenated with 48 reduced channels, giving
+304. Two $3 \times 3$ convolutions to 256 channels then cost 21.7 billion multiply-accumulates, more than ASPP itself,
+because they run at 16 times as many positions.
+
+**Pyramid pooling.** PSPNet's encoder runs at output stride 8 <Cite id="zhao2017pspnet" />, so a $480 \times 480$ input
+gives a map of $60 \times 60$ cells with 2048 channels. Its bins average blocks of $60 \times 60$, $30 \times 30$,
+$20 \times 20$ and $10 \times 10$ cells. Each pooled map is reduced to $2048/4 = 512$ channels, and concatenating the
+four with the original map gives $2048 + 4 \cdot 512 = 4096$ channels.
+
+## Assumptions
+
+- The encoder's features are already semantic at every position, so the decoder only adds context and resolution.
+- Context helps uniformly: a pixel's class depends on its surroundings in a way a fixed set of spacings or regions
+  captures. Long, thin structures across the image fit poorly in square pooling bins.
+- The training crop is about the size of the test images; the rates and bin sizes are tuned to the map size the crop
+  gives.
+
+## Pitfalls
+
+- **Rates too large for the map.** A rate close to the map size wastes the outer taps on padding. Choose rates for the
+  feature-map size at the training crop, and double them when halving the output stride.
+- **Gridding.** Stacking atrous layers with the same rate $r > 1$ samples the input on a sparse lattice and misses the
+  pixels in between. Mixed rates, or a $1 \times 1$ branch alongside, fill the gaps.
+- **Memory at small output stride.** Stride 8 multiplies the activations of the last stages by 4 relative to stride 16
+  and by 16 relative to 32. Batch normalisation then sees small batches, and its statistics are noisy; see
+  <NoteLink to="normalisation-in-convolutional-networks" />.
+- **Misaligned upsampling.** Bilinear upsampling with and without aligned corners places samples differently, and a
+  $33 \to 513$ resize that does not match the encoder's own sampling shifts the prediction by half a cell.

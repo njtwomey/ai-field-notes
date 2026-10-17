@@ -1,0 +1,174 @@
+---
+title: 'Unsupervised data augmentation'
+kind: technique
+summary: 'Unsupervised data augmentation (UDA) applies consistency regularisation between an unlabelled example and a strongly augmented copy, made by RandAugment or back-translation. Training-signal annealing drops labelled examples the model already predicts confidently.'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['UDA', 'training signal annealing', 'TSA', 'consistency training with strong augmentation']
+requires: [consistency-regularisation]
+related: [augmentation-principles, fixmatch, data-augmentation, mixmatch, text-augmentation]
+references: [xie2020uda, cubuk2020randaugment, sohn2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { StrongAugmentationConsistency } from './StrongAugmentationConsistency'
+
+<Definition>
+**Unsupervised data augmentation** (<Gloss name="uda" form="short" />) is consistency regularisation in which the
+perturbation is a strong, label-preserving <NoteLink to="augmentation-principles">data augmentation</NoteLink> of the
+kind used in <NoteLink to="supervised-learning">supervised learning</NoteLink>: RandAugment for images, back-translation
+for text. The model's sharpened prediction on the original unlabelled example is the target for its prediction on the
+augmented copy. **Training-signal annealing** limits overfitting to the few labelled examples by removing from the
+supervised loss those the model already predicts with high confidence <Cite id="xie2020uda" />.
+</Definition>
+
+## Problem
+
+Early consistency methods perturbed inputs with Gaussian noise, dropout or small shifts (<NoteLink
+to="consistency-regularisation">Π-model</NoteLink>) or with a computed adversarial direction (<NoteLink
+to="virtual-adversarial-training">VAT</NoteLink>). These perturbations are small and generic. They test the model's
+smoothness in a tiny neighbourhood and teach no invariance that the data's domain is known to have. Supervised
+learning had meanwhile found augmentations that change an input a great deal and keep its class, such as
+AutoAugment's and RandAugment's image policies and back-translation for sentences. Xie et al. asked whether the
+quality of the perturbation, not its smallness, is what makes consistency training work, and answered by plugging the
+strongest supervised augmentations into the consistency loss <Cite id="xie2020uda" />.
+
+A second problem comes from the label counts. With 20 labelled reviews and tens of thousands of unlabelled ones, a
+large network fits the labelled examples in a few hundred steps, long before the unlabelled term has shaped the
+boundary. UDA's training-signal annealing holds the labelled loss back until the unlabelled data have had their
+effect.
+
+## Mechanism
+
+### The consistency term
+
+Let $p_{\thetavec}(\cdot \mid \xvec) \in [0, 1]^K$ be the model's class probabilities from logits $\zvec(\xvec)$, and
+let $\hat\xvec \sim q(\hat\xvec \mid \xvec)$ be a strong augmentation. The target is computed from the original,
+unaugmented example with a fixed copy $\tilde\thetavec$ of the parameters (no gradient), and it is **sharpened** with a
+softmax temperature $\tau$:
+
+$$
+p^{\text{sharp}}_{\tilde\thetavec}(k \mid \xvec) = \frac{\exp(z_k(\xvec)/\tau)}{\sum_j \exp(z_j(\xvec)/\tau)} .
+$$
+
+With $\tau = 1$ the target is the plain prediction; as $\tau \to 0$ it tends to the one-hot vector of the arg max.
+**Confidence masking** keeps the term only for examples whose unsharpened confidence exceeds a threshold $\beta$. On a
+batch $\Bcal$ of unlabelled examples the unsupervised loss is
+
+$$
+\Lcal_U = \frac{1}{|\Bcal|} \sum_{\xvec \in \Bcal} \indicator\Big[\max_k p_{\tilde\thetavec}(k \mid \xvec) > \beta\Big]\,
+\mathrm{CE}\big(p^{\text{sharp}}_{\tilde\thetavec}(\cdot \mid \xvec),\, p_{\thetavec}(\cdot \mid \hat\xvec)\big),
+$$
+
+with $\mathrm{CE}(\pvec, \qvec) = -\sum_k p_k \log q_k$. The cross-entropy and the KL divergence from the target differ
+by the target's entropy, a constant in $\thetavec$, so they have the same gradient. For <Gloss name="cifar-10" /> the
+paper uses $\tau
+= 0.4$ and $\beta = 0.8$ <Cite id="xie2020uda" />. The total loss adds $\lambda\Lcal_U$ to the supervised cross-entropy,
+with $\lambda = 1$ in most experiments.
+
+### The augmentations
+
+- **Images: RandAugment.** Each strongly augmented image applies a fixed number of operations drawn uniformly from a
+  list of about 14 (rotation, shear, translation, colour, contrast, brightness, sharpness, posterise, solarise,
+  equalise and others), with a magnitude drawn at random <Cite id="cubuk2020randaugment" />. It needs no search on
+  labelled data, unlike AutoAugment.
+- **Text: back-translation** (see <NoteLink to="text-augmentation">text augmentation</NoteLink>). A sentence is
+  translated into another language and back by two translation models, with sampling at a softmax temperature that
+  trades diversity against faithfulness (0.7 to 0.9 worked best). The paraphrase keeps the meaning and changes the words
+  and their order.
+- **Text: <Gloss name="tf-idf" /> word replacement.** For topic classification, uninformative words with low TF-IDF
+  scores are replaced and the keywords are kept.
+
+The augmentation's job is to be diverse, so that the consistency term tests many directions, and valid, so that the
+class does not change. Gaussian noise is valid but not diverse; an unconstrained edit is diverse but not valid. The
+paper found a strong correlation between how well an augmentation works in supervised learning and how well it
+works in consistency training <Cite id="xie2020uda" />.
+
+### Training-signal annealing
+
+Let $T$ be the total number of training steps and $K$ the number of classes. At step $t$ the threshold is
+
+$$
+\eta_t = \alpha_t\Big(1 - \frac{1}{K}\Big) + \frac{1}{K},
+$$
+
+rising from $1/K$ to 1 as the schedule $\alpha_t$ rises from 0 to 1. A labelled example whose true-class probability
+exceeds $\eta_t$ is removed from the supervised loss at that step. Three schedules release the labelled signal at
+different times:
+
+$$
+\alpha_t^{\log} = 1 - e^{-5t/T}, \qquad \alpha_t^{\text{linear}} = \frac{t}{T}, \qquad
+\alpha_t^{\exp} = e^{5(t/T - 1)} .
+$$
+
+The log schedule releases most of the signal early, the exp schedule most of it at the end. Xie et al. recommend the
+exp schedule when the model overfits easily (few labels, an easy task) and the log schedule when it does not
+<Cite id="xie2020uda" />. The annealing caps how confident the model can become on a labelled example, so the
+unlabelled term keeps a say in where the boundary goes.
+
+<StrongAugmentationConsistency />
+
+## Worked example
+
+Two classes, $\tau = 0.4$, $\beta = 0.8$, total $T = 400$ steps.
+
+**Step 1: confidence masking.** An unlabelled example with logits $(2.0, 1.0)$ has $p = (0.731, 0.269)$. Its
+confidence $0.731$ is below $\beta = 0.8$, so it contributes nothing this step. A second example with logits $(3.0,
+0.5)$ has $p = (0.924, 0.076)$ and passes.
+
+**Step 2: sharpening.** Dividing the second example's logits by $\tau = 0.4$ gives $(7.5, 1.25)$ and the target
+$(0.998, 0.002)$.
+
+**Step 3: the loss on the augmented copy.** The model predicts $\qvec = (0.8, 0.2)$ on the strongly augmented copy.
+The cross-entropy against the sharpened target is $-(0.998 \ln 0.8 + 0.002 \ln 0.2) = 0.226$. Against the
+unsharpened target it would be $0.328$.
+
+**Step 4: the gradient.** With respect to the copy's first logit, the gradient is $q_1 - p^{\text{target}}_1$: $0.8 -
+0.998 = -0.198$ with sharpening, $0.8 - 0.924 = -0.124$ without. Sharpening raises the pull towards the confident
+class by 60%, which is the low-entropy push of <NoteLink to="entropy-minimisation">entropy minimisation</NoteLink>.
+
+**Step 5: training-signal annealing at $t = 100$.** With $K = 2$, $\eta_{100} = 0.857$ under the log schedule, $0.625$
+under the linear one and $0.512$ under the exp one. A labelled example with true-class probability $0.9$ is removed
+under all three. One with probability $0.6$ stays under the log and linear schedules and is removed under the exp
+schedule. By $t = 200$ the thresholds are $0.959$, $0.750$ and $0.541$.
+
+In the figure, on two moons with eight labels and the default seed, the run with a strong jitter of sd 0.3 reaches
+99.0% accuracy on the 192 unlabelled points after 400 steps, and the same run with a weak jitter of sd 0.05 stays at
+86.5%, close to the 84.4% of the labelled points alone. On data seeds 1 and 3 the strong copy also wins (89.1% against
+84.4%, and 87.5% against 82.8%). Annealing does not help on this problem: with 8 labels and 400 steps the network
+does not overfit the labels, and withholding them only slows learning (98.4% with the log schedule, 87.0% with the
+linear and 86.5% with the exp schedule on the default seed).
+
+## Cost
+
+Each step adds, per unlabelled example, a forward pass on the original without gradients and a forward and backward
+pass on the augmented copy. The paper's image runs use an unlabelled batch several times larger than the labelled
+batch, so the unlabelled term dominates the cost. The augmentations themselves are cheap for images; back-translation
+needs two translation models and is run once, offline, to produce a fixed set of paraphrases per sentence.
+
+## Trade-offs
+
+- **Soft against hard targets.** UDA keeps a soft, sharpened target and a separate confidence mask; <NoteLink
+  to="fixmatch">FixMatch</NoteLink> replaces both by a hard pseudo-label with a threshold and adds a weak view for the
+  target <Cite id="sohn2020" />, removing $\tau$ as a hyperparameter.
+- **Augmentation quality.** The method is only as good as its augmentation. Where no strong, valid augmentation is
+  known, as for most tabular data, UDA has nothing to add over smaller perturbations.
+- **Annealing schedule.** The right schedule depends on how fast the model overfits the labels, which is hard to know
+  in advance with a small validation set.
+
+## Pitfalls
+
+- **Augmentations that change the class.** A strong augmentation that occasionally flips the class (a crop that
+  removes the object, a back-translation that negates a sentence) trains the model to agree with the wrong label.
+- **Out-of-domain unlabelled data.** Unlabelled examples from a different distribution add confident but meaningless
+  targets. The paper filters unlabelled data with a model trained on the labelled data and keeps the examples it
+  classifies most confidently in each class.
+- **Annealing in the wrong regime.** Training-signal annealing slows learning where the model does not overfit, as the
+  figure shows; it is a remedy for a large model on very few labels.
+
+## Results that carried the idea
+
+UDA reported an error rate of 5.43% on CIFAR-10 with 250 labels, and 4.20% on IMDb sentiment with 20 labelled reviews,
+better than the best model of the time trained on all 25,000 labelled reviews <Cite id="xie2020uda" />. The text result
+made the point that consistency with good augmentation, plus a pretrained <Gloss name="language-model">language
+model</Gloss>, can replace most of the labels.

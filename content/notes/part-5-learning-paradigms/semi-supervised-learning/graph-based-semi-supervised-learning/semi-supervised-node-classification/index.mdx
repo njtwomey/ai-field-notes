@@ -1,0 +1,188 @@
+---
+title: 'Semi-supervised node classification'
+kind: concept
+summary: 'Semi-supervised node classification labels all nodes of one graph from a few labelled nodes, using node features and edges. A two-layer graph convolutional network trained on the labelled nodes is the standard method; without features it behaves like a learnt label propagation.'
+tags: [semi-supervised, graphs, graph-neural-networks, classification, worked-example]
+aliases: ['node classification with few labels', 'transductive node classification']
+requires: [graph-convolutional-network, label-propagation]
+related:
+  [
+    label-spreading,
+    manifold-regularisation,
+    graph-neural-networks-under-heterophily,
+    graph-learning-benchmarks,
+    oversmoothing,
+    self-supervised-learning-on-graphs,
+    untrained-graph-propagation,
+  ]
+references: [kipf2017, yang2016planetoid, li2018, wu2019sgc, gasteiger2019appnp, huang2021correctsmooth, shchur2018pitfalls, zachary1977]
+status: draft
+updated: 2026-10-17
+---
+
+import { FewLabelNodes } from './FewLabelNodes'
+
+<Definition>
+**Semi-supervised node classification** takes one graph with $V$ nodes, an adjacency matrix $\Amat$
+($V \times V$), a feature matrix $\Xmat$ ($V \times F$, one row of $F$ features per node) and the classes of a small
+set $\Lcal$ of labelled nodes, and predicts the class of every other node of the same graph. The unlabelled nodes, with
+their features and edges, are available during training. The task is transductive: the nodes to be classified are
+known when the model is fitted <Cite id="kipf2017" />.
+</Definition>
+
+## Intuition
+
+Two sources of information describe each node: its own features, and its position in the graph. Classical
+<NoteLink to="graph-based-semi-supervised-learning">graph-based semi-supervised learning</NoteLink> uses only the
+second. <NoteLink to="label-propagation">Label propagation</NoteLink> and <NoteLink to="label-spreading">label
+spreading</NoteLink> spread the given labels along edges and ignore features. A supervised classifier on the features
+uses only the first, and sees only the labelled nodes. On citation graphs such as Cora, where nodes are papers, features
+are word counts and edges are citations, both sources carry part of the answer. Papers on the same topic share words,
+and papers cite papers on their own topic.
+
+A <Gloss name="gnn">graph neural network</Gloss> combines them. A <NoteLink to="graph-convolutional-network">graph
+convolutional network</NoteLink> mixes every node's features with its neighbours' before classifying, and is trained
+with the loss on the labelled nodes only. The unlabelled nodes enter through the mixing: their features shape the
+representations of the labelled nodes they are joined to, and their own predictions are computed from the same mixed
+features.
+
+## Details
+
+### The standard model
+
+Kipf and Welling's model has two graph-convolution layers <Cite id="kipf2017" />:
+
+$$
+\Zmat = \operatorname{softmax}\paren{\hat\Amat\,\operatorname{ReLU}\paren{\hat\Amat\Xmat\Wmat^{(1)}}\Wmat^{(2)}},
+\qquad \hat\Amat = \tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2},
+$$
+
+with $\Wmat^{(1)}$ ($F \times H$) and $\Wmat^{(2)}$ ($H \times C$) the weights, $H$ the hidden width, $C$ the number of
+classes and $\tilde\Dmat$ the degree matrix of $\Amat + \I$. Row $v$ of $\Zmat$ holds the class probabilities of node
+$v$. Training minimises the cross-entropy over the labelled nodes,
+
+$$
+\Jcal = -\sum_{v \in \Lcal}\sum_{c=1}^{C} Y_{vc}\log Z_{vc},
+$$
+
+with $\Ymat$ the one-hot labels, usually with <Gloss name="weight-decay">weight decay</Gloss>, dropout and
+<NoteLink to="early-stopping">early stopping</NoteLink> on a validation set. Each layer reaches one hop further, so the
+prediction of node $v$ depends on the features of the nodes within two edges of $v$.
+
+### How the unlabelled nodes are used
+
+The loss contains only labelled nodes, yet the model is semi-supervised in two ways.
+
+- **Their features.** The labelled node $v$ is classified from $(\hat\Amat^2\Xmat)_v$, roughly, which averages the
+  features of its unlabelled neighbours. Those features influence the gradient and therefore the weights.
+- **Their predictions.** Every unlabelled node is classified by the same weights from its own two-hop neighbourhood. A
+  node two edges from a labelled node of class $c$, with features like those of class $c$, inherits that class.
+
+Older methods put the graph into the **loss**: <NoteLink to="manifold-regularisation">manifold regularisation</NoteLink>
+adds $\fvec^\top\Lmat\fvec$ to a supervised objective. The graph convolutional network puts the graph into the
+**model** instead. Kipf and Welling argue that the penalty form assumes edges only encode similarity of labels, while
+conditioning the model on $\Amat$ lets it learn how to use the edges <Cite id="kipf2017" />.
+
+### Relation to label propagation
+
+Li, Han and Wu show that a graph convolution is a form of Laplacian smoothing: multiplying by $\hat\Amat$ moves every
+node's features towards its neighbours' <Cite id="li2018" />. Label propagation applies the same kind of smoothing to
+the labels instead of the features, and repeats it until convergence instead of twice.
+
+The two meet when there are no features. With $\Xmat = \I$, each node's feature is its own one-hot indicator, and the
+first layer's weights $\Wmat^{(1)}$ become one learnt vector per node. The network can then use only the graph, as label
+propagation does, but it learns how far and how strongly to spread from the labelled nodes instead of following a fixed
+rule. Kipf and Welling use this set-up on <NoteLink to="untrained-graph-propagation">Zachary's karate club</NoteLink>
+<Cite id="kipf2017" /> <Cite id="zachary1977" />.
+
+Several simplifications keep the propagation and drop the depth or the nonlinearity:
+
+- **<NoteLink to="neighbour-sampling-and-scalable-graph-networks">Simplified graph convolution</NoteLink>** removes the
+  nonlinearities, precomputes $\hat\Amat^K\Xmat$ and fits <NoteLink to="logistic-regression">logistic
+  regression</NoteLink> to it <Cite id="wu2019sgc" />.
+- **APPNP** predicts from features with a <Gloss name="mlp">multilayer perceptron</Gloss>, then spreads the predictions
+  with personalised PageRank, $\Zmat \leftarrow (1 - \alpha)\hat\Amat\Zmat + \alpha\Hmat$, the label-spreading iteration
+  with restart probability $\alpha = 0.1$ and 10 steps <Cite id="gasteiger2019appnp" />.
+- **Correct and Smooth** fits a model to the features alone, spreads its residual errors from the labelled nodes and
+  then smooths its predictions, both by label spreading. On several standard benchmarks it matches or exceeds graph
+  neural networks <Cite id="huang2021correctsmooth" />.
+
+### The benchmark setting
+
+The usual benchmark is the Planetoid split of the Cora, Citeseer and Pubmed citation graphs: 20 labelled nodes per
+class, 500 nodes for validation and 1000 for testing <Cite id="yang2016planetoid" />. On Cora the label rate is 0.052.
+In Kipf and Welling's comparison, label propagation reached 68.0% test accuracy on Cora, manifold regularisation 59.5%
+and the two-layer network 81.5% <Cite id="kipf2017" />. Features matter on Cora: label propagation ignores them.
+
+## Worked example
+
+Four nodes form a path $1 - 2 - 3 - 4$. Nodes 1 and 2 belong to class A and nodes 3 and 4 to class B. Each node has one
+feature, $\xvec = (1.0, -0.2, -0.6, -1.0)$: high for A, low for B, with a noisy value at node 2. Node 1 is labelled A
+and node 4 is labelled B.
+
+**Features only.** The nearest-class-mean rule on the two labelled nodes, with features $1.0$ (A) and $-1.0$ (B), puts
+its threshold halfway, at 0. Node 2, with feature $-0.2$, is classified B: wrong. Node 3 is B: right.
+
+**Graph only.** The harmonic solution on the path, with unit weights, interpolates linearly from 1 at node 1 to 0 at
+node 4: the score for A is $2/3$ at node 2 and $1/3$ at node 3. Both are right, but the graph alone could not tell where
+along the path the class changes.
+
+**One graph convolution.** Adding self-loops gives degrees $\tilde d = (2, 3, 3, 2)$, and
+$\hat A_{ij} = 1/\sqrt{\tilde d_i\tilde d_j}$ for every edge and self-loop:
+
+$$
+\hat\Amat = \begin{pmatrix}
+0.500 & 0.408 & 0 & 0 \\
+0.408 & 0.333 & 0.333 & 0 \\
+0 & 0.333 & 0.333 & 0.408 \\
+0 & 0 & 0.408 & 0.500
+\end{pmatrix},
+\qquad
+\hat\Amat\xvec = (0.418,\; 0.142,\; -0.675,\; -0.745).
+$$
+
+Node 2's smoothed feature, $0.408 \times 1.0 + 0.333 \times (-0.2) + 0.333 \times (-0.6) = 0.142$, is pulled up by its
+labelled neighbour. The same nearest-class-mean rule on the smoothed features of the two labelled nodes, $0.418$ (A) and
+$-0.745$ (B), puts its threshold halfway, at $-0.163$. Node 2 ($0.142$) is now A and node 3 ($-0.675$) is B, both right.
+The graph corrected the noisy feature, and the feature placed the class change between nodes 2 and 3.
+
+The figure runs the three approaches on a two-block random graph with noisy features and on the karate club.
+
+<FewLabelNodes />
+
+On the block model with 40 nodes per block, an edge probability of 0.12 within and 0.02 across blocks, a feature signal
+$\mu = 1$ and 3 labels per class, the averages over five draws are 0.78 for label propagation, 0.67 for logistic
+regression on the features and 0.92 for the network. With equal edge probabilities of 0.06 and $\mu = 1.5$, the graph
+carries no class information: label propagation falls to 0.50, the features alone reach 0.77 and the network 0.58,
+because its averaging mixes each node's informative features with those of random neighbours. On the karate club with
+one label per club, label propagation and the network both misclassify one or two of the 32 unlabelled members.
+
+## Assumptions
+
+- **Homophily.** Linked nodes tend to share a class. The edge homophily, the share of edges that join nodes of the
+  same class, is 0.86 for the karate club (67 of 78 friendships lie within a club). When it is near the share
+  expected by chance, neighbourhood averaging hurts; see
+  <NoteLink to="graph-neural-networks-under-heterophily">graph neural networks under heterophily</NoteLink>.
+- **Labels reach every region.** A two-layer network sees two hops. Nodes many hops from any labelled node receive
+  predictions only through the features and the shared weights. Li et al. argue that shallow networks cannot spread
+  scarce labels across a large graph and add <NoteLink to="co-training">co-training</NoteLink> and
+  <NoteLink to="self-training">self-training</NoteLink> to expand the labelled set <Cite id="li2018" />.
+- **Labelled nodes represent their classes.** The labelled set is assumed to be a fair sample of each class. Labels
+  chosen by degree, or clustered in one part of the graph, bias the model.
+
+## Pitfalls
+
+- **One fixed split.** Shchur et al. show that different train, validation and test splits of the same graphs give
+  very different rankings of graph networks, and that simpler models tuned with equal care can beat more complex
+  ones <Cite id="shchur2018pitfalls" />. Report results over many random splits, and compare against label propagation
+  and Correct and Smooth, not only other networks.
+- **Validation labels.** The Planetoid protocol uses 500 labelled nodes for early stopping and
+  <NoteLink to="model-selection">model selection</NoteLink>, many more than the 140 training labels on Cora. A method
+  tuned on such a set uses more labels than its label rate suggests <Cite id="li2018" />.
+- **Depth.** <NoteLink to="stacking">Stacking</NoteLink> many graph convolutions oversmooths: the node representations
+  converge towards each other and the classes blur; see <NoteLink to="oversmoothing">oversmoothing</NoteLink>.
+  Personalised-PageRank propagation (APPNP) reaches far without stacking layers <Cite id="gasteiger2019appnp" />.
+- **Transductive by default.** The network is trained with the full graph. A node added later changes $\hat\Amat$; an
+  inductive model that samples neighbourhoods, such as <NoteLink to="graphsage">GraphSAGE</NoteLink>, handles new nodes.
+- **Leakage through edges.** The features and edges of test nodes are used in training. That is the transductive
+  setting, but a model evaluated this way should not be reported as one that generalises to unseen nodes.

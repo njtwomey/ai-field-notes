@@ -1,0 +1,169 @@
+---
+title: 'Molecular property prediction with graph networks'
+kind: example
+summary: 'A molecule is a graph of atoms and bonds. A message-passing network with sum readout regresses a property built from additive group contributions on synthetic molecules, and is compared with a fingerprint-plus-linear-model baseline on scaffold splits.'
+tags: [graph-neural-networks, worked-example, scientific-machine-learning]
+aliases: ['molecular graph regression', 'molecule property prediction']
+requires: [graph-pooling-and-readout]
+related:
+  [
+    molecular-representations,
+    scaffold-and-similarity-splits,
+    gated-and-edge-conditioned-message-passing,
+    chemistry-and-materials-datasets,
+    euclidean-equivariant-graph-network,
+    machine-learned-interatomic-potentials,
+    ridge-regression,
+  ]
+references:
+  [
+    gilmer2017,
+    duvenaud2015fingerprints,
+    yang2019chemprop,
+    rogers2010,
+    wildman1999crippen,
+    bemis1996,
+    wu2018moleculenet,
+    jiang2021descriptors,
+    hu2020ogb,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { MoleculeRegression } from './MoleculeRegression'
+
+<Definition>
+Predict a real-valued property $y$ of a molecule from its structure. Each molecule is a carbon scaffold, a six-ring, a
+five-ring or a chain of four carbons, carrying one to four substituents drawn from methyl ($\text{–CH}_3$), ethyl
+($\text{–CH}_2\text{CH}_3$), hydroxyl ($\text{–OH}$), methoxy ($\text{–OCH}_3$), amine ($\text{–NH}_2$) and carbonyl
+($\text{=O}$). The property is a sum of per-atom contributions set by each atom's element, hydrogen count and double
+bond, plus $0.5$ for every pair of nitrogen or oxygen atoms exactly three bonds apart, plus Gaussian noise of standard
+deviation $0.05$. There are 180 molecules. The test set is every five-ring molecule (55 of them), so the test scaffold
+never appears in training. Compare a <Gloss name="gnn">message passing</Gloss> network with a sum readout against ridge
+regression on count fingerprints, by the <Gloss name="rmse">root mean squared error</Gloss> on the test molecules.
+</Definition>
+
+## Setup
+
+**The molecular graph.** Atoms are nodes and bonds are edges. Hydrogens are left implicit, as in most molecular graphs:
+an atom of element $e$ with valence $\nu_e$ ($\nu_{\mathrm C} = 4$, $\nu_{\mathrm N} = 3$, $\nu_{\mathrm O} = 2$) and
+bond orders $b_1, \dots$ carries $\nu_e - \sum_j b_j$ hydrogens. Each atom $v$ has a feature vector
+$\xvec_v \in \set{0, 1}^9$: its element (3 entries, one-hot), its hydrogen count from 0 to 3 (4 entries, one-hot),
+whether it lies on the ring, and whether it carries a double bond. Each edge carries its bond order, 1 or 2.
+
+**The property.** Let $c(e, k, \delta)$ be the contribution of an atom of element $e$ with $k$ hydrogens and double-bond
+flag $\delta$. The values used here are
+
+| atom | contribution |
+| --- | --- |
+| C with 3, 2, 1, 0 hydrogens | 0.55, 0.40, 0.25, 0.10 |
+| N with 2, 1, 0 hydrogens | −1.00, −0.75, −0.50 |
+| O with 1 hydrogen (hydroxyl) | −0.90 |
+| O with no hydrogen, single bonds (ether) | −0.35 |
+| O with a double bond (carbonyl) | −0.60 |
+
+The property of a molecule with atoms $\Vcal$ and topological distances $d(u, v)$ (the number of bonds on a shortest
+path) is
+
+$$
+y = \sum_{v \in \Vcal} c(e_v, k_v, \delta_v) + 0.5 \cdot \abs{\set{\set{u, v} : e_u, e_v \in \set{\mathrm N, \mathrm O},\ d(u, v) = 3}} + \varepsilon,
+\qquad \varepsilon \sim \Gauss(0, 0.05^2).
+$$
+
+The first term is an atom-additive model of the kind used for partition coefficients, where carbon raises the value and
+polar atoms lower it <Cite id="wildman1999crippen" />. The values here are invented for the example. The second term
+stands for an interaction between two polar groups, as an internal hydrogen bond would be, and is the part no single
+atom's own environment reveals.
+
+**The two models.**
+
+- **Fingerprint and ridge.** An extended-connectivity (Morgan) fingerprint names every atom by its element, hydrogen
+  count, ring membership and double bond at round 0, and at round $r$ by its round-$(r-1)$ name together with the
+  sorted multiset of its neighbours' round-$(r-1)$ names and bond orders <Cite id="rogers2010" />. The count
+  fingerprint of radius $R$ counts how many atoms carry each name at rounds $0, \dots, R$, over the names seen in the
+  training molecules. Ridge regression with penalty $0.1$ on these counts is the baseline
+  (<NoteLink to="ridge-regression">ridge regression</NoteLink>).
+- **Message passing network.** Three layers update each atom's vector $\hvec_v \in \reals^{12}$ by
+  $\hvec_v' = \mathrm{ReLU}\paren{\Wmat_0^\tr \hvec_v + \Wmat_1^\tr \sum_{u \in \Ncal_1(v)} \hvec_u + \Wmat_2^\tr \sum_{u \in \Ncal_2(v)} \hvec_u + \bvec}$,
+  where $\Ncal_1(v)$ and $\Ncal_2(v)$ are the neighbours of $v$ joined by single and by double bonds. One weight matrix
+  per bond order is the simplest edge-conditioned message
+  (<NoteLink to="gated-and-edge-conditioned-message-passing">gated and edge-conditioned message passing</NoteLink>). A
+  linear map of the three layers' vectors, concatenated, gives each atom one number $o_v$, and the prediction is the sum
+  readout $\hat y = \sum_v o_v$ (<NoteLink to="graph-pooling-and-readout">graph pooling and readout</NoteLink>).
+  Full-batch <NoteLink to="adam">Adam</NoteLink> minimises the <Gloss name="mse">mean squared error</Gloss> on the
+  training molecules.
+
+## Solution
+
+**Two molecules by hand.** Put hydroxyl groups on two neighbouring carbons of the six-ring (a 1,2-diol). The ring
+carbons that carry a group have one hydrogen each, the other four have two, and each oxygen has one hydrogen:
+
+- ring carbons: $2 \cdot 0.25 + 4 \cdot 0.40 = 2.10$;
+- oxygens: $2 \cdot (-0.90) = -1.80$;
+- the two oxygens are three bonds apart, O–C–C–O, which adds $0.5$;
+- so $y = 2.10 - 1.80 + 0.5 = 0.80$, before noise.
+
+Move the second hydroxyl one carbon further round the ring (a 1,3-diol). The atom counts and types are unchanged, so the
+atom terms still sum to $0.30$, but the oxygens are now four bonds apart and the interaction term is 0: $y = 0.30$.
+
+**What each model can represent.** The atom terms depend only on round-0 names, so a fingerprint of radius 0 with a
+linear model represents them exactly, with one weight per atom type. It cannot separate the two diols, which have the
+same atom types and differ by $0.5$. The interaction needs both polar atoms in one atom's environment. The middle
+carbons of O–C–C–O see one oxygen at distance 1 and the other at distance 2, so a radius-2 fingerprint has a name for
+that pattern, and a linear model on radius-2 counts can represent the whole noise-free property. The price is the
+number of names: 499 different radius-2 environments occur in the training molecules, for 125 training molecules, so
+ridge regression must choose among many nearly collinear counts.
+
+The message passing network represents the property with no names to choose. After three rounds, atom $v$'s vector can
+depend on every atom within three bonds, so $o_v$ can equal $c(e_v, k_v, \delta_v)$ plus $0.25$ for every polar
+partner at distance 3. The sum readout then adds the per-atom values, as the property does. The sum matters: with a
+mean readout, a molecule's prediction would not grow with the number of atoms, while the property does
+(<NoteLink to="graph-pooling-and-readout">graph pooling and readout</NoteLink>).
+
+## Simulation
+
+<MoleculeRegression />
+
+At the defaults (scaffold split, 150 Adam steps at rate 0.02, seed 1) the network's test error falls to about 0.17,
+against a standard deviation of the property of 0.99 across molecules and a noise floor of 0.05. The radius-2
+fingerprint model reaches about 0.20, and the radius-0 model, which sees only atom types, about 0.28, roughly the spread
+of the interaction term it cannot see. The per-atom outputs of the trained network correlate with the true contributions
+(a correlation of 0.77 over the test atoms at the defaults, between 0.4 and 0.6 for seeds 2 and 3). The loss constrains
+only their sum, so training can move value between neighbouring atoms without changing any prediction, and a per-atom
+attribution read from a sum readout is not identified by the data. Switching to a random split of the same size changes
+the ranking of the two models from one seed to another: at this data size neither model wins reliably, which matches
+comparisons on real molecular benchmarks <Cite id="jiang2021descriptors" />.
+
+## What it illustrates
+
+- **Molecules as graphs.** Atoms with element and hydrogen features, bonds with their orders, and permutation-invariant
+  readout give a model that needs no hand-chosen descriptors (<NoteLink to="molecular-representations">molecular
+  representations</NoteLink>). Duvenaud et al. introduced the learned analogue of the circular fingerprint
+  <Cite id="duvenaud2015fingerprints" />, and Gilmer et al. framed it as message passing <Cite id="gilmer2017" />.
+- **Readout matches the target.** An extensive property, one that adds over atoms, calls for a sum readout of per-atom
+  outputs, and those outputs give a per-atom attribution for free.
+- **Fingerprints are a strong baseline.** A fixed fingerprint with a linear model or a tree ensemble matches graph
+  networks on many property benchmarks, especially with a few hundred to a few thousand molecules
+  <Cite id="jiang2021descriptors" />. A graph network's advantage is that it learns which environments matter instead of
+  counting all of them.
+- **Scaffold splits test extrapolation.** Holding out a whole scaffold tests whether a model generalises to new
+  chemistry, which a random split does not (<NoteLink to="scaffold-and-similarity-splits">scaffold and similarity
+  splits</NoteLink>) <Cite id="bemis1996" />.
+
+## Variations
+
+- **Directed bond messages.** Chemprop's directed message passing network passes messages along directed bonds rather
+  than atoms, which stops a message from returning at once to the atom it came from, and pairs the learned
+  representation with a few computed descriptors <Cite id="yang2019chemprop" />. It is a common default for property
+  prediction.
+- **More data, less additivity.** Larger training sets and properties with long-range or three-dimensional effects
+  favour graph networks; the MoleculeNet and <NoteLink to="graph-learning-benchmarks">OGB</NoteLink> molecular tasks are
+  the usual tests, with scaffold splits <Cite id="wu2018moleculenet" /> <Cite id="hu2020ogb" />.
+- **Three-dimensional geometry.** Energies and forces depend on atomic positions. Equivariant networks on the 3D point
+  cloud handle them (<NoteLink to="euclidean-equivariant-graph-network">E(n)-equivariant graph network</NoteLink>,
+  <NoteLink to="machine-learned-interatomic-potentials">machine-learned interatomic potentials</NoteLink>).
+- **A mean readout.** Replacing the sum with a mean leaves the network unable to represent the size dependence of the
+  property; a target such as a concentration that does not grow with size would favour the mean.
+- **A larger radius.** A radius-3 fingerprint adds more environments again; with this training set its test error
+  rises rather than falls, because the extra names are rare.

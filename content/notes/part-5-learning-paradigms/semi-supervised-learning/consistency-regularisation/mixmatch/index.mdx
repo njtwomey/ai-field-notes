@@ -1,0 +1,173 @@
+---
+title: 'MixMatch'
+kind: technique
+summary: 'MixMatch guesses each unlabelled example''s label by averaging predictions over several augmentations and sharpening with a temperature, then trains on mixup combinations of labelled and unlabelled examples. ReMixMatch adds distribution alignment and augmentation anchoring.'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['ReMixMatch', 'label guessing and sharpening', 'distribution alignment', 'augmentation anchoring']
+requires: [consistency-regularisation, entropy-minimisation]
+related: [mixup-and-cutmix, fixmatch, unsupervised-data-augmentation, mean-teacher, pseudo-labelling]
+references: [berthelot2019mixmatch, berthelot2020remixmatch, zhang2018mixup, grandvalet2005, sohn2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { GuessAndSharpen } from './GuessAndSharpen'
+
+<Definition>
+**MixMatch** is a semi-supervised training procedure that builds a target for every unlabelled example by **label
+guessing**: average the model's predictions over $K'$ augmentations of the example, then **sharpen** the average with
+a temperature $T$. Labelled examples with their labels and unlabelled examples with their guesses are shuffled together
+and combined pairwise by <NoteLink to="mixup-and-cutmix">mixup</NoteLink>. The model is trained with cross-entropy on
+the mixed labelled examples and squared error on the mixed unlabelled ones <Cite id="berthelot2019mixmatch" />.
+</Definition>
+
+## Problem
+
+By 2019 three ideas each improved semi-supervised <NoteLink to="image-classification">image classification</NoteLink>. <NoteLink
+to="consistency-regularisation">Consistency regularisation</NoteLink> made predictions stable under augmentation.
+<NoteLink to="entropy-minimisation">Entropy minimisation</NoteLink> made predictions on unlabelled data confident, so
+the boundary avoided them <Cite id="grandvalet2005" />. Generic regularisation such as <Gloss name="weight-decay">weight
+decay</Gloss> and mixup kept the network from memorising the few labels <Cite id="zhang2018mixup" />. Each was used
+separately. MixMatch puts all three into one target and one loss: averaging over augmentations gives consistency,
+sharpening gives low entropy, and mixup regularises both terms. Berthelot et al. showed that the combination did better
+than any part, with the largest gains when labels were fewest <Cite id="berthelot2019mixmatch" />.
+
+## Mechanism
+
+### Label guessing
+
+For each unlabelled example $\uvec_b$ in a batch, draw $K'$ augmentations $\hat\uvec_{b,1}, \dots, \hat\uvec_{b,K'}$
+and average the model's predictions over them:
+
+$$
+\bar\qvec_b = \frac{1}{K'} \sum_{k=1}^{K'} p_{\thetavec}(\cdot \mid \hat\uvec_{b,k}) \in [0, 1]^C ,
+$$
+
+with $C$ the number of classes. The average is held fixed: no gradient flows through it. An average over several
+views is less noisy than one prediction, and it already enforces agreement between the views, since all $K'$ of them
+are trained towards the same target.
+
+### Sharpening
+
+The average is pushed towards a one-hot vector with temperature $T \in (0, 1]$:
+
+$$
+\operatorname{Sharpen}(\bar\qvec, T)_c = \frac{\bar q_c^{1/T}}{\sum_{j=1}^{C} \bar q_j^{1/T}} .
+$$
+
+$T = 1$ leaves the average unchanged; as $T \to 0$ the result tends to the one-hot vector of the arg max. Training on a
+sharpened target lowers the entropy of the model's predictions on unlabelled data, which is entropy minimisation done
+through the target rather than through an extra loss term. The paper fixes $T = 0.5$ and $K' = 2$ for every
+experiment <Cite id="berthelot2019mixmatch" />.
+
+### Mixup across both sets
+
+Collect the batch's $B$ augmented labelled examples with one-hot labels into $\hat\Xcal$, and the $K'B$ augmented
+unlabelled copies, each with its sharpened guess, into $\hat\Ucal$. Shuffle their union into $\Wcal$. Mixup of two
+examples $(\xvec_1, \pvec_1)$ and $(\xvec_2, \pvec_2)$ draws $\lambda \sim \Beta(\alpha, \alpha)$, sets
+$\lambda' = \max(\lambda, 1 - \lambda)$, and returns
+
+$$
+\xvec' = \lambda'\xvec_1 + (1 - \lambda')\xvec_2, \qquad \pvec' = \lambda'\pvec_1 + (1 - \lambda')\pvec_2 .
+$$
+
+The $\max$ keeps the mixed example closer to its first argument, so a labelled example stays mostly labelled and an
+unlabelled one mostly unlabelled; plain mixup omits it. The $i$-th labelled example is mixed with $\Wcal_i$, and the
+$i$-th unlabelled copy with $\Wcal_{B+i}$, so that every mixed example has a partner drawn from either set. The paper
+uses $\alpha = 0.75$ as a starting point.
+
+### The loss
+
+With the mixed sets $\Xcal'$ (labelled) and $\Ucal'$ (unlabelled),
+
+$$
+\Lcal = \frac{1}{|\Xcal'|} \sum_{(\xvec, \pvec) \in \Xcal'} \mathrm{CE}\big(\pvec, p_{\thetavec}(\cdot \mid \xvec)\big)
++ \lambda_U \frac{1}{C\,|\Ucal'|} \sum_{(\uvec, \qvec) \in \Ucal'} \norm{\qvec - p_{\thetavec}(\cdot \mid \uvec)}^2 .
+$$
+
+The unlabelled term is the squared error (the multiclass Brier score), which is bounded and less sensitive than
+cross-entropy to a confidently wrong guess. Its weight $\lambda_U$ is large (75 for <Gloss name="cifar-10" />, 100 as a
+starting point) and is ramped up linearly over the first 16,000 steps <Cite id="berthelot2019mixmatch" />.
+
+### What each part buys
+
+The paper's ablation on CIFAR-10 with 250 labels, where full MixMatch has an error of 11.80%, removes one part at a
+time <Cite id="berthelot2019mixmatch" />:
+
+- one augmentation instead of two ($K' = 1$): 17.09%;
+- no sharpening ($T = 1$): 27.83%;
+- no mixup: 39.11%;
+- an EMA teacher of the weights for guessing, as in <NoteLink to="mean-teacher">mean teacher</NoteLink>: 11.86%,
+  slightly worse.
+
+On those images every part helps, and mixup most of all.
+
+### ReMixMatch
+
+ReMixMatch adds two parts <Cite id="berthelot2020remixmatch" />. **Distribution alignment** rescales each guess so
+that the model's average prediction on unlabelled data matches the class distribution of the labelled data: the
+guess $\bar\qvec$ is multiplied elementwise by the ratio of the labelled class frequencies to a running average of the
+model's predictions, then renormalised. This stops the guesses from collapsing onto a few classes. **Augmentation
+anchoring** takes the guess from a weakly augmented view only and uses it as the target for several strongly
+augmented views, with a learned augmentation policy (CTAugment). Anchoring a strong view to a weak view's prediction
+is the step that <NoteLink to="fixmatch">FixMatch</NoteLink> then simplified, replacing the sharpened guess by a
+thresholded hard label <Cite id="sohn2020" />.
+
+<GuessAndSharpen />
+
+## Worked example
+
+Three classes, one unlabelled example, $K' = 2$, $T = 0.5$.
+
+**Step 1: guessing.** The model predicts $(0.6, 0.3, 0.1)$ on the first augmentation and $(0.4, 0.4, 0.2)$ on the
+second. The average is $\bar\qvec = (0.5, 0.35, 0.15)$.
+
+**Step 2: sharpening.** With $1/T = 2$ the entries are squared: $(0.25, 0.1225, 0.0225)$, summing to $0.395$. The
+target is $(0.633, 0.310, 0.057)$. Its entropy is $0.816$ nats, against $0.999$ for the average.
+
+**Step 3: mixing.** The shuffle pairs one copy of the example with a labelled example of class 2, target $(0, 1,
+0)$. The draw $\lambda = 0.3$ gives $\lambda' = \max(0.3, 0.7) = 0.7$. The mixed input is $0.7$ of the unlabelled copy
+plus $0.3$ of the labelled input, and the mixed target is $0.7 \times (0.633, 0.310, 0.057) + 0.3 \times (0, 1, 0) =
+(0.443, 0.517, 0.040)$.
+
+**Step 4: the unlabelled loss.** The model predicts $(0.5, 0.4, 0.1)$ on the mixed input. The squared differences
+are $0.0032$, $0.0137$ and $0.0036$; their sum divided by $C = 3$ is $0.0069$, which enters the loss multiplied by
+$\lambda_U$.
+
+The figure runs MixMatch on two moons with eight labels, where it behaves differently from the image benchmarks. On the
+default data seed, with $\lambda_U = 30$ and 600 steps, the accuracy on the 192 unlabelled points is 87.5% with the
+paper's $T = 0.5$ and $\alpha = 0.75$, against 84.4% for the labelled points alone. Turning mixup off ($\alpha =
+0$) raises it to 91.1%, and turning sharpening off as well ($T = 1$) to 99.5%. Across data seeds 1 to 3, mixup lowered
+the final accuracy at $T = 1$ on every seed (86.5%, 87.0% and 86.5% with mixup against 90.6%, 99.5% and 96.4% without).
+Two properties of the toy explain it. Mixed points between two moons fall in the gap with intermediate targets, so mixup
+asks for a gradual change across the gap, the opposite of the <NoteLink to="low-density-separation">low-density
+separation</NoteLink> the unlabelled data support; image mixtures fall far from any real image and do not compete with
+the data in this way. And the labelled-only network starts with whole regions of a moon on the wrong side, so sharpening
+makes those wrong guesses confident before they are corrected.
+
+## Cost
+
+A step costs $K'$ forward passes without gradients per unlabelled example for guessing, and a forward and backward
+pass over $B + K'B$ mixed examples. With $K' = 2$ this is about three times a supervised step on the same number of
+labelled examples. Mixup itself is a weighted sum of inputs and costs nothing next to the network.
+
+## Trade-offs
+
+- **Soft targets with sharpening against hard thresholded labels.** Sharpening keeps some uncertainty and uses every
+  unlabelled example; FixMatch's threshold discards uncertain examples and uses a hard label. FixMatch reached lower
+  error with fewer hyperparameters <Cite id="sohn2020" />.
+- **Many hyperparameters.** $K'$, $T$, $\alpha$ and $\lambda_U$ interact. The paper fixes $K'$ and $T$ and tunes only
+  $\alpha$ and $\lambda_U$ per dataset, which still needs labelled validation data.
+- **Mixup's assumption.** Mixup asks the prediction to change linearly along the segment between two examples. For
+  images the segment runs through inputs far from any real image, and the requirement acts as a regulariser. Where the
+  segment crosses a gap between classes inside the data, as on two moons, it conflicts with low-density separation.
+
+## Pitfalls
+
+- **Weights that do not transfer.** The paper's $\lambda_U$ ranged from 50 to 250 across its datasets (75 for
+  CIFAR-10, 150 for CIFAR-100) <Cite id="berthelot2019mixmatch" />, and a value tuned on one dataset is a guess on the
+  next.
+- **Order of the mixed sets.** The $\lambda' = \max(\lambda, 1 - \lambda)$ step matters: without it a "labelled"
+  mixed example can be mostly an unlabelled input carrying a guessed label, and the two loss terms lose their roles.
+- **Class collapse with few labels.** Sharpened guesses can drift towards the classes the model learnt first.
+  Distribution alignment in ReMixMatch is the remedy <Cite id="berthelot2020remixmatch" />.

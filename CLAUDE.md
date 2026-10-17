@@ -109,8 +109,10 @@ Notes are encyclopedia entries. Every sentence carries information and stands on
   at most three colour slots in a scatter, one hue for sequential scales, `scale="diverging"` for signed values,
   `emphasis` for highlighted marks. UI: shadcn components (Base UI, compose with `render`), Tailwind, lucide icons
   only.
-- Known engine quirks: a `useFigureState` key named `set` breaks the figure (it shadows `state.set`); an empty `dense` `Points` layer throws (skip empty layers); a `Raster` paints opaquely, so draw
-  cell edges with `Segments`; a log axis cannot show zeros or bars starting at 0.
+- Known engine quirks: a `useFigureState` key named after a state member breaks the figure, because it shadows it
+  (`values`, `schema`, `set`, `handle`, `bind`, `reset`, `isDefault`, `json`, `setJson`, `dropped`, `attach`); an
+  empty `dense` `Points` layer throws (skip empty layers); a `Raster` paints opaquely, so draw cell edges with
+  `Segments`; a log axis cannot show zeros or bars starting at 0.
 
 ## Python (only when asked)
 

@@ -1,0 +1,183 @@
+---
+title: 'Semi-supervised clustering'
+kind: technique
+summary: 'Semi-supervised clustering uses side information: seed points with known clusters, or must-link and cannot-link constraints between pairs. COP-k-means enforces constraints during assignment, seeded k-means starts from the seeds, and metric learning reshapes distances.'
+tags: [semi-supervised, clustering, worked-example]
+aliases: ['constrained clustering', 'must-link and cannot-link constraints', 'COP-k-means', 'seeded k-means', 'PCK-means']
+requires: [k-means]
+related: [metric-learning, clustering, spectral-clustering, gaussian-mixture-model, semi-supervised-learning-in-practice]
+references:
+  [wagstaff2001constrained, basu2002seeding, basu2004active, basu2004probabilistic, xing2002, barhillel2005rca, lloyd1982]
+status: draft
+updated: 2026-10-17
+---
+
+import { ConstrainedClustering } from './ConstrainedClustering'
+
+<Definition>
+**Semi-supervised clustering** partitions $n$ points into $k$ clusters using, besides the points, a small amount of
+side information about the wanted partition. The side information takes two forms: **seeds**, a few points with a
+known cluster, and **pairwise constraints**, a set $\Mcal$ of **must-link** pairs that belong in the same cluster and
+a set $\Ccal$ of **cannot-link** pairs that do not. Methods use it in three places: to start the clustering (seeded
+k-means), to restrict or penalise the assignments (COP-k-means, PCK-means), or to learn the distance in which the
+clustering runs (metric learning).
+</Definition>
+
+## Problem
+
+<NoteLink to="k-means">k-means</NoteLink> finds the partition of lowest inertia, the summed squared distance from each
+point to its cluster mean. Many partitions of a dataset are sensible, and the one of lowest inertia is often not the one
+the user wants. Two long parallel bars of points are the plainest case: cutting both bars across the middle gives a
+lower inertia than separating them, so k-means with $k = 2$ cuts them across. Documents can be grouped by topic or by
+author; images of faces by identity or by pose. The data alone do not say which grouping is meant.
+
+Side information says it. It is often cheap: a user can say that two documents belong together without naming the
+topic, and a GPS trace that follows a car gives must-links between its points. Wagstaff, Cardie, Rogers and Schroedl
+used such constraints to find road lanes in GPS data <Cite id="wagstaff2001constrained" />. Semi-supervised clustering
+keeps the clustering algorithm and changes it as little as possible to respect the side information. It differs from
+semi-supervised classification in what it outputs: a partition into $k$ groups, which need not match any labelled
+class, and which may include clusters no seed or constraint touches.
+
+## Mechanism
+
+### Closing the constraints
+
+Must-link is an equivalence relation: if $a$ must link with $b$ and $b$ with $c$, then $a$ must link with $c$. The
+transitive closure of $\Mcal$ joins the points into **groups**, the connected components of the must-link graph.
+Cannot-links then apply to whole groups: if $a$ must link with $b$ and $b$ cannot link with $c$, then $a$ cannot link
+with $c$. A cannot-link inside a group is a contradiction, and no partition satisfies the constraints. Every method
+below works with the closed sets <Cite id="wagstaff2001constrained" />.
+
+### Seeded and constrained k-means
+
+Basu, Banerjee and Mooney use labelled seeds to start Lloyd's algorithm <Cite id="basu2002seeding" />. **Seeded
+k-means** sets each initial centroid to the mean of the seeds of its cluster and then runs plain k-means, so the seeds
+may change cluster later. **Constrained k-means** keeps each seed in its given cluster at every assignment step. Lloyd's
+algorithm only finds a local minimum of the inertia <Cite id="lloyd1982" />, and a good start picks which one. The seeds
+choose the start and, in the constrained form, fix part of the answer.
+
+### COP-k-means: hard constraints
+
+COP-k-means changes the assignment step of Lloyd's algorithm <Cite id="wagstaff2001constrained" />. It visits the points
+in a fixed order. Each point goes to the nearest centroid whose cluster is **legal**: no must-link partner of the point
+is already placed in another cluster, and no cannot-link partner is already placed in this one. If no cluster is legal,
+the algorithm fails and returns no partition. The update step is unchanged: each centroid moves to the mean of its
+points. The partition it returns satisfies every constraint.
+
+The order matters. A cannot-link partner placed early can leave a later point with no legal cluster even when a
+partition that satisfies all constraints exists, because COP-k-means never revisits a placement. Wagstaff and
+colleagues saw such failures for some random orderings in their experiments <Cite id="wagstaff2001constrained" />.
+Deciding whether any partition satisfies a set of cannot-links with $k \ge 3$ clusters is graph colouring, which is
+NP-complete, so no greedy order avoids failure in general.
+
+### PCK-means: penalised constraints
+
+PCK-means of Basu, Banerjee and Mooney makes each constraint soft <Cite id="basu2004active" />. With cluster labels
+$z_i$, centroids $\muvec_h$, and costs $w$ per broken must-link and $\bar w$ per broken cannot-link, it minimises
+
+$$
+J = \frac12\sum_{i=1}^{n}\norm{\xvec_i - \muvec_{z_i}}^2
++ \sum_{(i, j) \in \Mcal} w\,\indicator[z_i \ne z_j]
++ \sum_{(i, j) \in \Ccal} \bar w\,\indicator[z_i = z_j].
+$$
+
+The assignment step visits the points in turn and gives each the cluster $h$ that minimises its share of $J$: half the
+squared distance to $\muvec_h$, plus $w$ for each must-link partner currently in another cluster, plus $\bar w$ for each
+cannot-link partner currently in $h$. With the other labels held fixed, this choice cannot raise $J$. The update step
+sets each $\muvec_h$ to the mean of its points, which minimises the first term with the labels fixed and leaves the
+others unchanged. Both steps lower $J$ or leave it equal, and there are finitely many labellings, so PCK-means
+converges to a local minimum, as Lloyd's algorithm does. It never fails: an inconsistent or noisy constraint only costs
+$w$. The cost $w$ is in units of squared distance, so it must be set relative to the scale of the data.
+
+Basu, Bilenko and Mooney later cast constrained clustering as inference in a hidden <Gloss name="mrf">Markov random
+field</Gloss> whose energy is this kind of objective, with the squared distance replaced by other distortion measures
+such as Bregman divergences and cosine distance <Cite id="basu2004probabilistic" />.
+
+### Learning the metric
+
+Constraints in COP-k-means and PCK-means act on the constrained points only. An unconstrained point still goes to its
+nearest centroid in Euclidean distance, so if the Euclidean geometry favours the wrong partition, a few constraints
+cannot change it. Metric learning uses the constraints to change the distance itself. Xing, Jordan, Russell and Ng learn
+a <NoteLink to="mahalanobis-distance">Mahalanobis distance</NoteLink>
+$d_{\Amat}(\xvec, \xvec') = \sqrt{(\xvec - \xvec')^\top\Amat(\xvec - \xvec')}$, with $\Amat \succeq 0$, that keeps
+must-linked pairs close while keeping cannot-linked pairs apart, and then run k-means in it <Cite id="xing2002" />.
+
+Relevant component analysis (RCA) of Bar-Hillel, Hertz, Shental and Weinshall gets a metric in closed form from the
+must-link groups alone <Cite id="barhillel2005rca" />. Call the groups of two or more points chunklets
+$G_1, \dots, G_m$, with means $\hat\muvec_j$ and $p$ points in total. The within-chunklet covariance is
+
+$$
+\hat\Cmat = \frac{1}{p}\sum_{j=1}^{m}\sum_{i \in G_j}(\xvec_i - \hat\muvec_j)(\xvec_i - \hat\muvec_j)^\top,
+$$
+
+and RCA uses $\Amat = \hat\Cmat^{-1}$, which is the Euclidean distance after the whitening map
+$\xvec \mapsto \hat\Cmat^{-1/2}\xvec$. Directions in which points of one chunklet vary are irrelevant to the grouping
+and get shrunk; directions in which they agree are stretched. On the two bars, points of one bar vary along the bars and
+agree across them, so RCA shrinks the long axis and k-means then separates the bars. Under a Gaussian model with a
+shared class covariance, $\hat\Cmat$ is the maximum-likelihood estimate of that covariance
+<Cite id="barhillel2005rca" />. <NoteLink to="metric-learning">Metric learning</NoteLink> covers the wider family of
+learned distances.
+
+## Worked example
+
+Six points on a line, $x = 0, 1, 4, 6, 9, 10$, are clustered with $k = 2$, starting from the seeds 0 (cluster 1) and
+10 (cluster 2), so the seeded starting centroids are $\mu_1 = 0$ and $\mu_2 = 10$.
+
+**Step 1: plain k-means.** The points 0, 1 and 4 are nearer 0; the points 6, 9 and 10 are nearer 10. The update gives
+$\mu_1 = 5/3 = 1.67$ and $\mu_2 = 25/3 = 8.33$. Reassigning changes nothing: 4 is 2.33 from $\mu_1$ and 4.33 from
+$\mu_2$, and 6 is the mirror image. The partition is $\{0, 1, 4\}, \{6, 9, 10\}$, with inertia
+$2.78 + 0.44 + 5.44 = 8.67$ per cluster, 17.33 in all.
+
+**Step 2: one must-link, COP-k-means.** Suppose 4 and 6 must link. From $\mu = (1.67, 8.33)$, visiting the points in
+increasing order: 0, 1 and 4 go to cluster 1; 6 is nearer cluster 2, but its partner 4 is already in cluster 1, so its
+only legal cluster is 1; 9 and 10 go to cluster 2. The update gives $\mu_1 = 11/4 = 2.75$ and $\mu_2 = 9.5$, and a
+second pass changes nothing. The partition $\{0, 1, 4, 6\}, \{9, 10\}$ has inertia $22.75 + 0.5 = 23.25$: the
+constraint costs 5.92 in inertia.
+
+**Step 3: closure.** Add a cannot-link between 1 and 6. Closure with the must-link 4–6 adds a cannot-link between 1 and
+4. Visiting in order from $\mu = (1.67, 8.33)$: 0 and 1 go to cluster 1; 4 cannot join 1, so it goes to cluster 2; 6
+must join 4 and cannot join 1, so cluster 2; 9 and 10 go to cluster 2. The partition is $\{0, 1\}, \{4, 6, 9, 10\}$.
+Without the closure, 4 would have been placed in cluster 1 next to its unknown enemy 1, and 6 would then have had no
+legal cluster: COP-k-means would have failed.
+
+**Step 4: PCK-means.** Return to the single must-link 4–6 with cost $w$. At $\mu = (1.67, 8.33)$, with 4 already in
+cluster 1, point 6 costs $\tfrac12 (6 - 1.67)^2 = 9.39$ in cluster 1 and $\tfrac12 (6 - 8.33)^2 + w = 2.72 + w$ in
+cluster 2. It joins its partner only if $w > 6.67$. A must-link is honoured when breaking it costs more than the
+distance it saves, and the figure's cost $w$ plays the same role.
+
+<ConstrainedClustering />
+
+## Cost
+
+Each pass of COP-k-means or PCK-means costs $O(nkd)$ for the distances, as in Lloyd's algorithm, plus $O(\abs{\Mcal} +
+\abs{\Ccal})$ after closure for checking constraints; closing the must-links takes nearly linear time with a union-find
+structure. The closure can enlarge the cannot-link set: a cannot-link between two groups of sizes $a$ and $b$ becomes
+$ab$ pairs. RCA costs $O(pd^2)$ for the covariance and $O(d^3)$ for its inverse square root, once, before an ordinary
+k-means. Learning a full Mahalanobis matrix by optimisation, as Xing and colleagues do, costs an iterative projection
+onto the positive semidefinite cone with an $O(d^3)$ eigendecomposition per step <Cite id="xing2002" />.
+
+## Trade-offs
+
+- **Hard against soft constraints.** COP-k-means satisfies every constraint or fails; PCK-means always returns a
+  partition and lets $w$ trade constraints against inertia. Real constraints from users contain mistakes, which makes
+  the soft form the usual choice.
+- **Assignment against metric.** Constraints in the assignment step affect only the constrained points and, through the
+  centroids, their neighbours. A learned metric generalises the constraints to every point, at the cost of assuming
+  that one global linear metric suits the whole space.
+- **Seeds against pairs.** Seeds carry more information per label (a point's cluster rather than a relation) and need
+  $k$ known; pairs are easier to obtain from people and do not say how many clusters there are.
+- **Which pairs to ask for.** Random pairs are mostly cannot-links when $k$ is large, and most of them are obvious.
+  Basu, Banerjee and Mooney query pairs actively, first exploring far-apart points to find one point per cluster and
+  then consolidating, and need far fewer constraints for the same accuracy <Cite id="basu2004active" />.
+
+## Pitfalls
+
+- **Order dependence.** COP-k-means and PCK-means visit points in a fixed order, and the result changes with it. Run
+  several orders or restarts and keep the lowest objective that satisfies the constraints.
+- **Too few constraints for the geometry.** If plain k-means prefers the wrong partition, a handful of constraints
+  usually does not overturn it in COP-k-means or PCK-means. The figure shows the bars cut across with 30 constraints and
+  separated with 200, while the learned metric needs only a few must-links.
+- **Inconsistent constraints.** A cannot-link inside a must-link group makes COP-k-means fail on every order. Check the
+  closure for contradictions before clustering.
+- **Scale of the penalty.** PCK-means' $w$ is measured in squared distance. Rescaling the features changes the balance
+  between the inertia and the constraints unless $w$ is rescaled with them.

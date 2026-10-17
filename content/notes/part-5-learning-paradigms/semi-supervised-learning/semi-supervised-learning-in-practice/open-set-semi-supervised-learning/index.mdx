@@ -1,0 +1,158 @@
+---
+title: 'Open-set semi-supervised learning'
+kind: concept
+summary: 'In open-set semi-supervised learning the unlabelled set contains classes absent from the labelled set. Methods detect and down-weight those points, by out-of-distribution scores, one-versus-all heads or curriculum filtering, before using them for training.'
+tags: [semi-supervised, robustness, worked-example]
+aliases: ['class-mismatched semi-supervised learning', 'semi-supervised learning with class distribution mismatch']
+requires: [when-semi-supervised-learning-fails, pseudo-labelling]
+related:
+  [
+    out-of-distribution-test-sets,
+    selective-classification,
+    out-of-distribution-detection,
+    evaluating-semi-supervised-learning,
+    fixmatch,
+    generative-semi-supervised-learning,
+  ]
+references:
+  [oliver2018realistic, chen2020uasd, yu2020mtc, saito2021openmatch, guo2020safe, hendrycks2017baseline]
+status: draft
+updated: 2026-10-17
+---
+
+import { OpenSetContamination } from './OpenSetContamination'
+
+<Definition>
+**Open-set semi-supervised learning** is semi-supervised classification in which the unlabelled set contains points of
+classes that no labelled point belongs to. The task is still to classify the $K$ known classes. A method must decide,
+for each unlabelled point, whether it is an **inlier** from a known class, to be used as ordinary unlabelled data, or an
+**outlier** from an unseen class, to be left out or down-weighted. The setting is also called semi-supervised learning
+under class distribution mismatch.
+</Definition>
+
+## Intuition
+
+The standard benchmark makes unlabelled data by hiding labels, so every unlabelled point belongs to a known class.
+Unlabelled data collected for real do not: a pile of web images used to help a ten-class animal classifier contains
+cars, food and text. A semi-supervised method treats each unlabelled point as a member of some known class.
+<NoteLink to="pseudo-labelling">Pseudo-labelling</NoteLink> assigns it the most probable known class; a generative model
+assigns it a responsibility for each known class; <NoteLink to="fixmatch">FixMatch</NoteLink> trains the network to
+predict a known class for it under strong augmentation. An outlier therefore becomes a wrongly labelled training point,
+and a whole unseen class becomes a whole cluster of wrong labels pulling on the decision boundary.
+
+The remedy is to recognise the outliers first. That is the problem of
+<NoteLink to="out-of-distribution-detection">out-of-distribution detection</NoteLink> (<Gloss name="ood" /> detection),
+solved here with a twist: the detector itself must be trained from the few labels, and it decides what the
+semi-supervised learner sees.
+
+## Details
+
+### How much harm
+
+Oliver, Odena, Raffel, Cubuk and Goodfellow measured the harm on <Gloss name="cifar-10" />. Six animal classes, with 400
+labels each, formed the labelled task. The unlabelled data came from four classes, and the experiment varied how many of
+those four were among the six. With all four inside, the methods gained; as the overlap fell, they lost accuracy, and
+with no overlap several of them did worse than the supervised baseline <Cite id="oliver2018realistic" />. Guo and
+colleagues report that existing deep semi-supervised methods fell below <NoteLink to="supervised-learning">supervised
+learning</NoteLink> in about 40% of their unseen-class settings <Cite id="guo2020safe" />.
+
+The harm depends on where the outliers lie. An unseen class far from every known class attracts whatever the model
+offers it: a known class's region in pseudo-labelling, a component in a mixture model. That pull moves the boundary
+between the known classes. An unseen class that looks like a known class is assigned to it confidently and blurs it. An
+unseen class between two known classes fills the low-density gap that the boundary should cross, which removes the
+signal that <NoteLink to="low-density-separation">low-density separation</NoteLink> relies on.
+
+### Scoring the unlabelled points
+
+Every open-set method computes an inlier score $s(\xvec)$ for each unlabelled point and uses it to filter or weight the
+point. The scores come from out-of-distribution detection.
+
+- **Maximum softmax probability.** The classifier's confidence $\max_k p_\theta(k \mid \xvec)$ is a baseline OOD score
+  <Cite id="hendrycks2017baseline" />. The confidence threshold of pseudo-labelling and FixMatch is already this filter.
+  It fails for outliers on which the network is confidently wrong, which neural networks often are far from the
+  training data.
+- **Class-conditional distances.** Fit a Gaussian to each known class in some feature space and score a point by its
+  distance to the nearest class mean, standardised by the class spread. Far from every class means unseen. The figure
+  uses this score on the raw inputs.
+- **<Gloss name="ovr">One-versus-all</Gloss> heads.** OpenMatch adds to FixMatch one binary classifier per known class,
+  each deciding "class $k$ or not class $k$". A point that every head rejects is an outlier. An extra
+  <NoteLink to="consistency-regularisation">consistency loss</NoteLink> makes the heads' outputs stable under
+  augmentation, which sharpens the detection, and points flagged as outliers are left out of the FixMatch loss
+  <Cite id="saito2021openmatch" />.
+- **Curriculum filtering.** Yu, Ikami, Irie and Aizawa train an OOD score jointly with the classifier and alternate:
+  update the network, re-estimate each unlabelled point's OOD score, select the points with low scores as inliers for
+  the next round of semi-supervised training <Cite id="yu2020mtc" />.
+- **Uncertainty-aware distillation.** UASD of Chen, Zhu, Li and Gong builds soft targets for the unlabelled points
+  from the network's own predictions accumulated during training, and drops points whose targets are not confident,
+  which limits how far errors on outliers propagate <Cite id="chen2020uasd" />.
+- **Learned weights.** DS3L learns a weight for every unlabelled point by bi-level optimisation, so that training on
+  the weighted points lowers the labelled loss; points that hurt get weight near zero <Cite id="guo2020safe" />.
+
+### What a filter costs
+
+A filter makes two kinds of error. It keeps some outliers, and those do the harm the filter was meant to stop. It also
+removes some inliers, and those are unlabelled data the method no longer uses. A filter set to remove a share $\alpha$
+of a known class's points, as a test at level $\alpha$ does, removes about $\alpha$ of the useful data when its model of
+the known classes is correct, and more when the model is estimated from few labels. Both errors are largest for
+**near** outliers, unseen classes close to a known class, which no score separates well. Far outliers are easy to
+remove and do the most damage when kept.
+
+## Worked example
+
+Two known classes lie on the line. Class 0 has labels at $-1.6$ and $-0.8$; class 1 has labels at $0.8$ and $1.6$. The
+filter is a Gaussian novelty test at level $\alpha = 0.01$.
+
+1. **Class means.** $\hat\mu_0 = -1.2$ and $\hat\mu_1 = 1.2$.
+2. **Pooled variance.** Each labelled point lies 0.4 from its class mean, so the sum of squared deviations is
+   $4 \times 0.16 = 0.64$. Two class means used up two of the four degrees of freedom, so
+   $\hat\sigma^2 = 0.64 / (4 - 2) = 0.32$, a standard deviation of 0.57.
+3. **The score.** For an unlabelled point $x$, the score is
+   $s(x) = \min_k (x - \hat\mu_k)^2 / \hat\sigma^2$. If $x$ came from a known Gaussian class, $s$ would follow a
+   $\chi^2$ distribution with one degree of freedom, so the p-value is $P(\chi^2_1 \ge s)$. The point is removed when
+   the p-value is below $\alpha$, which for one degree of freedom means $s > 6.63$, a distance of more than
+   $\sqrt{6.63} \times 0.57 = 1.46$ from the nearest class mean.
+4. **Four unlabelled points.**
+
+| $x$ | nearest mean | $s(x)$ | p-value | decision |
+| --- | --- | --- | --- | --- |
+| 1.9 | 1.2 | $0.49/0.32 = 1.53$ | 0.216 | keep (a typical class 1 point) |
+| 2.5 | 1.2 | $1.69/0.32 = 5.28$ | 0.022 | keep |
+| 0.0 | $\pm 1.2$ | $1.44/0.32 = 4.50$ | 0.034 | keep |
+| 3.5 | 1.2 | $5.29/0.32 = 16.5$ | 0.00005 | remove |
+
+5. **Reading the table.** A point from an unseen class centred at 3.5 is removed. A point at 2.5 passes, whether it
+   belongs to class 1's tail or to an unseen class next to it: the filter cannot tell. A point at 0, between the two
+   classes, passes too, because it is only 1.2 from each mean. With $\alpha = 0.05$ the cut-off falls to $s > 3.84$,
+   and the points at 2.5 and 0 are removed as well, together with about 5% of the genuine class points.
+
+The figure runs this filter in front of <NoteLink to="generative-semi-supervised-learning">semi-supervised EM</NoteLink>
+with one Gaussian per known class. With 4 labels per class and an unseen class at 3.5 making up 60% of the unlabelled
+data, EM on all the data puts one Gaussian on the unseen class and stretches the other over both known classes: the test
+error rises from 0.024 without outliers to 0.35. With the filter, which removes about 90% of the unseen points, the
+error stays at 0.024. Moving the unseen class to 2.5 shows the near case: the filter removes about a third of its
+points, and at high contamination the filtered model does no better than the unfiltered one, and here somewhat worse,
+because the filter also cuts the tail of class 1.
+
+<OpenSetContamination />
+
+## Assumptions
+
+- **The known classes are the task.** Open-set semi-supervised learning classifies only the $K$ known classes; it does
+  not discover the unseen ones. Discovering them is novel class discovery, or open-world semi-supervised learning,
+  where the unseen classes must also be clustered.
+- **The inlier score generalises from few labels.** Every score above is estimated from the labelled data or from a
+  network trained mostly on them. With very few labels, the score's notion of a known class is itself uncertain.
+- **The test set holds only known classes.** If outliers also appear at test time, the classifier needs a
+  <NoteLink to="reject-option">reject option</NoteLink> as well (see <NoteLink to="selective-classification">selective
+  classification</NoteLink>).
+
+## Pitfalls
+
+- **Trusting confidence.** The confidence threshold of pseudo-labelling removes only the outliers the network is unsure
+  about. Outliers far from the training data often get confident predictions and pass.
+- **Filtering too hard.** A strict filter removes the hard inliers, the unusual points of known classes, which are the
+  unlabelled points that carry the most information about the boundary.
+- **Benchmarks with far outliers only.** Mismatch made by adding a distant dataset (digits to animals) is easy to
+  filter. Results on near outliers, such as unseen animal classes among animal classes, say more about a method.
+- **Ignoring class proportions.** Removing outliers changes the class proportions of the remaining unlabelled data if
+  the filter removes one known class's tail more than another's.

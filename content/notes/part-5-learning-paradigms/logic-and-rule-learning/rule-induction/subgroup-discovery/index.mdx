@@ -1,0 +1,208 @@
+---
+title: 'Subgroup discovery'
+kind: technique
+summary: 'Subgroup discovery finds conjunctive descriptions of subsets of the data whose target distribution differs most from the whole, ranked by a quality such as weighted relative accuracy, which trades size against unusualness. It describes data rather than predicting.'
+tags: [logic, rule-learning, exploration, worked-example]
+aliases: ['subgroup mining', 'SD-Map', 'CN2-SD', 'Klösgen quality']
+requires: [rule-quality-measures]
+related:
+  [
+    pattern-mining,
+    slice-analysis,
+    association-rule-classification,
+    sequential-covering,
+    multiple-testing,
+    certifiably-optimal-rule-lists,
+  ]
+references:
+  [
+    wrobel1997,
+    lavrac2004cn2sd,
+    atzmueller2006sdmap,
+    atzmueller2015subgroup,
+    herrera2011subgroup,
+    vanleeuwen2012diverse,
+    lavrac1999,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { SubgroupSpace } from './SubgroupSpace'
+
+<Definition>
+**Subgroup discovery** searches a table with a target attribute for the $k$ **descriptions**, conjunctions of
+conditions on the other attributes such as $\text{age} \ge 50 \wedge \text{smoker} = \text{yes}$, whose covered rows
+have a target distribution most unlike that of the whole table. A **quality measure** scores each description; the
+usual measures grow with both the number of rows covered and the difference between the target inside them and in the
+population. The result is a ranked list of individually interesting subgroups, not a classifier
+<Cite id="wrobel1997" /> <Cite id="atzmueller2015subgroup" />.
+</Definition>
+
+## Problem
+
+An analyst studying hospital outcomes wants statements such as "smokers aged 50 or more have an adverse outcome rate of
+0.70, against 0.30 overall". A classifier does not provide them. Its rules must jointly cover every row and are judged
+by joint accuracy, so a rule that is interesting on its own can be absent, and a rule in a
+<NoteLink to="decision-lists-and-rule-sets">decision list</NoteLink> means something only after the rules above it.
+<NoteLink to="pattern-mining">Association rules</NoteLink> are judged one at a time, but they have no target and favour
+small rules of high confidence.
+
+Subgroup discovery keeps the hypothesis language of <NoteLink to="rule-induction">rule induction</NoteLink>,
+conjunctions of attribute tests, and changes the goal. Each description is scored alone, descriptions may overlap
+freely, and the score rewards large subgroups whose target departs from the population. Klösgen's Explora and Wrobel's
+MIDOS introduced the task in the mid-1990s <Cite id="wrobel1997" />. Later work adapted covering learners to it, as
+CN2-SD did, and frequent-pattern miners, as SD-Map did <Cite id="lavrac2004cn2sd" /> <Cite id="atzmueller2006sdmap" />.
+The same search over slices of a data set underlies <NoteLink to="slice-analysis">slice analysis</NoteLink> of model
+errors.
+
+## Mechanism
+
+### Descriptions and their covers
+
+A **selector** tests one attribute: $\text{region} = \text{north}$ for a nominal attribute, $\text{age} \ge 52$ or
+$\text{income} \le 45$ for a numeric one at a cut point chosen in advance. A description $d$ is a conjunction of
+selectors, and its **cover** is the set of rows meeting all of them. Adding a selector can only shrink the cover. Write
+$N$ for the rows of the table and $N^+$ for the rows whose binary target is positive, so that $p_0 = N^+/N$ is the
+population rate. A description covering $n$ rows, $n^+$ of them positive, has subgroup rate $p = n^+/n$.
+
+In the coverage-space notation of <NoteLink to="rule-quality-measures">rule quality measures</NoteLink>, $n^+$ is the
+positives $p$ a rule covers and $n - n^+$ its negatives; the letters differ because subgroup discovery reserves $p$ for
+the rate.
+
+### Quality measures
+
+The **Klösgen family** of qualities multiplies a power of the relative size by the rise in rate:
+
+$$
+q_a(d) = \left(\frac{n}{N}\right)^{a} (p - p_0), \qquad 0 \le a \le 1.
+$$
+
+The exponent $a$ sets the exchange rate between size and unusualness <Cite id="atzmueller2015subgroup" />.
+
+- $a = 1$ gives **<Gloss name="wracc">weighted relative accuracy</Gloss>**, $\frac{n}{N}(p - p_0)$
+  <Cite id="lavrac1999" />. It equals the <Gloss name="tpr">true positive rate</Gloss> minus the <Gloss name="fpr">false
+  positive rate</Gloss> of the description, times the constant $p_0(1 - p_0)$, so it favours large subgroups that are
+  moderately unusual.
+- $a = \frac12$ orders subgroups as the one-sample binomial test statistic
+  $z = \sqrt{n}\,(p - p_0)/\sqrt{p_0(1 - p_0)}$ does, since $z = q_{1/2}\sqrt{N}/\sqrt{p_0(1 - p_0)}$.
+- $a = 0$ gives the **added value** $p - p_0$, which ignores size; the **lift** $p/p_0$ orders subgroups the same way.
+  Both prefer tiny pure subgroups and are used with a minimum size.
+
+For a numeric target, the <NoteLink to="mean-shift">mean shift</NoteLink> $n^a(\mu - \mu_0)/\sigma_0$ plays the same
+role, with $\mu$ the subgroup's mean, $\mu_0$ and $\sigma_0$ the population's mean and standard deviation. Asking for
+subgroups where the target is lower than in the population, or different in either direction, changes the sign or takes
+the absolute value.
+
+### Searching the description space
+
+With $S$ selectors there are about $S^D$ descriptions of up to $D$ selectors. Three properties keep the search
+manageable.
+
+- **Minimum support is anti-monotone.** A description that covers fewer than $n_{\min}$ rows has no refinement that
+  covers more, so it is neither reported nor refined.
+- **Optimistic estimates.** Every refinement of $d$ covers a subset of its rows. For $0 \le a \le 1$, no subset of a
+  cover with $n^+$ positives scores more than its positives alone, which gives the bound
+  $q_a(d') \le \left(n^+/N\right)^{a} (1 - p_0)$ for every refinement $d'$ of $d$. When the bound is below the quality
+  of the current $k$-th best subgroup, the whole branch below $d$ is skipped. This is branch and bound over the
+  refinement lattice, the same device that <NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule
+  lists</NoteLink> use over rule-list prefixes.
+- **Counting from a prefix tree.** SD-Map treats selectors as items and builds an FP-tree whose nodes count both the
+  rows and the positive rows on their path. The counts $(n, n^+)$ of every conjunction are read from the tree without
+  scanning the data again, so any count-based quality is evaluated exhaustively <Cite id="atzmueller2006sdmap" />.
+
+Heuristic searches trade completeness for speed. Beam search keeps the best $w$ descriptions at each depth. CN2-SD runs
+<Gloss name="cn2" />'s beam search with weighted relative accuracy and replaces CN2's covering step by **weighted
+covering**: a row covered by an accepted rule is not removed but has its weight reduced, so later rules are steered
+towards rows not yet described <Cite id="lavrac2004cn2sd" />.
+
+<Derivation title="Why the positives alone bound every refinement">
+Fix a subset of the cover with $k$ positives and $m$ negatives, $n' = k + m$. Its quality is
+$q = N^{-a}\big[k(k + m)^{a - 1} - p_0 (k + m)^{a}\big]$. The derivative in $m$ is
+$N^{-a}\big[(a - 1)k(k + m)^{a - 2} - a p_0 (k + m)^{a - 1}\big]$. Both terms are non-positive for $0 \le a \le 1$, so
+adding negatives never raises the quality, and the best subset with $k$ positives has $m = 0$ and quality
+$(k/N)^a (1 - p_0)$. That value increases with $k$, and $k \le n^+$. Hence every refinement scores at most
+$(n^+/N)^a (1 - p_0)$.
+</Derivation>
+
+### Redundancy
+
+The top $k$ by any quality are often near-copies: "smoker", "smoker and BMI at most 30", "smoker and income above 25".
+A redundancy filter keeps the better of two subgroups whose covers overlap heavily, measured by the Jaccard index of
+their covers, or of which one description contains the other <Cite id="vanleeuwen2012diverse" />. Weighted covering in
+CN2-SD pursues the same aim during the search.
+
+### Beyond a single target rate
+
+When the target is a model rather than a rate, such as a correlation between two variables or the slope of a
+regression, the quality compares the model fitted inside the subgroup with the model fitted on the whole table. That
+generalisation is called exceptional model mining, and the search machinery above carries over, except that most of
+its qualities have no optimistic estimate <Cite id="atzmueller2015subgroup" />.
+
+## Worked example
+
+A table of $N = 20$ patients has $N^+ = 6$ adverse outcomes, so $p_0 = 0.3$. Five candidate descriptions cover:
+
+| description | $n$ | $n^+$ | $p$ | $q_0$ | $q_{1/2}$ | $q_1$ |
+| --- | --- | --- | --- | --- | --- | --- |
+| A: smoker = yes | 8 | 5 | 0.625 | 0.325 | 0.206 | 0.130 |
+| B: smoker = yes ∧ age ≥ 50 | 3 | 3 | 1 | 0.700 | 0.271 | 0.105 |
+| C: sex = male | 10 | 4 | 0.400 | 0.100 | 0.071 | 0.050 |
+| D: age ≥ 50 | 9 | 4 | 0.444 | 0.144 | 0.097 | 0.065 |
+| E: region = north | 6 | 3 | 0.500 | 0.200 | 0.110 | 0.060 |
+
+**Computing the qualities.** For A, the rise in rate is $0.625 - 0.3 = 0.325$, which is $q_0$. The relative size is
+$8/20 = 0.4$, so $q_{1/2} = \sqrt{0.4} \times 0.325 = 0.632 \times 0.325 = 0.206$ and $q_1 = 0.4 \times 0.325 = 0.130$.
+For B, the rise is $0.7$ and the relative size $0.15$: $q_{1/2} = 0.387 \times 0.7 = 0.271$ and $q_1 = 0.105$.
+
+**The exponent decides.** Added value and the binomial quality rank B first: three patients, all with the outcome.
+Weighted relative accuracy ranks A first: eight patients, five with the outcome. B's purity cannot make up for covering
+only 15% of the table once size enters linearly.
+
+**Pruning.** Run a top-1 search for weighted relative accuracy, level by level. After the single selectors, the best is
+A with 0.130. The optimistic estimate of E is $(3/20)(1 - 0.3) = 0.105 < 0.130$, so no refinement of E can win, and all
+of them are skipped unseen. C and D each have $n^+ = 4$ and bound $0.2 \times 0.7 = 0.14 > 0.130$, so their refinements
+must be examined. A's own bound is $0.25 \times 0.7 = 0.175$; its refinement B scores 0.105 and does not displace it.
+
+The figure runs the same search on 800 synthetic patients. An outcome rate of 0.7 was planted among smokers aged 50 or
+more, a rate of 0.45 among northerners who never exercise, and 0.2 for everyone else. With $a = 1$, the best description
+found is "smoker = yes" (260 rows, rate 0.51), just ahead of "age ≥ 52 ∧ smoker = yes" (130 rows, rate 0.71). With
+$a = \frac12$ the order flips, and with $a = 0$ small chance subgroups such as western smokers (46 rows) enter the top
+five. Age is cut at 34, 52 and 67, so the planted threshold 50 cannot be expressed. For $a = 1$ and $a = \frac12$ the
+planted description itself would score higher than anything found.
+
+<SubgroupSpace />
+
+## Cost
+
+An exhaustive search evaluates up to $\sum_{j \le D} \binom{S}{j}$ descriptions, each in $O(N/32)$ word operations when
+covers are bit sets. With tens of selectors and $D \le 3$ that is thousands of descriptions, a fraction of a second.
+Optimistic-estimate pruning removes most of the lattice for weighted relative accuracy, and less for small $a$, whose
+bound $(n^+/N)^a(1 - p_0)$ stays large for small covers. SD-Map's prefix tree costs two passes over the data plus the
+size of the tree <Cite id="atzmueller2006sdmap" />. Beam search costs $O(w\, S\, D)$ evaluations and can miss the best
+subgroup.
+
+## Trade-offs
+
+- **The exponent $a$.** It is the analyst's statement of what "interesting" means. Weighted relative accuracy reports
+  broad patterns, the binomial quality balances size and strength, and lift reports strong local effects that need a
+  minimum size to be credible.
+- **Exhaustive against heuristic search.** Exhaustive search with pruning returns the true top $k$ in the language;
+  beam search scales to more selectors and deeper descriptions.
+- **Fixed against adaptive cut points.** Fixed equal-frequency cuts allow counting tricks like SD-Map; cuts recomputed
+  inside each description adapt to the subgroup but rule out exhaustive counting.
+- **Description against prediction.** Subgroups overlap and leave rows uncovered. A set of good subgroups is not a good
+  classifier, and an accurate classifier is not a good set of subgroups <Cite id="herrera2011subgroup" />.
+
+## Pitfalls
+
+- **Multiple testing.** A search over thousands of descriptions finds some that look unusual by chance. Report the
+  quality on held-out rows, or compare it with the best quality found on data with the target permuted (see
+  <NoteLink to="multiple-testing">multiple testing</NoteLink>).
+- **Redundant results.** Without a redundancy filter the top $k$ is one subgroup described $k$ ways.
+- **Discretisation hides the true boundary.** A planted threshold that is not a cut point is approximated by a
+  neighbouring cut, as in the figure.
+- **Description is not explanation.** A subgroup with a high rate may owe it to an attribute outside the description
+  that is correlated with it.
+- **Tiny subgroups at small $a$.** With $a$ near 0 and a low minimum support, the top results are a handful of rows
+  each.

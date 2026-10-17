@@ -1,0 +1,205 @@
+---
+title: 'Low-rank and hashing attention'
+kind: technique
+summary: 'Linformer projects the $n$ keys and values to $k\ll n$ rows, so attention costs $O(nk)$; Nyströmformer approximates the attention matrix from landmark rows; Reformer hashes queries and keys with locality-sensitive hashing and attends only within buckets.'
+tags: [attention, long-context, transformer, low-rank, worked-example]
+aliases:
+  [
+    'Linformer',
+    'low-rank attention',
+    'Nystromformer',
+    'Nyströmformer',
+    'Nyström attention',
+    'Reformer',
+    'LSH attention',
+    'hashing attention',
+  ]
+requires: [efficient-attention, locality-sensitive-hashing]
+related:
+  [
+    linear-attention,
+    singular-value-decomposition,
+    kernel-approximation,
+    random-projections,
+    trainable-sparse-attention,
+    perceiver-and-latent-bottlenecks,
+    multi-head-latent-attention,
+  ]
+references: [wang2020linformer, xiong2021nystromformer, kitaev2020reformer, williams2001, choromanski2021, tay2022, dao2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { LowRankHashing } from './LowRankHashing'
+
+<Definition>
+**Low-rank attention** replaces the $n \times n$ attention matrix
+$\Pmat = \operatorname{softmax}(\Qmat\Kmat^\tr/\sqrt d)$ by a product of thin matrices: Linformer projects the keys and
+values along the sequence to $k \ll n$ rows <Cite id="wang2020linformer" />, and Nyströmformer rebuilds $\Pmat$ from $m$
+landmark rows and columns <Cite id="xiong2021nystromformer" />. **Hashing attention** keeps exact softmax weights but
+scores each query only against keys that land in the same bucket of a
+<NoteLink to="locality-sensitive-hashing">locality-sensitive hash</NoteLink>, as in Reformer
+<Cite id="kitaev2020reformer" />. Both cut the cost from $O(n^2 d)$ to $O(nkd)$ or $O(n \log n\, d)$ for $n$ tokens of
+head width $d$.
+</Definition>
+
+## Problem
+
+Full attention computes all $n^2$ entries of $\Pmat$ and, in the standard algorithm, stores them
+(<NoteLink to="efficient-attention">efficient attention</NoteLink> gives the costs). Two observations about trained
+attention matrices suggest cheaper forms. First, many rows look alike: tokens on the same topic attend to the same
+places, so $\Pmat$ has a few large <NoteLink to="singular-value-decomposition">singular values</NoteLink> and a small
+tail, and a low-rank matrix can stand in for it. Second, each row puts most of its weight on the few keys most similar
+to the query, so finding those keys and ignoring the rest loses little.
+
+Low-rank methods exploit the first observation and hashing the second. They fail in opposite cases. A sharp row that
+attends to one token raises the rank and hurts low-rank methods. A diffuse row that spreads its weight over many keys
+hurts hashing, which keeps only a bucket.
+
+## Mechanism
+
+### Linformer: projecting along the sequence
+
+Linformer multiplies the keys and values by learned matrices $\Emat, \Fmat \in \reals^{k \times n}$ that mix positions:
+
+$$
+\Omat = \operatorname{softmax}\paren{\frac{\Qmat(\Emat\Kmat)^\tr}{\sqrt d}}\Fmat\Vmat.
+$$
+
+$\Emat\Kmat$ and $\Fmat\Vmat$ have $k$ rows, so the score matrix is $n \times k$ and time and memory are $O(nkd)$ and
+$O(nk)$ <Cite id="wang2020linformer" />. The effective attention matrix is $\operatorname{softmax}(\cdot)\Fmat$, of rank
+at most $k$. Wang et al. show, by a <NoteLink to="random-projections">random-projection</NoteLink> argument, that a $k$
+independent of $n$ suffices for a given approximation error, and that the attention matrices of a pretrained model have
+most of their spectrum in the first few singular values. The projections can be shared between keys and values, across
+heads and across layers, and can be replaced by mean pooling or a <NoteLink to="pooling-and-strides">strided
+convolution</NoteLink>, which is what the figure uses.
+
+### Nyströmformer: landmarks
+
+The <NoteLink to="kernel-approximation">Nyström method</NoteLink> approximates a kernel matrix from a few of its rows
+and columns <Cite id="williams2001" />. Nyströmformer applies it to the attention matrix, with $m$ landmark queries
+$\tilde\Qmat$ and keys $\tilde\Kmat$ taken as the means of $m$ consecutive segments
+<Cite id="xiong2021nystromformer" />:
+
+$$
+\hat\Pmat = \operatorname{softmax}\paren{\frac{\Qmat\tilde\Kmat^\tr}{\sqrt d}}
+\paren{\operatorname{softmax}\paren{\frac{\tilde\Qmat\tilde\Kmat^\tr}{\sqrt d}}}^{+}
+\operatorname{softmax}\paren{\frac{\tilde\Qmat\Kmat^\tr}{\sqrt d}}.
+$$
+
+The three factors are $n \times m$, $m \times m$ and $m \times n$, and $^{+}$ is the Moore–Penrose pseudo-inverse,
+which Nyströmformer approximates by a few matrix iterations. Multiplying from the right by $\Vmat$ never forms
+$\hat\Pmat$, so the cost is $O(nmd)$. When the middle matrix is ill-conditioned, its inverse amplifies errors, and
+$\hat\Pmat$ can have negative entries; dropping its small singular values, as the iteration does implicitly, keeps it
+stable.
+
+### Reformer: hashing into buckets
+
+Reformer finds each query's nearest keys with angular locality-sensitive hashing <Cite id="kitaev2020reformer" />. For
+a random matrix $\Rmat \in \reals^{d \times b/2}$ with standard normal entries, the hash of a vector $\xvec$ is
+
+$$
+h(\xvec) = \arg\max\,[\xvec^\tr\Rmat;\ -\xvec^\tr\Rmat] \in \set{1, \dots, b},
+$$
+
+the index of the largest of the $b$ projections onto the columns of $\Rmat$ and their negatives. Vectors at a small
+angle land in the same bucket with high probability. The algorithm has four steps:
+
+1. **Share queries and keys.** Each token's key is its query scaled to unit length, so a query and the keys it should
+   find hash alike. A token does not attend to itself unless no other key is available, since its own key would
+   otherwise dominate.
+2. **Sort and chunk.** Tokens are sorted by bucket (and by position within a bucket) and cut into chunks of equal
+   length $c$. Each query attends to the keys in its own chunk and the one before it, which hold the tokens of its
+   bucket.
+3. **Repeat.** Hashing is random, so two similar vectors can fall into different buckets. Reformer hashes $r$ times
+   with independent $\Rmat$ and combines the rounds, which lowers the chance of missing a key.
+4. **Cost.** Sorting costs $O(n \log n)$ and attention $O(ncd)$ per round.
+
+Reformer also saves memory with reversible residual layers, which recompute activations in the backward pass instead of
+storing them.
+
+The <NoteLink to="linear-attention">Performer</NoteLink> is a third approximation of the same matrix: it estimates the
+softmax kernel with random features, so attention becomes a product of $n \times m$ factors computed right to left
+<Cite id="choromanski2021" />. It is covered with linear attention.
+
+<LowRankHashing />
+
+## Worked example
+
+**Linformer with mean pooling.** Take one query $q = 1$ and four keys and values of width 1, with the scale set to 1:
+keys $(2, 2, -1, -1)$ and values $(1, 3, 0, 2)$.
+
+1. **Exact attention.** The scores are $2, 2, -1, -1$ and their exponentials $7.389, 7.389, 0.368, 0.368$, summing to
+   $15.51$. The weights are $0.476, 0.476, 0.024, 0.024$, and the output is
+   $0.476 \times (1 + 3) + 0.024 \times (0 + 2) = 1.953$.
+2. **Pool to $k = 2$.** $\Emat = \Fmat$ averages positions 1–2 and 3–4, so the projected keys are $(2, -1)$ and the
+   projected values $(2, 1)$. The weights are $e^2 / (e^2 + e^{-1}) = 0.953$ and $0.047$, and the output is
+   $0.953 \times 2 + 0.047 \times 1 = 1.953$. Pooling loses almost nothing, because each segment's keys are equal.
+3. **Reorder the keys** to $(2, -1, 2, -1)$ with the same values. Exact attention now weights positions 1 and 3 by
+   0.476 and gives $0.476 \times 1 + 0.024 \times 3 + 0.476 \times 0 + 0.024 \times 2 = 0.595$. The pooled keys are
+   both $0.5$, so pooling weights the two pooled values $(2, 1)$ equally and gives $1.5$. A projection that mixes
+   dissimilar keys averages away exactly the contrast that attention needs. Learned projections reduce this, but a
+   fixed rank cannot follow every pattern.
+
+**Reformer with four buckets.** Take $d = 2$, $b = 4$ and $\Rmat = \eye$, so $h(\xvec)$ picks the largest of $x_1$,
+$x_2$, $-x_1$ and $-x_2$: buckets are quarter-planes centred on the four axis directions. The query is
+$\qvec = (1, 0.2)$, in bucket 1 ($+x_1$). Five keys and their buckets:
+
+| Key          | Bucket       | Score $\qvec^\tr\kvec$ | $e^{\text{score}}$ |
+| ------------ | ------------ | ---------------------- | ------------------ |
+| $(0.9, -0.3)$ | 1 ($+x_1$)  | 0.84                   | 2.316              |
+| $(0.3, 1)$    | 2 ($+x_2$)  | 0.50                   | 1.649              |
+| $(-1, 0.1)$   | 3 ($-x_1$)  | $-0.98$                | 0.375              |
+| $(0.8, 0.5)$  | 1 ($+x_1$)  | 0.90                   | 2.460              |
+| $(0, -1)$     | 4 ($-x_2$)  | $-0.20$                | 0.819              |
+
+The query scores only the two keys in bucket 1. Full attention's normaliser is 7.619, and the two kept keys hold
+$(2.316 + 2.460) / 7.619 = 62.7\%$ of the weight. The key $(0.3, 1)$, at $62°$ from the query, falls in the next bucket
+and its 21.6% is lost. A second round with a rotated $\Rmat$ moves the bucket boundaries and may catch it.
+
+## Cost
+
+| Method        | Time per head         | Score memory | Causal |
+| ------------- | --------------------- | ------------ | ------ |
+| Full          | $O(n^2 d)$            | $O(n^2)$     | yes    |
+| Linformer     | $O(nkd)$              | $O(nk)$      | no     |
+| Nyströmformer | $O(nmd + m^3)$        | $O(nm)$      | no     |
+| Reformer      | $O(rn\log n + rncd)$  | $O(rnc)$     | yes    |
+
+$k$ is the projected length, $m$ the number of landmarks, $r$ the number of hashing rounds and $c$ the chunk length.
+In the figure, with four topics and $\beta = 6$, the best rank-4 matrix misplaces 17% of the weight, Linformer with
+pooling at $k = 4$ 20%, and Nyström with 4 landmarks 17%. LSH with two rounds scores about 55 keys per query to
+misplace 21%. Sharpening the attention to $\beta = 15$ raises the rank-4 error to 37%.
+
+## Trade-offs
+
+- **Low rank against sharp attention.** A matrix whose rows put most weight on one or two keys is close to a permutation
+  and has no good low-rank approximation. <NoteLink to="induction-heads-and-circuits">Induction heads</NoteLink> and
+  copying, which look up one specific earlier token, are this case.
+- **Causality.** Linformer's $\Emat$ and Nyströmformer's segment means mix all positions, including future ones, so
+  neither serves a decoder without changes. The fixed $\Emat \in \reals^{k \times n}$ also fixes the sequence length.
+  Reformer's hashing is compatible with a <NoteLink to="causal-masking">causal mask</NoteLink>.
+- **Hashing against diffuse attention.** When a query spreads its weight over many keys, a bucket holds only a part of
+  it. More rounds recover more weight at proportionally more cost.
+- **Exact attention got faster.** <NoteLink to="flash-attention">FlashAttention</NoteLink> made exact attention cheap in
+  memory and fast at lengths of tens of thousands of tokens <Cite id="dao2022" />. Since then, <Gloss name="llm">large
+  language models</Gloss> have used exact attention, windows, learned block selection or linear-attention layers rather
+  than these approximations; see <NoteLink to="trainable-sparse-attention">trainable sparse attention</NoteLink>.
+- **Where the idea survives.** Low-rank compression now acts on the feature dimension rather than the sequence:
+  <NoteLink to="multi-head-latent-attention">multi-head latent attention</NoteLink> caches a low-rank latent per token.
+  Projecting a long input onto a fixed set of learned latent queries, the Linformer idea with learned queries in place
+  of $\Emat$, is the basis of <NoteLink to="perceiver-and-latent-bottlenecks">Perceiver-style bottlenecks</NoteLink>.
+
+## Pitfalls
+
+- **Unstable pseudo-inverse.** Nyström's middle matrix can be nearly singular when two landmarks are alike. Without a
+  cutoff on its small singular values the approximation can be far worse than a plain low-rank one; in the figure the
+  Nyström curve leaves the chart at high $\beta$.
+- **Unbalanced buckets.** Real queries cluster, so some buckets hold many tokens and some none. Reformer's
+  sort-and-chunk step bounds the work per chunk but can split a large bucket across chunks, and a query then misses keys
+  in its own bucket.
+- **Hashing is not differentiable.** Gradients flow through the attention within buckets, not through the bucket
+  choice, so the model cannot learn to fix a bad hash.
+- **Speed in practice.** Sorting, gathering and hashing are memory-bound and map poorly onto the dense matrix units of
+  accelerators, so the asymptotic saving turns into a speedup over exact attention only at long lengths. Tay et al.
+  survey the variants and their costs <Cite id="tay2022" />.

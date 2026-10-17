@@ -1,0 +1,211 @@
+---
+title: 'Efficient convolutional networks'
+kind: concept
+summary: 'MobileNet uses depthwise separable convolutions and inverted residuals with linear bottlenecks, ShuffleNet shuffles channels between groups, and EfficientNet scales depth, width and resolution together by fixed ratios. Each trades accuracy for FLOPs and latency.'
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases:
+  [
+    'MobileNet',
+    'MobileNetV2',
+    'inverted residual',
+    'linear bottleneck',
+    'ShuffleNet',
+    'channel shuffle',
+    'EfficientNet',
+    'compound scaling',
+    'RegNet',
+  ]
+requires: [depthwise-and-grouped-convolution, residual-network]
+related:
+  [
+    squeeze-and-excitation,
+    modern-convolutional-networks,
+    pruning-and-sparsity,
+    knowledge-distillation,
+    neural-architecture-search,
+    inception-networks,
+  ]
+references:
+  [
+    howard2017mobilenets,
+    sandler2018mobilenetv2,
+    zhang2018shufflenet,
+    ma2018shufflenetv2,
+    tan2019,
+    radosavovic2020regnet,
+    howard2019mobilenetv3,
+    tan2021efficientnetv2,
+    qin2024mobilenetv4,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { BlockCost } from './BlockCost'
+import { CompoundScaling } from './CompoundScaling'
+
+<Definition>
+Efficient <NoteLink to="convolutional-networks">convolutional networks</NoteLink> are image classifiers and backbones
+designed to reach a given accuracy with as few multiply-adds, parameters or milliseconds as possible. Their blocks
+factor a full convolution into cheaper parts: depthwise convolutions for spatial filtering and $1 \times 1$ or grouped
+convolutions for channel mixing. MobileNet, ShuffleNet, EfficientNet and RegNet are the main families; they differ in
+the block, in how channels are mixed across groups and in how the network is scaled to a budget.
+</Definition>
+
+## Intuition
+
+A $3 \times 3$ convolution from $C$ to $C$ channels costs $9C^2$ multiply-adds per pixel. Almost all of this is the
+channel term: at $C = 256$, the layer does 2,304 multiplications per output value, and only 9 of them are about where
+the pixels are. The rest is a dense mixing of channels repeated for each of the nine kernel positions. A phone with a
+budget of a few hundred million multiply-adds per image cannot afford many such layers at useful widths.
+
+The fix is to do the two jobs separately. A <NoteLink to="depthwise-and-grouped-convolution">depthwise
+convolution</NoteLink> filters each channel on its own, at $9C$ multiply-adds per pixel. A
+<NoteLink to="one-by-one-convolution">one-by-one convolution</NoteLink> then mixes channels at $C^2$. Together they
+cost $9C + C^2$, about nine times less than the full layer for $C$ in the hundreds. Xception reached the same
+factorisation from the <NoteLink to="inception-networks">Inception</NoteLink> side.
+
+Each family keeps the residual, stage-by-stage layout of <NoteLink to="residual-network">ResNet</NoteLink> and changes
+the block inside it. MobileNet introduced the separable block, MobileNetV2 rearranged it into an inverted residual,
+ShuffleNet made the $1 \times 1$ layers cheaper with groups, and EfficientNet fixed a block and asked how to grow the
+network around it.
+
+<BlockCost />
+
+## Details
+
+### MobileNet: depthwise separable convolutions
+
+MobileNet (v1) replaces every $3 \times 3$ convolution after the first by a depthwise $3 \times 3$ convolution and a
+$1 \times 1$ convolution, each followed by <NoteLink to="batch-normalisation">batch normalisation</NoteLink> and
+<Gloss name="relu" /> <Cite id="howard2017mobilenets" />. For a $k \times k$ kernel and $C$ to $C'$ channels, the cost
+per pixel falls from $k^2 C C'$ to $k^2 C + C C'$, a ratio of $1/C' + 1/k^2$. MobileNet adds two global knobs: a width
+multiplier that thins every layer and a resolution multiplier that shrinks the input. Both cut cost roughly
+quadratically, and they trade accuracy for latency without redesigning the network.
+
+### MobileNetV2: inverted residuals and linear bottlenecks
+
+A ResNet bottleneck is wide outside and narrow inside: $256 \to 64 \to 64 \to 256$ channels. MobileNetV2 inverts it
+<Cite id="sandler2018mobilenetv2" />. Its block takes a narrow input of $d'$ channels, expands it by a factor $t$ with
+a $1 \times 1$ convolution, filters the $t d'$ channels with a $k \times k$ depthwise convolution and projects back to
+$d''$ channels with a second $1 \times 1$ convolution. The shortcut joins the narrow ends. For an $h \times w$ map the
+block costs
+
+$$
+h w \, d' t \, (d' + k^2 + d'')
+$$
+
+multiply-adds <Cite id="sandler2018mobilenetv2" />. The depthwise layer is cheap even at the expanded width, so the
+spatial filtering happens in a wide space while the tensors passed between blocks stay small. The shortcut tensors are
+the narrow ones, which keeps memory traffic low.
+
+The projection has no activation: it is a **linear bottleneck**. Sandler et al. argue that a ReLU applied in a
+low-dimensional space destroys information, because it zeroes every coordinate that falls below zero, and that the
+features a layer needs lie close to a low-dimensional subspace. Applying ReLU6, $\min(\max(0, z), 6)$, only in the
+expanded layers and keeping the narrow layers linear improved accuracy in their experiments
+<Cite id="sandler2018mobilenetv2" />. Expansion factors between 5 and 10 performed about the same; $t = 6$ is the
+default.
+
+### ShuffleNet: grouped channel mixing
+
+After depthwise separation, the $1 \times 1$ layers hold most of the cost. ShuffleNet makes them
+<NoteLink to="depthwise-and-grouped-convolution">grouped</NoteLink>: with $g$ groups, a $1 \times 1$ layer costs
+$C C'/g$ instead of $C C'$ <Cite id="zhang2018shufflenet" />. Stacked grouped layers would never exchange information
+between groups, so each output group would see only one input group. A **channel shuffle** fixes this at no cost: it
+reshapes the $C$ channels into a $g \times (C/g)$ grid, transposes it and flattens it, so the next grouped layer reads
+one slice of every previous group.
+
+ShuffleNet V2 then measured speed rather than multiply-adds and derived four guidelines
+<Cite id="ma2018shufflenetv2" />: equal input and output widths minimise memory access; many groups raise memory access;
+fragmented, multi-branch blocks reduce parallelism; and elementwise operations (additions, activations) take real
+time. Its block splits the channels in two, processes one half and concatenates, which obeys all four.
+
+### EfficientNet: compound scaling
+
+Networks are scaled up by depth (more layers), width (more channels) or input resolution. Scaling one dimension alone
+gives diminishing returns in accuracy. The dimensions depend on each other: a larger image needs more layers to widen
+the <NoteLink to="receptive-field-and-dilated-convolution">receptive field</NoteLink> and more channels to capture its
+finer patterns. EfficientNet scales all three together <Cite id="tan2019" />. With a compound coefficient $\phi$,
+
+$$
+\text{depth } d = \alpha^\phi, \qquad \text{width } w = \beta^\phi, \qquad \text{resolution } r = \gamma^\phi,
+\qquad \alpha \beta^2 \gamma^2 \approx 2, \quad \alpha, \beta, \gamma \ge 1.
+$$
+
+The constraint follows from the cost of a convolution. Doubling the number of layers doubles the multiply-adds.
+Multiplying every width by $w$ multiplies each layer's $C C'$ term by $w^2$. Multiplying the image side by $r$
+multiplies the number of pixels by $r^2$. The total cost therefore grows by $\alpha \beta^2 \gamma^2$ per unit of
+$\phi$, and the constraint makes each unit of $\phi$ double it.
+
+Tan and Le found the baseline EfficientNet-B0 by <NoteLink to="neural-architecture-search">architecture
+search</NoteLink> over MobileNetV2-style inverted residual blocks with
+<NoteLink to="squeeze-and-excitation">squeeze-and-excitation</NoteLink>. They then fixed $\phi = 1$, grid-searched
+$\alpha = 1.2$, $\beta = 1.1$, $\gamma = 1.15$, and applied these to grow B1 to B7 <Cite id="tan2019" />.
+
+<CompoundScaling />
+
+### RegNet and later designs
+
+RegNet replaces hand-made or searched architectures by a design space: the width of block $j$ follows a quantised
+linear function of $j$, with few parameters <Cite id="radosavovic2020regnet" />. Under comparable training and
+multiply-adds, RegNet models run up to five times faster on a <Gloss name="gpu" /> than EfficientNet, because they use
+wider, regular blocks instead of many depthwise layers <Cite id="radosavovic2020regnet" />.
+
+MobileNetV3 searches the block configuration for phone <Gloss name="cpu" plural /> and adds squeeze-and-excitation and
+the hard-swish activation <Cite id="howard2019mobilenetv3" />. EfficientNetV2 replaces the expansion and depthwise pair
+by one ordinary $3 \times 3$ convolution (Fused-MBConv) in the early, high-resolution stages, where depthwise layers use
+accelerators poorly, and grows the image size during training <Cite id="tan2021efficientnetv2" />. MobileNetV4 searches
+over one "universal inverted bottleneck" that contains the inverted residual, the
+<NoteLink to="modern-convolutional-networks">ConvNeXt</NoteLink> block and a plain feed-forward block as special cases
+<Cite id="qin2024mobilenetv4" />.
+
+## Worked example
+
+**A MobileNetV2 block.** Take a stage-3 block of MobileNetV2: $d' = d'' = 32$ channels on a $28 \times 28$ map, $t = 6$,
+$k = 3$, stride 1, so the shortcut applies.
+
+1. **Expand.** A $1 \times 1$ convolution from 32 to $6 \cdot 32 = 192$ channels has $32 \cdot 192 = 6{,}144$ weights.
+2. **Filter.** A $3 \times 3$ depthwise convolution on 192 channels has $9 \cdot 192 = 1{,}728$ weights.
+3. **Project.** A linear $1 \times 1$ convolution from 192 to 32 channels has $6{,}144$ weights.
+4. **Total.** $14{,}016$ weights. At $28 \cdot 28 = 784$ pixels the block costs $784 \cdot 14{,}016 = 11.0$ million
+   multiply-adds, which equals $h w\, d' t (d' + k^2 + d'') = 784 \cdot 32 \cdot 6 \cdot 73$.
+
+A plain $3 \times 3$ convolution at the narrow width, $32 \to 32$, has $9{,}216$ weights; at the 192-channel inside
+width it would have $9 \cdot 192^2 = 331{,}776$. The block filters in the 192-channel space at 4% of the cost of a full
+convolution there. The figure above shows the other side: at 32 channels the inverted residual costs more than the
+plain layer, because its two $1 \times 1$ layers dominate.
+
+**EfficientNet-B0 to B3.** B0 has 16 inverted residual blocks in seven stages, a $224 \times 224$ input, 5.3 million
+parameters and 0.39 billion multiply-adds. B3 uses width 1.2, depth 1.4 and a $300 \times 300$ input. Depth 1.4 turns
+the stage repeats $(1, 2, 2, 3, 3, 4, 1)$ into $\lceil 1.4 n \rceil = (2, 3, 3, 5, 5, 6, 2)$, 26 blocks. Width 1.2
+turns each channel count $c$ into $1.2c$ rounded to a multiple of 8, so 40 becomes 48 and 320 becomes 384. The rule
+predicts a cost ratio of $d w^2 r^2 = 1.4 \cdot 1.2^2 \cdot (300/224)^2 = 3.6$. Counted layer by layer, B3 has 12.2
+million parameters and 1.83 billion multiply-adds, 4.7 times B0, because rounding the repeats up adds more blocks than
+the factor 1.4 suggests. The published coefficients of B1 to B7 are rounded versions of the rule, not exact powers of
+$\alpha$, $\beta$ and $\gamma$.
+
+## Assumptions
+
+- Spatial filtering and channel mixing can be done separately with little loss. This holds well enough on natural
+  images that every family above relies on it.
+- Multiply-adds predict cost. They do on phone CPUs for the designs they were tuned on, and less well elsewhere (see
+  Pitfalls).
+- For compound scaling: the baseline is good, and one set of ratios $(\alpha, \beta, \gamma)$ found at $\phi = 1$
+  stays good for larger $\phi$.
+
+## Pitfalls
+
+- **Multiply-adds are not latency.** Depthwise layers do few operations per byte of memory moved, so on GPUs and other
+  accelerators they are limited by memory bandwidth. A model with fewer multiply-adds can run slower than a regular one;
+  RegNet and EfficientNetV2 were motivated by this <Cite id="radosavovic2020regnet" />
+  <Cite id="tan2021efficientnetv2" />. Measure on the target device, as ShuffleNet V2 recommends
+  <Cite id="ma2018shufflenetv2" />.
+- **Activation memory.** EfficientNet's larger variants train on large images with expanded blocks, so the stored
+  activations, not the parameters, set the training memory, and training on very large images is slow
+  <Cite id="tan2021efficientnetv2" />.
+- **Scaling an unsuitable baseline.** Compound scaling grows a good small network; it does not repair a poor one, and
+  the ratios found for one baseline need not suit another.
+- **Architecture is one lever of several.** <NoteLink to="knowledge-distillation">Distillation</NoteLink> from a larger
+  teacher, <NoteLink to="pruning-and-sparsity">pruning</NoteLink> and quantisation also make a network cheaper, and they
+  combine with these designs. Comparing an efficient architecture against a large one trained without them overstates
+  what the architecture contributes.

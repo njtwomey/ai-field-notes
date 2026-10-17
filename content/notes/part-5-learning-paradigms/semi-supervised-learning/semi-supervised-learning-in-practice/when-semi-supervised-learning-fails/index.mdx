@@ -1,0 +1,216 @@
+---
+title: 'When semi-supervised learning fails'
+kind: concept
+summary: 'Unlabelled data lower accuracy when a method''s assumption fails: a misspecified generative model, a boundary through a dense region, unlabelled points from other classes, or early mistakes that self-training reinforces. Safe methods bound the loss against the supervised baseline.'
+tags: [semi-supervised, worked-example]
+aliases: ['safe semi-supervised learning', 'degradation from unlabelled data']
+requires: [semi-supervised-assumptions]
+related:
+  [
+    generative-semi-supervised-learning,
+    pseudo-labelling,
+    open-set-semi-supervised-learning,
+    evaluating-semi-supervised-learning,
+    when-unlabelled-data-helps,
+    low-density-separation,
+    expectation-maximisation,
+  ]
+references:
+  [
+    cozman2003mixture,
+    nigam2000em,
+    castelli1995exponential,
+    scholkopf2012causal,
+    oliver2018realistic,
+    arazo2020pseudo,
+    li2011safe,
+    krijthe2017icls,
+    guo2020safe,
+    singh2008unlabeled,
+    mey2019improvability,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { MisspecifiedEm } from './MisspecifiedEm'
+
+<Definition>
+A semi-supervised method **fails** on a task when, trained on the same labelled points, it has a higher test error with
+the unlabelled data than without them. Every semi-supervised method links the input density $p(\xvec)$ to the class
+probabilities $p(y \mid \xvec)$ through an assumption, and it fails when that link is false for the task. **Safe
+<NoteLink to="semi-supervised-learning">semi-supervised learning</NoteLink>** designs methods whose error, by
+construction or with high probability, is no worse than that of the supervised learner on the same labels.
+</Definition>
+
+## Intuition
+
+A supervised learner uses the labelled points only. A semi-supervised learner adds a bet: that the shape of
+$p(\xvec)$, seen through the unlabelled points, says where the class boundary lies. The
+<NoteLink to="semi-supervised-assumptions">smoothness, cluster, low-density and manifold assumptions</NoteLink> are
+different forms of the bet. When the bet is right, the unlabelled points act like extra labels. When it is wrong, they
+act like wrong labels, and there are many more of them than of the right ones.
+
+The harm grows with the number of unlabelled points. A method that weighs each unlabelled point like a labelled one is
+dominated by the unlabelled data once there are many more of them. Its estimate then converges to what the unlabelled
+data favour under the method's assumption, not to what the labels support. More unlabelled data make the estimate more
+precise and, under a wrong assumption, more precisely wrong.
+
+## Details
+
+### Misspecified generative models
+
+A generative method fits a model $p_\theta(\xvec, y)$ by maximising the labelled log-likelihood plus the marginal
+log-likelihood of the unlabelled points, usually by
+<NoteLink to="expectation-maximisation">expectation-maximisation</NoteLink> with the labelled points' class
+responsibilities held fixed (<NoteLink to="generative-semi-supervised-learning">generative semi-supervised
+learning</NoteLink>). With $l$ labelled pairs $(\xvec_i, y_i)$ and $u$ unlabelled inputs $\xvec_j$, and a weight
+$\lambda \in [0, 1]$ on the unlabelled term, the objective is
+
+$$
+\ell(\theta) = \sum_{i=1}^{l} \log p_\theta(\xvec_i, y_i) + \lambda\sum_{j=1}^{u} \log \sum_{k} p_\theta(\xvec_j, k).
+$$
+
+Nigam, McCallum, Thrun and Mitchell introduced the weight $\lambda$ for <NoteLink to="naive-bayes">naive
+Bayes</NoteLink> text classifiers, because EM with $\lambda = 1$ can lower accuracy when the model's assumptions are
+violated; they chose $\lambda$ by <Gloss name="loo">leave-one-out cross-validation</Gloss> on the labelled documents
+<Cite id="nigam2000em" />.
+
+Divide $\ell$ by $l + \lambda u$. As $u/l \to \infty$ with $\lambda > 0$ fixed, the second term dominates, and its
+average converges to the expected marginal log-likelihood $\expect_{p(\xvec)}\brack{\log p_\theta(\xvec)}$. The estimate
+therefore converges to $\theta_U$, the parameter whose marginal $p_\theta(\xvec)$ is closest to the true $p(\xvec)$ in
+<NoteLink to="kullback-leibler-divergence">Kullback–Leibler divergence</NoteLink>. With labels alone it converges to
+$\theta_L$, the parameter whose joint $p_\theta(\xvec, y)$ is closest to the true joint. The labels then only name the
+components of $\theta_U$.
+
+If the model family contains the true distribution, $\theta_U$ and $\theta_L$ coincide, and the unlabelled data only
+lower the variance of the estimate. Castelli and Cover showed that, for a correct two-component mixture known from
+unlabelled data, the excess error over the Bayes error falls exponentially in the number of labels
+<Cite id="castelli1995exponential" />.
+If the family is wrong, $\theta_U$ and $\theta_L$ differ, and nothing guarantees that $\theta_U$ classifies as well as
+$\theta_L$. Cozman, Cohen and Cirelo analysed this case and showed that unlabelled data can then raise the
+classification error even in settings where more labelled data would lower it: the unlabelled data remove variance and
+add bias <Cite id="cozman2003mixture" />.
+
+### A boundary through a dense region
+
+Methods built on the cluster or low-density assumption, such as the
+<NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink> and
+<NoteLink to="entropy-minimisation">entropy minimisation</NoteLink>, move the decision boundary out of dense regions.
+When the true boundary crosses a dense region, for example two classes that split one Gaussian blob along a line through
+its centre, the methods push the boundary to the edge of the blob and label most of it as one class. Graph methods fail
+the same way when the <NoteLink to="spectral-clustering">similarity graph</NoteLink> joins points of different classes:
+<NoteLink to="label-propagation">label propagation</NoteLink> carries labels along the graph's edges, wherever they go
+(see <NoteLink to="graph-construction-for-semi-supervised-learning">graph construction for semi-supervised
+learning</NoteLink>).
+
+### Unlabelled points from other classes
+
+A benchmark builds its unlabelled set by hiding labels, so every unlabelled point belongs to a labelled class. Real
+unlabelled data contain other classes. A pseudo-labelling or consistency method assigns each such point to some known
+class, often confidently, and trains on it. Oliver and colleagues held six animal classes of <Gloss name="cifar-10" />
+as labelled data and drew unlabelled data from four classes; as fewer of the four were among the six, accuracy fell, and
+with no overlap several methods did worse than the supervised baseline <Cite id="oliver2018realistic" />.
+<NoteLink to="open-set-semi-supervised-learning">Open-set semi-supervised learning</NoteLink> treats this case. A milder
+form is a shift in class proportions: if the unlabelled data hold the classes in different proportions from the labelled
+data, a method that matches its predictions to the labelled proportions mislabels the excess.
+
+### Self-reinforced mistakes
+
+<NoteLink to="self-training">Self-training</NoteLink> and <NoteLink to="pseudo-labelling">pseudo-labelling</NoteLink>
+train on their own predictions. A wrong pseudo-label raises the probability of the wrong class at the next step, so the
+mistake grows more confident and is never revisited. Arazo and colleagues named this **confirmation bias**
+<Cite id="arazo2020pseudo" />. It fails worst when the labelled-only model is systematically wrong on a whole region:
+the region is pseudo-labelled wrongly and with high confidence.
+
+### Causal direction
+
+Schölkopf and colleagues give a reason why some tasks cannot gain at all. If the input $\xvec$ causes the label $y$
+and the mechanism $p(y \mid \xvec)$ is chosen independently of the input distribution $p(\xvec)$, then $p(\xvec)$
+contains no information about $p(y \mid \xvec)$, and a better estimate of $p(\xvec)$ from unlabelled data cannot
+improve the classifier. In the anticausal direction, $y$ causes $\xvec$, $p(\xvec) = \sum_y p(y)p(\xvec \mid y)$ is
+built from the class-conditional densities, and the assumptions of semi-supervised learning can hold
+<Cite id="scholkopf2012causal" />. Predicting a disease from its cause is causal; recognising a digit from its image is
+anticausal, because the digit the writer intended produced the pixels.
+
+### Safe semi-supervised learning
+
+A safe method guarantees, by construction or with high probability, that the unlabelled data do not raise the error
+above the supervised learner's.
+
+- **Choose how much to trust the unlabelled data.** Select $\lambda$, including $\lambda = 0$, by
+  <NoteLink to="cross-validation">cross-validation</NoteLink> on the labelled points. The guarantee is only as good as
+  the validation estimate, which is noisy with few labels (see
+  <NoteLink to="evaluating-semi-supervised-learning">evaluating semi-supervised learning</NoteLink>).
+- **Hedge between candidate boundaries.** The safe semi-supervised <Gloss name="svm" /> (S4VM) of Li and Zhou finds
+  several large-margin separators of the labelled and unlabelled data and returns the labelling of the unlabelled points
+  that maximises the worst-case gain over the supervised SVM across those candidates <Cite id="li2011safe" />.
+- **Constrain the solution to the labels' span.** Implicitly constrained least squares considers only classifiers that
+  are least-squares solutions for some soft labelling of the unlabelled points, and picks among them the one that fits
+  the labelled data best. Krijthe and Loog prove that in one dimension it is never worse than the supervised least
+  squares classifier in squared loss <Cite id="krijthe2017icls" />.
+- **Down-weight suspicious unlabelled points.** For unlabelled data from unseen classes, DS3L learns a weight for each
+  unlabelled point by bi-level optimisation, so that the model trained on the weighted data has a low labelled loss.
+  The weights can fall to zero, which recovers the supervised model <Cite id="guo2020safe" />.
+
+The theory says when a guarantee is possible. Singh, Nowak and Zhu derived finite-sample error bounds under the cluster
+assumption and showed that unlabelled data help when the clusters are close enough that the labelled sample cannot tell
+them apart but the much larger unlabelled sample can <Cite id="singh2008unlabeled" />. Mey and Loog survey the results
+on when semi-supervised learning can improve on <NoteLink to="supervised-learning">supervised learning</NoteLink> at all
+<Cite id="mey2019improvability" />.
+
+## Worked example
+
+Take two equally likely classes on the line. Class 0 has two modes, $\tfrac12\Gauss(-2.5, 0.6^2) +
+\tfrac12\Gauss(2.0, 0.6^2)$; class 1 sits between them, $\Gauss(0.5, 0.6^2)$. The Bayes classifier assigns class 1
+roughly to the interval between the modes and has error 0.077. The model fits one Gaussian per class, which is wrong for
+class 0.
+
+**Step 1: the labels alone, in the limit of many labels.** Maximum likelihood fits each class's mean and variance to its
+own points. Class 0 gets mean $\tfrac12(-2.5) + \tfrac12(2.0) = -0.25$ and variance
+$0.6^2 + \tfrac14(2.0 + 2.5)^2 = 0.36 + 5.06 = 5.42$, a broad Gaussian with standard deviation 2.33. Class 1 gets
+mean 0.5 and variance 0.36. The narrow class 1 density exceeds the broad class 0 density on $(-0.49, 1.60)$, so the
+rule assigns class 1 there and class 0 elsewhere. Its error is 0.104, close to the Bayes error, although the model of
+class 0 is wrong.
+
+**Step 2: unlabelled data alone, in the limit.** With many unlabelled points EM fits two Gaussians to the input density
+$p(x) = \tfrac14\Gauss(-2.5, 0.36) + \tfrac14\Gauss(2.0, 0.36) + \tfrac12\Gauss(0.5, 0.36)$. The best two-Gaussian
+fit, found by EM, has a narrow component at $-2.54$ (weight 0.24, standard deviation 0.57) for the left mode and a
+broad one at 0.97 (weight 0.76, standard deviation 0.96) covering class 1 and class 0's right mode. The input density
+has three bumps, and two Gaussians must merge two of them.
+
+**Step 3: naming the components.** The labels decide which component is which class. Nearly all of the left
+component's mass is class 0. The right component holds 0.5 of class 1 and 0.26 of class 0, so it becomes class 1. The
+rule now assigns class 1 to every $x > -1.34$, which includes all of class 0's right mode. That mode carries probability
+0.25, and the error is 0.257.
+
+**Step 4: the comparison.** Adding unlabelled data moves the error from 0.104 towards 0.257. The unlabelled data did
+their job, a better fit to $p(x)$, and that fit is the wrong one for classification. Down-weighting them with
+$\lambda < 1$ changes the rate, not the limit: the objective still converges to Step 2 as $\lambda u$ grows. Choosing
+$\lambda = 0$ by validation, as a safe method would, keeps the error at the supervised value.
+
+The figure runs the same problem with a few labels per class, together with a problem where the model is correct and
+one where class 0 is skewed.
+
+<MisspecifiedEm />
+
+## Assumptions
+
+- **The comparison is with the same labels.** Failure is defined against the supervised learner trained on the same
+  labelled points with equally tuned hyperparameters. A weak baseline can hide a failure.
+- **The labels are clean.** With noisy labels, the supervised baseline is itself biased, and a semi-supervised method
+  can do better or worse for reasons unrelated to its assumption.
+- **The test distribution matches the labelled one.** If deployment data resemble the unlabelled pool more than the
+  labelled set, the comparison changes, and the problem becomes one of <NoteLink to="domain-adaptation">domain
+  adaptation</NoteLink>.
+
+## Pitfalls
+
+- **Testing on curated unlabelled data.** A method validated with unlabelled data made by hiding labels has never met
+  unlabelled data from other classes or in other proportions. Test with the unlabelled data that deployment will supply.
+- **Assuming more unlabelled data is safer.** Under a wrong assumption the error grows with the number of unlabelled
+  points, as Step 4 shows.
+- **Trusting a single run.** With few labels, the gain from unlabelled data varies a great deal across draws of the
+  labelled set. One lucky draw can hide a method that usually hurts.
+- **Skipping the $\lambda = 0$ option.** Any tuning of the unlabelled weight should include ignoring the unlabelled
+  data, so that the supervised model can win the selection.

@@ -1,0 +1,212 @@
+---
+title: 'Decision lists and rule sets'
+kind: concept
+summary: 'A decision list is an ordered sequence of if-then rules in which the first rule whose condition holds gives the prediction; in an unordered rule set every matching rule votes. Lists of rules with at most $k$ conditions are learnable in polynomial time (Rivest).'
+tags: [logic, rule-learning, interpretability, worked-example]
+aliases: ['decision list', 'rule list', 'rule set', 'k-decision list', 'k-DL', 'ordered rule set', 'unordered rule set']
+requires: [decision-tree]
+related:
+  [
+    sequential-covering,
+    rule-quality-measures,
+    certifiably-optimal-rule-lists,
+    bayesian-rule-lists,
+    rules-from-decision-trees,
+    intrinsically-interpretable-models,
+    probably-approximately-correct-learning,
+  ]
+references: [rivest1987, clark1989, clark1991, furnkranz2012, letham2015, angelino2018, rudin2019, singh2021imodels]
+status: draft
+updated: 2026-10-17
+---
+
+import { DecisionListOrder } from './DecisionListOrder'
+
+<Definition>
+A **rule** $a \to c$ pairs an **antecedent** $a$, a conjunction of conditions on the input such as
+$\text{sex} = \text{male} \wedge \text{age} = \text{adult}$ or $x_1 \le 0.4 \wedge x_2 > 1.2$, with a **consequent**
+class $c$. A **decision list** $d = (a_1 \to c_1, \dots, a_m \to c_m, c_0)$ predicts for an input $\xvec$ the class of
+the first rule whose antecedent holds, and the default class $c_0$ when none does. An **unordered rule set** applies
+every rule whose antecedent holds and combines their classes by a vote. A two-class rule set for one target class is a
+formula in <Gloss name="dnf">disjunctive normal form</Gloss>: the input is predicted positive when any rule holds
+<Cite id="rivest1987" /> <Cite id="furnkranz2012" />.
+</Definition>
+
+## Intuition
+
+A rule is a statement a person can check against one case: "an adult man aboard the Titanic most likely died". A
+model made of a few such statements can be read in full, audited line by line and applied by hand. Rules are the
+oldest hypothesis language of machine learning, and they remain the form in which clinical scores, credit policies and
+expert systems are written.
+
+A single rule covers only part of the input space. A model needs several rules, and they can disagree: an adult man
+travelling first class satisfies "adult man, so died" and "first class, so survived". The two ways of combining rules
+differ in how they settle that disagreement.
+
+- A **decision list** settles it by position. The rules are tried top to bottom and the first one that fires decides.
+  Each rule after the first only has to be right on the inputs the rules above it did not catch.
+- A **rule set** settles it by voting. Every rule that fires is consulted, and some aggregate of their classes
+  decides. The rules can be read in any order, but each one must be right wherever it fires, and the vote needs a
+  tie-breaking scheme.
+
+A <NoteLink to="decision-tree">decision tree</NoteLink> sits between the two. Its root-to-leaf paths are rules whose
+antecedents never overlap, so exactly one fires on every input, and order and voting both become irrelevant. A
+decision list is a tree in which every test has a leaf on one side: "if $a_1$ then $c_1$, else (if $a_2$ then $c_2$,
+else …)".
+
+## Details
+
+### Coverage and capture
+
+Write $n$ for the number of training pairs $(\xvec_i, y_i)$ with classes $y_i \in \{1, \dots, K\}$. The **coverage**
+of an antecedent is the set of rows it holds on, $\operatorname{cov}(a) = \{i : a(\xvec_i) = \text{true}\}$. In a
+decision list, rule $j$ **captures** the rows it covers that no earlier rule covers:
+
+$$
+\operatorname{cap}_j = \operatorname{cov}(a_j) \setminus \bigcup_{k < j} \operatorname{cov}(a_k).
+$$
+
+The captured sets of the $m$ rules and the default partition the rows. The prediction of the list is the class of the
+captured set an input falls in, so a list is a piecewise-constant classifier like a tree, but its pieces are
+differences of conjunctions rather than conjunctions. The meaning of a rule depends on its position: rule $j$ in a
+list means $a_j \wedge \neg a_1 \wedge \dots \wedge \neg a_{j-1}$. Each consequent $c_j$ is usually the majority class
+of $\operatorname{cap}_j$, and probabilistic lists store the class proportions of $\operatorname{cap}_j$ instead
+<Cite id="letham2015" />.
+
+### Combining the rules of a set
+
+An unordered rule set needs a rule for inputs that several rules cover and for inputs that none covers. CN2 in its
+unordered mode stores, for every rule, the class counts of the training rows it covers, adds the count vectors of all
+rules that fire and predicts the largest total; when no rule fires it predicts the most frequent class
+<Cite id="clark1991" />. Other schemes use the single most precise firing rule, or a weighted vote. A rule set for one
+target class needs no vote: it predicts the target when any rule fires and the other class otherwise, and its rules
+can be learned and read independently. The learners of the <NoteLink to="sequential-covering">sequential
+covering</NoteLink> family produce either form, and <NoteLink to="ripper">RIPPER</NoteLink> produces an ordered list of
+rule sets, one set per class.
+
+### Lists, sets and trees
+
+The three forms describe the same functions on discrete inputs, at very different sizes.
+
+- **Tree to rules.** Each leaf of a tree of depth $k$ is a conjunction of at most $k$ tests, and the leaves' rules
+  never overlap. They form a rule set or a list in any order. The conversion and its simplification are the subject
+  of <NoteLink to="rules-from-decision-trees">rules from decision trees</NoteLink>.
+- **List to set.** Rule $j$ of a list becomes $a_j \wedge \neg a_1 \wedge \dots \wedge \neg a_{j-1}$. Negating a
+  conjunction gives a disjunction, so the rule set in disjunctive normal form can be exponentially larger. The list
+  $(u_1 \wedge v_1 \to 0, \dots, u_m \wedge v_m \to 0, 1)$ predicts 1 exactly when
+  $(\neg u_1 \vee \neg v_1) \wedge \dots \wedge (\neg u_m \vee \neg v_m)$ holds, and the smallest disjunctive normal
+  form of that formula has $2^m$ conjunctions.
+- **Set to list.** A two-class rule set for the target class $c$ is the list $(a_1 \to c, \dots, a_m \to c, \bar c)$
+  with the other class $\bar c$ as default. Any order works, since all its rules predict the same class.
+- **List to tree.** A list whose antecedents each test one variable is the one-sided tree that tests $a_1$ at the root,
+  $a_2$ below its negative branch, and so on, with $m + 1$ leaves. A conjunctive antecedent fails in several ways, and
+  a tree has to repeat the subtree of all later rules under each of them, so its size can grow exponentially with $m$.
+
+### Learnability of $k$-decision lists
+
+Rivest defined $k$-DL, the decision lists over $n$ Boolean variables whose antecedents are conjunctions of at most $k$
+literals (variables or their negations). For fixed $k$ this class contains every $k$-DNF formula, every $k$-CNF formula
+and every decision tree of depth $k$ <Cite id="rivest1987" />.
+
+The class is learnable from a sample consistent with some $k$-DL by a greedy algorithm. Repeat: find any conjunction
+$t$ of at most $k$ literals that covers at least one remaining example and only examples of one class $c$; append
+$t \to c$ to the list; delete the examples $t$ covers. Stop when no example is left. The algorithm never gets stuck
+(see the derivation below), and it inspects at most
+$\abs{C_k} = \sum_{i=0}^{k} \binom{2n}{i} = O\big((2n)^k\big)$ candidate conjunctions per rule, so it runs in time
+polynomial in $n$ for fixed $k$.
+
+The number of $k$-decision lists over $n$ variables is at most $3^{\abs{C_k}}\,\abs{C_k}!$, since each conjunction
+is absent or present with one of two classes, in some order. Its logarithm is $O(n^k \log n)$. The finite-class bound
+of <NoteLink to="probably-approximately-correct-learning">PAC learning</NoteLink> then says that a consistent list
+found from $m \ge \frac{1}{\epsilon}\big(\ln \abs{k\text{-DL}} + \ln\frac{1}{\delta}\big)$ examples has error at most
+$\epsilon$ with probability at least $1 - \delta$, which is polynomial in $n$, $1/\epsilon$ and $\ln(1/\delta)$
+<Cite id="rivest1987" />. The result is about the noise-free case. On real data no consistent list may exist, and
+practical learners trade training errors against the number of rules.
+
+<Derivation title="Why the greedy algorithm always finds a next rule">
+Let the sample $S$ be labelled by a target list $d^* = (t_1 \to c_1, \dots, t_r \to c_r, c_0)$ with every $t_j$ in
+$C_k$. Let $S' \subseteq S$ be the examples not yet covered. Take the first rule $t_j$ of $d^*$ that covers some
+example of $S'$. Every example of $S'$ that $t_j$ covers reaches $t_j$ in $d^*$, because no earlier target rule covers
+any example of $S'$, so $d^*$ labels all of them $c_j$. Hence $t_j$ itself is a valid choice for the next rule. If no
+target rule covers any example of $S'$, every example of $S'$ is labelled $c_0$, and the empty conjunction (which is
+in $C_k$) covers them all with one class. Either way a valid conjunction exists, and every rule removes at least one
+example, so the algorithm ends after at most $\abs{S}$ rules with a list consistent with $S$.
+</Derivation>
+
+## Worked example
+
+The Titanic data list the 2201 people aboard by class (1st, 2nd, 3rd, crew), sex and age (child, adult), and whether
+they survived: 711 did and 1490 did not. Take the list
+
+1. if $\text{sex} = \text{male} \wedge \text{age} = \text{adult}$ then died,
+2. else if $\text{class} = \text{3rd}$ then died,
+3. else if $\text{class} = \text{1st}$ then survived,
+4. else survived.
+
+Letham et al. show a list of this form for these data <Cite id="letham2015" />. The captured counts follow from the
+table of the 14 kinds of passenger.
+
+- **Rule 1** captures all 1667 adult men: 1329 died and 338 survived. Predicting "died" is right 1329 times.
+- **Rule 2** sees only the 534 women and children. Of them, 244 travelled 3rd class: 141 died and 103 survived. The
+  rule is right 141 times. Read alone, "3rd class, so died" would describe 706 people with a survival rate of 25%; in
+  position 2 it describes 3rd-class women and children, whose survival rate is $103/244 = 42\%$.
+- **Rule 3** sees the 290 remaining women and children. The 150 in 1st class include 4 deaths. The rule is right 146
+  times.
+- **The default** gets the other 140, the 2nd-class women and children and the women of the crew: 124 survived, 16
+  died. It is right 124 times.
+
+Training accuracy is $(1329 + 141 + 146 + 124)/2201 = 1740/2201 = 0.791$. No classifier of these three attributes
+does better: the most frequent outcome of each of the 14 kinds of passenger is right 1740 times.
+
+**Order matters.** Move rule 3 to the top. It now captures all 325 first-class passengers, including the 175 first-class
+men, and predicts survival for them: right 203 times. Rule 1 then sees 1492 adult men outside 1st class, 1211 of whom
+died. Rules 2 and the default capture what they did before, right 141 and 124 times. Accuracy falls to
+$(203 + 1211 + 141 + 124)/2201 = 1679/2201 = 0.763$, because the 118 first-class men who died are now called survivors.
+
+**As an unordered set.** Store with each rule the counts of all rows it covers, (died, survived): rule 1 $(1329, 338)$,
+rule 2 $(528, 178)$, rule 3 $(122, 203)$. A first-class adult man fires rules 1 and 3, whose summed counts
+$(1451, 541)$ vote "died". Every other kind of passenger fires at most one rule or rules that agree, so the set makes
+the same predictions as the list and reaches 0.791 as well. The vote resolves the conflict here because the larger rule
+dominates the sum; with rules of similar size it can go either way.
+
+The figure below repeats the experiment on two moons, with a list of threshold rules learned by
+<NoteLink to="sequential-covering">sequential covering</NoteLink>.
+
+<DecisionListOrder />
+
+## Assumptions
+
+- **Discrete or discretised inputs.** Conditions are equalities on nominal attributes or thresholds on numeric ones.
+  The thresholds are chosen by the learner, often at quantiles, and the rules are only as fine as those cut points.
+- **Conjunctive antecedents.** Each rule is a conjunction. A disjunction of conditions takes several rules, and
+  an oblique boundary such as $x_1 + x_2 \le 1$ takes a staircase of boxes, as in a tree.
+- **Readable size.** The benefit of the form assumes a list of a few rules with few conditions each. Learners for
+  short lists use a complexity penalty: <NoteLink to="bayesian-rule-lists">Bayesian rule lists</NoteLink> use a
+  prior on length, <NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule lists</NoteLink> a penalty
+  per rule <Cite id="angelino2018" />.
+
+## In practice
+
+Rule lists and rule sets are used where the model itself has to be inspected: medical risk scores, lending and
+justice decisions, and global surrogates of black-box models. For such high-stakes tabular problems, sparse
+interpretable models are often about as accurate as black boxes <Cite id="rudin2019" />. The learners in common use
+are greedy covering algorithms (<NoteLink to="sequential-covering">CN2</NoteLink> and
+<NoteLink to="ripper">RIPPER</NoteLink>), rules extracted from trees, and optimisation-based lists
+(<NoteLink to="bayesian-rule-lists">BRL</NoteLink>, <NoteLink to="certifiably-optimal-rule-lists">CORELS</NoteLink>);
+the Python package imodels implements several behind one interface <Cite id="singh2021imodels" />. The overview in
+<NoteLink to="intrinsically-interpretable-models">intrinsically interpretable models</NoteLink> compares rule lists
+with sparse linear and <NoteLink to="generalised-additive-model">additive models</NoteLink>.
+
+## Pitfalls
+
+- **Reading a rule out of its position.** Rule $j$ of a list holds only for inputs that no earlier rule caught. Quoting
+  it alone, as in "3rd class, so died", changes what it says.
+- **Reordering a learned list.** Each rule was chosen for the rows that reached it. Moving a rule changes the rows every
+  later rule sees, and accuracy usually drops.
+- **Overlapping rules in a set.** A rule set gives no single reason for a prediction when several rules fire, and the
+  vote depends on the stored counts.
+- **The default class.** In a list learned on <NoteLink to="class-imbalance">imbalanced data</NoteLink>, the default
+  often carries most of the majority class, and the explanation for those predictions is "no rule fired".
+- **Small rules.** Rules covering a handful of rows look perfect on the training data and generalise poorly. Rule
+  quality measures that shrink precision at low coverage are the subject of
+  <NoteLink to="rule-quality-measures">rule quality measures</NoteLink>.

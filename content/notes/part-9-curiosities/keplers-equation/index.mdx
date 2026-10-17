@@ -1,0 +1,197 @@
+---
+title: 'Kepler''s equation'
+kind: technique
+summary: 'Kepler''s equation $M = E - e \sin E$ links the time since pericentre (the mean anomaly $M$) to the position on an elliptical orbit (the eccentric anomaly $E$). It has no closed-form solution; Newton''s method solves it in a few steps.'
+tags: [orbital-mechanics, root-finding, worked-example]
+aliases: [mean anomaly, eccentric anomaly, true anomaly, mean motion]
+requires: [kepler-orbits, root-finding]
+related: [newtons-method, symplectic-integrators-and-energy-drift, three-body-problem]
+references: [murray1999, charles1997, elipe2017]
+status: draft
+updated: 2026-10-17
+---
+
+import { AnomalyDiagram } from './AnomalyDiagram'
+import { NewtonOnKepler } from './NewtonOnKepler'
+
+<Definition>
+For a body on an elliptical <NoteLink to="kepler-orbits">Kepler orbit</NoteLink> with eccentricity $e \in [0, 1)$ and
+period $T$, **Kepler's equation** is
+
+$$
+M = E - e\sin E,
+$$
+
+where the **mean anomaly** $M = 2\pi(t - \tau)/T$ is the time since the pericentre passage at $\tau$, measured as an
+angle in radians, and the **eccentric anomaly** $E$ is an angle that fixes the body's position on the ellipse
+<Cite id="murray1999" />. Given $E$, computing $M$ is one line. Given $M$, finding $E$ is a root-finding problem, which
+<NoteLink to="newtons-method">Newton's method</NoteLink> solves to machine precision in a few steps from the start
+$E_0 = \pi$.
+</Definition>
+
+## Problem
+
+The orbit equation $r = p/(1 + e\cos\nu)$ gives the shape of an orbit but not the timing along it. Predicting where a
+planet, a comet or a satellite is at a given time needs the map from time to position. Kepler's second law fixes that
+map: the line from the focus to the body sweeps area at a constant rate. Turning "the swept area is a given fraction
+of the ellipse" into a position gives Kepler's equation. The equation has no solution in elementary functions, so
+orbit propagators and fits of orbits to radial-velocity data solve it numerically, once for every time at which a
+position is needed.
+
+## Mechanism
+
+### Three anomalies
+
+An **anomaly** is an angle that locates the body on its orbit, measured from pericentre. Take an ellipse with
+semi-major axis $a$, semi-minor axis $b = a\sqrt{1 - e^2}$, centre $C$ and the attracting mass at the focus $F$, a
+distance $ae$ from $C$. Draw the **auxiliary circle** of radius $a$ about $C$.
+
+- The **true anomaly** $\nu$ is the angle at the focus between the pericentre and the body $P$. It is the angle in
+  the orbit equation $r = p/(1 + e\cos\nu)$.
+- The **eccentric anomaly** $E$ is the angle at the centre between the pericentre and the point $Q$ of the auxiliary
+  circle directly above or below $P$. With $x$ along the major axis from $C$, the body is at $(a\cos E, b\sin E)$:
+  the ellipse is the circle squashed vertically by the factor $b/a$.
+- The **mean anomaly** $M$ is the angle of a fictitious body that moves round the auxiliary circle at the constant
+  rate $n = 2\pi/T$, the **mean motion**, and passes pericentre with the real body. It is a clock, not a position.
+
+From $P = (a\cos E, b\sin E)$ and $F = (ae, 0)$, the distance from the focus is
+
+$$
+r = \sqrt{a^2(\cos E - e)^2 + b^2\sin^2 E} = a(1 - e\cos E),
+$$
+
+using $b^2 = a^2(1 - e^2)$ and collecting the terms into the square $a^2(1 - e\cos E)^2$. The true anomaly follows from
+$E$ by the half-angle relation
+
+$$
+\tan\frac{\nu}{2} = \sqrt{\frac{1 + e}{1 - e}}\,\tan\frac{E}{2},
+$$
+
+which puts $\nu$ and $E$ in the same half-turn: both are 0 at pericentre and $\pi$ at apocentre.
+
+<Derivation title="The half-angle relation">
+The body's coordinates relative to the focus are $r\cos\nu = a(\cos E - e)$ and $r\sin\nu = b\sin E$. With
+$r = a(1 - e\cos E)$,
+
+$$
+r(1 - \cos\nu) = a(1 - e\cos E) - a(\cos E - e) = a(1 + e)(1 - \cos E),
+$$
+
+$$
+r(1 + \cos\nu) = a(1 - e\cos E) + a(\cos E - e) = a(1 - e)(1 + \cos E).
+$$
+
+Dividing the first by the second and using $\tan^2(x/2) = (1 - \cos x)/(1 + \cos x)$ gives
+$\tan^2(\nu/2) = \frac{1 + e}{1 - e}\tan^2(E/2)$. Both half-angles lie in the same quadrant because $\sin\nu$ and
+$\sin E$ have the same sign, so the positive root holds.
+</Derivation>
+
+### Kepler's equation from the area law
+
+Let $A$ be the pericentre. The area of the ellipse swept from the focus since pericentre is the region $FAP$. Because
+the ellipse is the auxiliary circle compressed by $b/a$ perpendicular to the major axis, this region has $b/a$ times
+the area of the corresponding region $FAQ$ of the circle. The circular region is the sector $CAQ$ with area
+$\tfrac12 a^2 E$, minus the triangle $CFQ$, whose base $CF = ae$ and height $a\sin E$ give area
+$\tfrac12 a^2 e\sin E$. So
+
+$$
+\operatorname{area}(FAP) = \frac{b}{a}\cdot\frac{a^2}{2}\paren{E - e\sin E} = \frac{ab}{2}\paren{E - e\sin E}.
+$$
+
+By Kepler's second law the swept area grows at a constant rate, and it reaches the whole ellipse $\pi ab$ after one
+period. At time $t - \tau$ after pericentre it is therefore $\pi ab\,(t - \tau)/T = \tfrac12 ab\,M$. Equating the two
+expressions and cancelling $ab/2$ gives Kepler's equation $M = E - e\sin E$. A circular orbit has $e = 0$, so all three
+anomalies coincide and the body moves at the constant rate $n$.
+
+The figure draws the construction. The shaded area swept from the focus keeps the same share of the ellipse as the
+mean point has of a full turn.
+
+<AnomalyDiagram />
+
+### Newton's method
+
+Write the residual $f(E) = E - e\sin E - M$, with derivative $f'(E) = 1 - e\cos E$. For $e < 1$ the derivative lies
+in $[1 - e, 1 + e]$ and is positive, so $f$ is strictly increasing and has exactly one root $E^*$. The root lies
+within $e$ of $M$, because $\abs{E^* - M} = e\abs{\sin E^*} \le e$. Newton's method replaces $f$ by its tangent at the
+current iterate $E_k$ and moves to the tangent's zero:
+
+$$
+E_{k+1} = E_k - \frac{E_k - e\sin E_k - M}{1 - e\cos E_k}.
+$$
+
+Near the root the error $\delta_k = E_k - E^*$ obeys $\delta_{k+1} \approx \frac{f''(E^*)}{2f'(E^*)}\,\delta_k^2$
+with $f''(E) = e\sin E$, so the number of correct digits roughly doubles each step (see <NoteLink
+to="root-finding">root finding</NoteLink>).
+
+## Worked example
+
+Take $e = 0.5$ and $M = 1$ rad, which is the time $T/(2\pi)$ after pericentre, about 16% of the period. Start at
+$E_0 = M = 1$. Each line evaluates $f$ and $f'$ at the current iterate and takes the Newton step $-f/f'$.
+
+1. $E_0 = 1$: $f = 1 - 0.5\sin 1 - 1 = -0.4207$ and $f' = 1 - 0.5\cos 1 = 0.7298$. The step is $+0.5765$, so
+   $E_1 = 1.5765$.
+2. $E_1 = 1.5765$: $f = 0.0765$ and $f' = 1.0028$. The step is $-0.0763$, so $E_2 = 1.500208$.
+3. $E_2 = 1.500208$: $f = 1.45 \times 10^{-3}$ and $f' = 0.9647$. The step is $-1.51 \times 10^{-3}$, so
+   $E_3 = 1.4987017$.
+4. $E_3$: $f = 5.7 \times 10^{-7}$, so $E_4 = 1.498701134$, and the next step is below $10^{-13}$.
+
+The errors $\abs{E_k - E^*}$ are $0.50$, $0.078$, $1.5 \times 10^{-3}$, $5.9 \times 10^{-7}$ and
+$9 \times 10^{-14}$. Each is about $0.26$ times the square of the one before, which matches the predicted constant
+$e\sin E^*/(2(1 - e\cos E^*)) = 0.4987/1.928 = 0.26$.
+
+The position follows from $E^* = 1.4987$ rad. The distance is $r = a(1 - 0.5\cos 1.4987) = a(1 - 0.5 \times 0.0720)
+= 0.964\,a$. The true anomaly is $\nu = 2\arctan\paren{\sqrt 3\tan 0.7494} = 2.031$ rad, or $116.4°$. After 16% of
+the period the body has turned through 32% of a full circle, because it moves fastest near pericentre.
+
+## Why the start matters
+
+Newton's method converges quadratically once it is close, but nothing guarantees that a start is close. The danger
+is a flat tangent. Near $E = 0$ the slope $f'(E) = 1 - e\cos E$ is about $1 - e$, which is $0.01$ at $e = 0.99$. Take
+$e = 0.99$ and $M = 0.1$, a body just past pericentre on a very eccentric orbit, with root $E^* = 0.832$. From
+$E_0 = M = 0.1$, $f = -0.0988$ and $f' = 0.0149$, so the first step is $+6.61$ rad and $E_1 = 6.71$, most of a turn past
+the root. The next tangent sends the iterate to $E_2 = -55.3$, and the iterates wander for 21 steps before they settle.
+For some $M$ near $0.1$ at this eccentricity they have not settled after 100 steps. Charles and Tatum studied this
+erratic behaviour of the iterates at high eccentricity <Cite id="charles1997" />.
+
+The start $E_0 = \pi$ avoids it and converges for every $e < 1$ and every $M$ <Cite id="charles1997" />. For
+$0 < M < \pi$, the root lies in $(0, \pi)$, and there $f'' = e\sin E > 0$, so $f$ is convex. A convex function lies
+above each of its tangents, so a Newton step from a point right of the root, where $f > 0$, lands at a point that is
+still right of the root, and closer to it. The iterates from $E_0 = \pi$ therefore decrease monotonically to $E^*$
+<Cite id="elipe2017" />. The first step is also safe, because the slope at $\pi$ is $1 + e$, the largest it can be. For
+$\pi < M < 2\pi$ the mirror argument holds with $f$ concave and the iterates increasing. In the example above,
+$E_0 = \pi$ reaches $E^* = 0.832$ in 8 steps, and across all $M$ at $e = 0.99$ it never needs more than about a dozen.
+
+Drag the level $M$ on the left panel or the guide on the right one, and step through the iterations with the player.
+
+<NewtonOnKepler />
+
+## Cost
+
+Each Newton step costs one sine, one cosine and a division. From $E_0 = \pi$ the method reaches a step below
+$10^{-12}$ in five to seven steps for moderate eccentricities and in at most about a dozen at $e = 0.99$. Libraries
+that solve Kepler's equation in bulk start closer to the root with an explicit approximation of $E^*(e, M)$ and finish
+with one or two Newton steps, or with a higher-order variant such as Halley's method.
+
+## Trade-offs
+
+- **Fixed-point iteration** $E_{k+1} = M + e\sin E_k$ needs no derivative and always converges, because the map
+  $E \mapsto M + e\sin E$ shrinks distances by at most the factor $e$. The convergence is linear, so at $e = 0.99$ it
+  can need about $\ln(10^{-12})/\ln 0.99 \approx 2700$ steps for twelve digits.
+- **Bisection** on the bracket $[M - e, M + e]$ always converges and halves the error each step: about 41 steps for
+  $10^{-12}$ when $e$ is near 1. It is the safe fallback when a solver must never fail.
+- **Newton's method** converges quadratically and is the usual choice, provided the start is chosen with care.
+
+## Pitfalls
+
+- **Starting at $M$ on very eccentric orbits.** $E_0 = M$ is the natural first guess and works for small
+  eccentricities, but for $e$ near 1 and $M$ near 0 the first tangent overshoots by several radians. Start at $\pi$, or
+  bracket the root and fall back to bisection.
+- **The quadrant of $\nu$.** Inverting $\tan(\nu/2)$ with a one-argument arctangent loses the half-turn. Compute
+  $\nu = 2\operatorname{atan2}\paren{\sqrt{1 + e}\sin(E/2), \sqrt{1 - e}\cos(E/2)}$ instead.
+- **Many turns.** $M$ grows without bound with time. Reduce it to $[0, 2\pi)$ before solving, since
+  $f(E + 2\pi) = f(E) + 2\pi$, and add the turns back to $E$ afterwards.
+- **Cancellation near the parabola.** For $e$ near 1 and small $E$, the residual $E - e\sin E \approx (1 - e)E +
+  eE^3/6$ is the difference of two nearly equal numbers, so it loses relative precision. Formulations tailored to
+  near-parabolic orbits avoid the subtraction.
+- **Hyperbolic orbits** obey the analogous equation $M = e\sinh F - F$ in the hyperbolic anomaly $F$, which Newton's
+  method also solves, with its own choice of start.

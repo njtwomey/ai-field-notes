@@ -1,0 +1,216 @@
+---
+title: 'Expressiveness of linear recurrences'
+kind: concept
+summary: 'Diagonal linear recurrences with positive decays cannot track the parity of a bit string or compose permutations at fixed depth. Negative eigenvalues or input-dependent non-diagonal transitions, as in DeltaNet with $\beta\in(0,2)$, let them track parity and other state machines.'
+tags: [sequence-models, expressivity, worked-example]
+aliases: ['illusion of state', 'state tracking', 'parity with linear RNNs', 'word problem', 'DeltaProduct']
+requires: [gated-linear-recurrence, delta-rule-and-test-time-training]
+related:
+  [
+    long-range-and-recall-benchmarks,
+    recurrent-neural-network,
+    mamba,
+    linear-recurrent-unit-and-s5,
+    rwkv-and-retentive-networks,
+    parallel-scan,
+    expressive-power-of-message-passing,
+    hybrid-sequence-models,
+  ]
+references:
+  [merrill2024illusion, merrill2023parallelism, grazzi2024, sarrof2024, siems2025deltaproduct, peng2025rwkv7, yang2024deltanet]
+status: draft
+updated: 2026-10-17
+---
+
+import { ParityTracking } from './ParityTracking'
+
+<Definition>
+A **linear recurrence** updates a state by $\hvec_t = \Amat(\xvec_t)\hvec_{t-1} + \bvec(\xvec_t)$, with a transition
+matrix $\Amat(\xvec_t)$ and an input $\bvec(\xvec_t)$ computed from the current token only. Its **expressiveness** is
+the set of functions of the input sequence that a fixed number of such layers, with nonlinear layers between them and
+finite-precision numbers, can compute at every sequence length. Layers whose transitions are diagonal with entries in
+$[0, 1]$, as in <Gloss name="mamba" />, <Gloss name="gla">gated linear attention</Gloss> and RG-LRU, cannot compute the
+parity of a bit string at arbitrary length <Cite id="grazzi2024" /> <Cite id="sarrof2024" />, and stacks of them, like
+transformers, cannot compose permutations of five objects unless $\mathrm{TC}^0 = \mathrm{NC}^1$
+<Cite id="merrill2024illusion" />. Transitions with negative or complex eigenvalues, or non-diagonal transitions that
+depend on the input, remove these limits.
+</Definition>
+
+## Intuition
+
+Many tasks ask a model to keep track of a state that each token changes: whether an even or odd number of switches has
+been flipped, the positions of pieces after a list of chess moves, the value of a variable after a list of assignments.
+A <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> with a nonlinear update does this naturally, one
+token at a time: its state after token $t$ is a function of its state after token $t - 1$ and the token.
+
+A linear recurrence also processes one token at a time, but its update is a matrix product. After $T$ tokens, with
+$\bvec = \zeros$, the state is $\Amat(\xvec_T)\cdots\Amat(\xvec_1)\hvec_0$. Whatever the recurrence can track is
+written in products of its transition matrices. If every transition is diagonal with entries in $[0, 1]$, every
+product is too: each entry can only shrink or stay put, and the order of the tokens does not matter, because diagonal
+matrices commute. Parity needs a state that flips back and forth. Composing permutations needs matrices that do not
+commute. Neither exists among nonnegative diagonal matrices.
+
+The restriction was made for speed. A <NoteLink to="parallel-scan">parallel scan</NoteLink> combines two steps by
+multiplying their transitions; for diagonal matrices that costs $d$ multiplications, for dense ones $d^3$. The question
+is how much structure can be added back without losing the cheap scan.
+
+## Details
+
+### State tracking as a word problem
+
+The cleanest tasks are **word problems**. A finite set $G$ with an associative product, such as a group, is fixed. The
+input is a sequence $g_1, \dots, g_T$ of elements and the output at each step is the running product
+$g_1 g_2 \cdots g_t$.
+
+- **Parity** is the word problem of the group $\integers_2 = \{0, 1\}$ under addition mod 2.
+- **Counting mod $m$** is the word problem of $\integers_m$.
+- **Permutation composition** is the word problem of the symmetric group $S_n$: each token is a permutation of $n$
+  objects and the state is where every object has gone. Tracking chess pieces from moves written as (from, to) squares
+  reduces to it <Cite id="merrill2024illusion" />.
+
+A deterministic finite automaton runs a word problem of its transition monoid, so word problems cover every regular
+language.
+
+### The circuit-complexity limit
+
+Two complexity classes frame the limit. $\mathrm{TC}^0$ is the set of problems solved by circuits of constant depth and
+polynomial size built from threshold gates. $\mathrm{NC}^1$ is the set solved by circuits of logarithmic depth with
+gates of two inputs. $\mathrm{TC}^0 \subseteq \mathrm{NC}^1$, and the inclusion is widely believed to be strict. The
+word problem of $S_5$ is $\mathrm{NC}^1$-complete (Barrington's theorem), so if the classes differ, no
+$\mathrm{TC}^0$ circuit family solves it.
+
+Transformers with numbers of logarithmic precision are in uniform $\mathrm{TC}^0$ <Cite id="merrill2023parallelism" />.
+Merrill, Petty and Sabharwal showed that stacks of <Gloss name="s4" /> and Mamba layers with the same precision are in
+it too <Cite id="merrill2024illusion" />. A fixed-depth stack of either cannot track $S_5$ permutations at every length.
+In their experiments on the word problem of $A_5$, a group with the same property, transformers, S4 and Mamba needed
+more layers as the sequence grew, while a one-layer nonlinear RNN solved every length. The paper calls the state of
+these layers an illusion: it has a fixed size, as an RNN's does, but it cannot be updated as an RNN's can.
+
+The same paper names the fix: make the transition matrix depend on the input and allow it to be non-diagonal. A
+recurrence $\hvec_t = \Amat(\xvec_t)\hvec_{t-1}$ whose $\Amat(\xvec)$ are permutation matrices tracks $S_5$ exactly in
+one layer, and it is still a scan, of matrix products.
+
+### Parity and the sign of the eigenvalues
+
+Parity is the smallest case, and its limit holds without complexity conjectures.
+
+Take one state and transitions $a(x) \in [0, 1]$ with $b = 0$ and $h_0 = 1$. After a string with $c$ ones,
+$h = a(1)^c a(0)^{T-c}$. Let $a(0) = 1$, so zeros leave the state alone, and write $\lambda = a(1)$. Then
+$h = \lambda^c$:
+
+- with $\lambda = 1$ the state never changes, and carries no information;
+- with $0 \le \lambda < 1$ the state falls monotonically towards 0. With $b$ binary digits it reaches 0 after about
+  $b/\log_2(1/\lambda)$ ones, and every longer count gives the same state;
+- in exact arithmetic the values $\lambda^c$ are distinct, but they never change sign, so a readout must map a
+  decreasing sequence to $0, 1, 0, 1, \dots$, which a fixed-size network with finite precision cannot do for every
+  $c$.
+
+With $\lambda = -1$ the state is $(-1)^c$: its sign is the parity, at every length, and a single threshold at 0 reads
+it. Grazzi et al. proved the general form: a finite-precision linear RNN can solve parity at arbitrary length only if
+some transition $\Amat(\xvec)$ has an eigenvalue that is not a nonnegative real <Cite id="grazzi2024" />. Sarrof,
+Veitsman and Hahn proved that state-space layers with nonnegative gates recognise, at finite precision, exactly the
+star-free regular languages, which exclude parity and every other form of counting mod $m$ <Cite id="sarrof2024" />.
+They can still do some tracking that transformers find hard, such as remembering the last instruction in a stream of
+writes and reads (the flip-flop language).
+
+The same reasoning gives counting mod $m$: a rotation by $2\pi/m$ in a two-dimensional block, a pair of complex
+eigenvalues $e^{\pm 2\pi i/m}$, counts the ones mod $m$. Grazzi et al. prove that counting mod $m$, for $m$ not a power
+of two, needs some product of transitions with a non-real eigenvalue <Cite id="grazzi2024" />. The
+<NoteLink to="linear-recurrent-unit-and-s5">linear recurrent unit</NoteLink> has complex eigenvalues, but its transition
+is the same for every token and lies inside the unit disc: the rotation is applied at zeros and ones alike, and it
+decays.
+
+The figure computes the best possible parity accuracy of the one-state recurrence, exactly, over all strings of each
+length.
+
+<ParityTracking />
+
+### Extending the transitions
+
+Grazzi et al. widened the eigenvalue range of two existing layers with one change each <Cite id="grazzi2024" />:
+
+- **Mamba.** The diagonal transition $s(\xvec) \in [0, 1]$ becomes $2s(\xvec) - 1 \in [-1, 1]$.
+- **DeltaNet.** The transition $\eye - \beta_t\kvec_t\kvec_t^\tr$ with $\beta_t \in [0, 1]$ has eigenvalue $1 - \beta_t$
+  along $\kvec_t$ and 1 elsewhere. Doubling it, $\eye - 2\beta_t\kvec_t\kvec_t^\tr$, gives an eigenvalue
+  $1 - 2\beta_t \in [-1, 1]$; at $\beta_t = 1$ the transition is a Householder reflection.
+
+Both changed layers learned parity perfectly, against 0.000 and 0.017 scaled accuracy before. DeltaNet with $[-1, 1]$
+also learned the $S_5$ word problem restricted to swaps in one layer; with its original range it needed five layers and
+still did not generalise far beyond the training length. Its transitions are non-diagonal and depend on the token, which
+Mamba's are not: the widened Mamba stayed poor at permutations. In <Gloss name="language-model">language models</Gloss>
+of 340M and 1.3B parameters, the widened DeltaNet reached lower perplexity on code and mathematics, while the widened
+Mamba got worse.
+
+Products of such generalised Householder transitions can recognise any regular language, with enough layers
+<Cite id="grazzi2024" />. **DeltaProduct** takes $n_h$ delta-rule steps per token, so each transition is the identity
+minus a matrix of rank $n_h$; state tracking improves as $n_h$ grows <Cite id="siems2025deltaproduct" />. The
+generalised delta rule of <NoteLink to="rwkv-and-retentive-networks">RWKV-7</NoteLink> also allows such transitions, and
+its authors prove that it recognises all regular languages <Cite id="peng2025rwkv7" />.
+
+### What the extra structure costs
+
+| Transition                         | Example layers                 | Scan combination      | Tracks                         |
+| ---------------------------------- | ------------------------------ | --------------------- | ------------------------------ |
+| diagonal, entries in $[0, 1]$      | Mamba, GLA, RG-LRU, RetNet     | $d$ products          | star-free languages, no parity |
+| diagonal, entries in $[-1, 1]$     | widened Mamba                  | $d$ products          | parity; no permutations        |
+| identity minus rank 1, from token  | DeltaNet, Gated DeltaNet       | chunked WY form       | with $[-1, 1]$: parity, swaps  |
+| identity minus rank $n_h$          | DeltaProduct, RWKV-7           | chunked, $n_h$ times  | more groups as $n_h$ grows     |
+| dense, from token                  | input-dependent S4 (IDS4)      | $d^3$ products        | any group of $d \times d$ matrices |
+| nonlinear                          | <Gloss name="lstm" />, <Gloss name="gru" />                      | no scan; sequential   | any finite automaton           |
+
+The structured middle rows keep training parallel:
+<NoteLink to="delta-rule-and-test-time-training">DeltaNet's</NoteLink> chunked algorithm uses the WY form of products of
+Householder-like matrices <Cite id="yang2024deltanet" />.
+
+## Worked example
+
+**Parity of 1011 with $\lambda = -1$.** Start at $h_0 = 1$ and multiply by $-1$ at every one.
+
+| $t$ | $x_t$ | $a(x_t)$ | $h_t$ |
+| --- | ----- | -------- | ----- |
+| 1   | 1     | $-1$     | $-1$  |
+| 2   | 0     | $1$      | $-1$  |
+| 3   | 1     | $-1$     | $1$   |
+| 4   | 1     | $-1$     | $-1$  |
+
+The final state is $-1$: an odd number of ones, which is right (three). The threshold "odd if $h < 0$" reads the parity
+after every prefix: odd, odd, even, odd.
+
+**The same string with $\lambda = 0.5$.** The states are $0.5, 0.5, 0.25, 0.125$. Strings with 0, 1, 2 and 3 ones end
+at 1, 0.5, 0.25 and 0.125, so the parity is the pattern even, odd, even, odd along a decreasing sequence. No single
+threshold separates it: "odd if $h < 0.75$" gets 0, 1 and 3 ones right and 2 ones wrong. Keep 2 binary digits and
+truncate: 0.125 becomes 0, as do the states for every larger count, and the parity of all strings with three or more
+ones is lost.
+
+**Counting mod 3 with a rotation.** Use a two-dimensional state $\hvec_0 = (1, 0)$ and rotate it by $120°$ at every
+one. The string 1011 turns it to $120°$, holds it, then to $240°$ and to $360° = 0°$: back to $(1, 0)$, so the count of
+ones is $0 \bmod 3$. Three ones is right.
+
+**A reflection in DeltaNet.** With $\kvec = (1, 0)$, the widened transition at $\beta = 1$ is
+$\eye - 2\kvec\kvec^\tr = \operatorname{diag}(-1, 1)$. It flips the first coordinate of the state and leaves the second
+alone: the $\lambda = -1$ recurrence in the first coordinate, chosen by the key.
+
+## Assumptions
+
+- **Finite precision.** The impossibility results assume a fixed number of bits per number, or logarithmically many in
+  the length. With unbounded precision, monotone sequences such as $\lambda^c$ stay distinct and the limits change.
+- **Fixed depth.** The limits are for a fixed number of layers as the length grows. Depth that grows with the length
+  recovers the tasks, as the $A_5$ experiments showed.
+- **Unproved conjecture.** The $S_5$ result for transformers and diagonal recurrences assumes
+  $\mathrm{TC}^0 \ne \mathrm{NC}^1$; the parity results do not.
+- **Expressible is not learnable.** A layer that can represent a task may still fail to learn it from data, or learn
+  it only at the training lengths.
+
+## Pitfalls
+
+- **A recurrence is not an RNN.** A fixed-size state is not the same as the ability to update it: Mamba's state has a
+  fixed size, but it cannot run an arbitrary automaton.
+- **Negative eigenvalues alone are not enough.** Diagonal transitions in $[-1, 1]$ give parity but commute, so they
+  cannot compose permutations. Non-diagonal, input-dependent transitions are needed for that.
+- **Magnitude below 1 still forgets.** A transition of $-0.9$ tracks parity only until $0.9^c$ falls below the
+  precision; stable layers keep $\abs\lambda \le 1$, and exact tracking needs $\abs\lambda = 1$ on the tracked
+  direction.
+- **Benchmarks that look like state tracking may not be.** Many language-modelling evaluations can be solved with
+  shortcuts or recall. Word problems over groups, parity and modular arithmetic test tracking directly.
+- **Gains in expressiveness can cost quality elsewhere.** The widened Mamba lost perplexity on language; whether a
+  change helps depends on the layer it is made to.

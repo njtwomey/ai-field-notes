@@ -1,0 +1,191 @@
+---
+title: 'Least general generalisation'
+kind: technique
+summary: 'The least general generalisation of two terms or clauses is the most specific one that θ-subsumes both, found by anti-unification: each pair of differing subterms becomes a shared new variable (Plotkin). Its relative form drives bottom-up systems such as Golem.'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['LGG', 'anti-unification', 'relative least general generalisation', 'Golem', 'RLGG']
+requires: [theta-subsumption]
+related: [inverse-entailment-and-progol, generality-ordering-and-refinement, concept-learning-and-version-spaces, unification-and-resolution, inductive-logic-programming]
+references: [plotkin1972thesis, muggleton1990golem, nienhuyscheng1997, deraedt2008]
+status: draft
+updated: 2026-10-17
+---
+
+import { LggBuilder } from './LggBuilder'
+
+<Definition>
+A **generalisation** of two terms $s$ and $t$ is a term $g$ with substitutions $\theta_1$ and $\theta_2$ such that
+$g\theta_1 = s$ and $g\theta_2 = t$. The **least general generalisation** $\operatorname{lgg}(s, t)$ is a
+generalisation that every other generalisation is more general than: for each generalisation $g'$ there is a $\sigma$
+with $g'\sigma = \operatorname{lgg}(s, t)$. For clauses, $\operatorname{lgg}(C, D)$ is the most specific clause that
+<NoteLink to="theta-subsumption">θ-subsumes</NoteLink> both $C$ and $D$. Plotkin proved that the lgg of two terms, and
+of two clauses, exists and is unique up to renaming of variables <Cite id="plotkin1972thesis" />.
+</Definition>
+
+## Problem
+
+A bottom-up learner starts from the examples and generalises only as far as they force it. For conjunctions of attribute
+tests that step is easy: keep the tests two examples share and drop the rest, as Find-S does
+(<NoteLink to="concept-learning-and-version-spaces">concept learning and version spaces</NoteLink>). First-order
+examples have structure. The atoms $\text{daughter}(\text{mary}, \text{ann})$ and $\text{daughter}(\text{eve},
+\text{tom})$ share no constant, yet the pattern "the first argument is female and the second is her parent" holds of
+both. A generaliser has to replace constants <NoteLink to="cyclic-factor-and-by-terms">by variables</NoteLink>, and it
+has to decide which constants become the same variable.
+
+Replacing every differing constant by its own fresh variable gives a generalisation that is too general. For
+$f(a, g(a))$ and $f(b, g(b))$ it gives $f(X, g(Y))$, which forgets that both terms repeat their first argument inside
+$g$. The least general generalisation $f(X, g(X))$ keeps that regularity. It is the bottom-up counterpart of
+<NoteLink to="unification-and-resolution">unification</NoteLink>: unification finds the most general common instance
+of two terms, anti-unification the most specific common generalisation.
+
+## Mechanism
+
+### Anti-unification of terms
+
+Keep a table of pairs of subterms, each pair with its variable. Compute $\operatorname{lgg}(s, t)$ recursively:
+
+1. If $s$ and $t$ are identical, return $s$.
+2. If $s = f(s_1, \dots, s_k)$ and $t = f(t_1, \dots, t_k)$ have the same function symbol and arity, return
+   $f(\operatorname{lgg}(s_1, t_1), \dots, \operatorname{lgg}(s_k, t_k))$.
+3. Otherwise, if the pair $(s, t)$ is in the table, return its variable; if not, add it with a new variable and return
+   that.
+
+The table is the whole difference from the too-general answer: the same pair of subterms always becomes the same
+variable <Cite id="plotkin1972thesis" />. The pair $(a, b)$ is a different pair from $(b, a)$, so
+$\operatorname{lgg}(f(a, b), f(b, a)) = f(X, Y)$.
+
+<Derivation title="Why the result is a least general generalisation">
+**It is a generalisation.** Let $g = \operatorname{lgg}(s, t)$ and let $\theta_1$ map each table variable to the first
+term of its pair and $\theta_2$ to the second. By induction on the recursion, $g\theta_1 = s$ and $g\theta_2 = t$: case
+1 returns $s$ itself, case 2 applies the substitutions argument by argument, and case 3 returns a variable that
+$\theta_1$ maps to $s$ and $\theta_2$ to $t$.
+
+**It is the least one.** Let $h$ be any generalisation, $h\sigma_1 = s$ and $h\sigma_2 = t$. Build $\lambda$ with
+$h\lambda = g$ by induction on $h$. If $h$ is a variable $X$, set $X\lambda = \operatorname{lgg}(X\sigma_1, X\sigma_2)$
+computed with the same table. If $h = f(h_1, \dots, h_k)$, then $s$ and $t$ both start with $f$, so case 2 applies and
+the arguments are handled by induction. A variable $X$ that occurs twice in $h$ maps to the same pair
+$(X\sigma_1, X\sigma_2)$ at both places, and the table gives that pair one variable, so $\lambda$ is well defined. Hence
+$h\lambda = g$, and $h$ is at least as general as $g$.
+</Derivation>
+
+### Clauses
+
+The lgg of two clauses pairs their literals. Every literal of $C$ is paired with every literal of $D$ that has the same
+predicate symbol and sign, and each pair is generalised by anti-unification with one table shared across
+<Gloss name="ovo">all pairs</Gloss>. The heads pair with each other. The result is
+
+$$
+\operatorname{lgg}(C, D) = \set{\operatorname{lgg}(l, m) : l \in C,\; m \in D,\; l \text{ and } m \text{ compatible}}.
+$$
+
+The lgg θ-subsumes $C$ through $\theta_1$ and $D$ through $\theta_2$, and every clause that θ-subsumes both also
+θ-subsumes it <Cite id="nienhuyscheng1997" />. It is the least upper bound of $C$ and $D$ in the θ-subsumption
+lattice. The clause usually contains redundant literals, and Plotkin's reduction removes them by deleting each literal
+that the rest of the clause can absorb under some substitution.
+
+### Relative least general generalisation
+
+A learner has background knowledge $B$ as well as examples. Plotkin's lgg **relative to** ground background facts $B$
+generalises each example together with everything known: the relative lgg of $e_1$ and $e_2$ is
+
+$$
+\operatorname{rlgg}(e_1, e_2) = \operatorname{lgg}(e_1 \leftarrow B,\; e_2 \leftarrow B).
+$$
+
+Each literal of $B$ is paired with each compatible literal of $B$, so the raw clause has up to $\abs{B}^2$ body
+literals. Two kinds of literal add nothing relative to $B$ and can be dropped: ground literals, which pair a fact with
+itself and are facts of $B$; and groups of literals whose variables are linked to the head through no chain of shared
+variables, which $B$ satisfies whatever the head's values. Reduction then removes the redundant literals among the
+rest.
+
+**Golem.** Muggleton and Feng's Golem learns <NoteLink to="horn-clauses-and-logic-programs">definite clauses</NoteLink>
+bottom-up with the relative lgg <Cite id="muggleton1990golem" />. It computes the relative lggs of randomly chosen pairs
+of positive examples, keeps the one that covers the most positives and no negatives, and generalises it further with the
+lgg of more positives while it stays consistent. Covered positives are removed, and the search repeats for the remaining
+ones. Golem keeps the clauses finite by allowing only **determinate** literals, whose new variables have exactly one
+value given the earlier ones.
+
+## Worked example
+
+**Terms.** Generalise $f(a, g(a))$ and $f(b, g(b))$, the first preset of the figure.
+
+1. **Root.** Both terms are $f$ with two arguments: compare the arguments.
+2. **First argument.** $a$ and $b$ differ. The pair $(a, b)$ is new, so it becomes $A$.
+3. **Second argument.** $g(a)$ and $g(b)$ are both $g$ with one argument: compare it.
+4. **Inside $g$.** The pair $(a, b)$ is in the table, so it becomes $A$ again.
+5. **Result.** $\operatorname{lgg} = f(A, g(A))$ after four comparisons. $\theta_1 = \set{A \mapsto a}$ and
+   $\theta_2 = \set{A \mapsto b}$ recover the inputs.
+
+For the lists $[1, 2, 3]$ and $[4, 2, 5]$, read as chains of list cells, the shared middle element survives:
+$[A, 2, B]$.
+
+**Clauses.** Generalise $C = \text{daughter}(\text{mary}, \text{ann}) \leftarrow \text{female}(\text{mary}) \land
+\text{female}(\text{ann}) \land \text{parent}(\text{ann}, \text{mary})$ and
+$D = \text{daughter}(\text{eve}, \text{tom}) \leftarrow \text{female}(\text{eve}) \land \text{parent}(\text{tom},
+\text{eve})$.
+
+1. **Heads.** $(\text{mary}, \text{eve})$ becomes $A$ and $(\text{ann}, \text{tom})$ becomes $B$:
+   $\text{daughter}(A, B)$.
+2. **$\text{female}(\text{mary})$ with $\text{female}(\text{eve})$.** The pair $(\text{mary}, \text{eve})$ is $A$:
+   $\text{female}(A)$.
+3. **$\text{female}(\text{ann})$ with $\text{female}(\text{eve})$.** The pair $(\text{ann}, \text{eve})$ is new and
+   becomes $C$: $\text{female}(C)$.
+4. **$\text{parent}(\text{ann}, \text{mary})$ with $\text{parent}(\text{tom}, \text{eve})$.** The pairs are $B$ and
+   $A$: $\text{parent}(B, A)$.
+5. **Reduction.** $\text{daughter}(A, B) \leftarrow \text{female}(A) \land \text{female}(C) \land
+   \text{parent}(B, A)$ has the redundant literal $\text{female}(C)$: the substitution $\set{C \mapsto A}$ folds it onto
+   $\text{female}(A)$. The reduced lgg is $\text{daughter}(A, B) \leftarrow \text{female}(A) \land \text{parent}(B, A)$.
+
+**Relative lgg.** Take the background $B$ of seven facts from the
+<NoteLink to="propositional-and-first-order-logic-for-learning">first-order logic</NoteLink> note: Ann is the parent of
+Mary and Tom, Tom of Eve and Ian, and Ann, Mary and Eve are female. Generalise the examples $\text{daughter}(\text{mary},
+\text{ann})$ and $\text{daughter}(\text{eve}, \text{tom})$ relative to $B$.
+
+1. **Raw clause.** The four parent facts pair in $4 \times 4 = 16$ ways and the three female facts in
+   $3 \times 3 = 9$, so the lgg of $e_1 \leftarrow B$ and $e_2 \leftarrow B$ has 25 body literals.
+2. **Ground literals.** The 7 pairs of a fact with itself give the facts of $B$, true for any head values: dropped.
+3. **Unlinked literals.** 13 literals, such as $\text{parent}(H, I)$ and $\text{female}(I)$, share no variable with
+   $\text{daughter}(A, B)$, even through other literals: dropped.
+4. **Linked literals.** Five remain: $\text{parent}(B, A)$, three literals $\text{parent}(B, \cdot)$ with a fresh child
+   variable, and $\text{female}(A)$.
+5. **Reduction.** Each $\text{parent}(B, \cdot)$ folds onto $\text{parent}(B, A)$. The relative lgg is
+   $\text{daughter}(A, B) \leftarrow \text{parent}(B, A) \land \text{female}(A)$, the correct definition, learnt from
+   two positive examples and no negatives.
+
+<LggBuilder />
+
+## Cost
+
+- **Terms.** Anti-unification visits each pair of aligned subterms once, so it runs in time linear in the size of the
+  smaller term, with a table lookup per differing pair.
+- **Clauses.** The lgg of $C$ and $D$ has up to $\abs{C} \cdot \abs{D}$ literals. The lgg of $n$ clauses, taken pair by
+  pair, has up to the product of their sizes, which grows exponentially in $n$.
+- **Relative lgg.** With $\abs{B}$ background facts the raw clause has up to $\abs{B}^2$ literals for two examples and
+  $\abs{B}^n$ for $n$. Golem's determinacy restriction and depth bound keep it polynomial.
+- **Reduction.** Deciding whether a literal is redundant is a θ-subsumption test, which is NP-complete, and reduction
+  makes one test per literal. Reducing the raw 25-literal relative lgg directly takes over a minute in the engine's
+  greedy reducer; dropping ground and unlinked literals first leaves 5 literals and takes milliseconds.
+
+## Trade-offs
+
+- **Bottom-up against top-down.** The lgg never invents a condition the examples do not share, so it suits small, clean
+  data and finds long clauses that a greedy <NoteLink to="generality-ordering-and-refinement">top-down search</NoteLink>
+  would not assemble (<NoteLink to="foil">FOIL</NoteLink>). It ignores the negatives until a clause is tested, and one
+  atypical positive generalises a clause far beyond what the other examples support.
+- **Specific answers.** The lgg is the most specific consistent generalisation, the opposite end of the version space
+  from the clause a top-down learner returns. Specific clauses generalise less to unseen examples.
+- **Relative lgg against bottom clauses.** <NoteLink to="inverse-entailment-and-progol">Progol's bottom
+  clause</NoteLink> saturates one example within mode declarations and then searches above it, which bounds the clause
+  by the language bias instead of by the product of the background. It is the usual choice in modern bottom-up-bounded
+  systems such as Aleph.
+
+## Pitfalls
+
+- **Forgetting the table.** Generalising each differing pair to a fresh variable loses every co-reference, and the
+  result is too general: $f(X, g(Y))$ instead of $f(X, g(X))$.
+- **Treating variables of the inputs as shared.** The inputs' variables are generalised like constants. A variable $X$
+  in $s$ and a variable $X$ in $t$ are different subterms unless the two terms were meant to share it.
+- **Unreduced clauses.** The raw clause lgg repeats conditions under different variable names, which misleads clause
+  length penalties and slows every later coverage test.
+- **Noise.** A single positive example from a different concept, or a missing background fact, removes the shared
+  literal it lacks from every later generalisation, and bottom-up search has no way to recover it.

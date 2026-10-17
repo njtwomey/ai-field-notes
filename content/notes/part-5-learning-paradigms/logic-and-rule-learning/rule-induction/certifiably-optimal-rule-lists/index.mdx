@@ -1,0 +1,203 @@
+---
+title: 'Certifiably optimal rule lists'
+kind: technique
+summary: 'CORELS finds the rule list that minimises training error plus $\lambda$ per rule, over lists of pre-mined antecedents, by branch and bound. Bounds on any extension of a prefix prune most of the search tree, and the result comes with a certificate of optimality (Angelino et al.).'
+tags: [logic, rule-learning, interpretability, optimisation, worked-example]
+aliases: [CORELS, certifiably optimal rule list, optimal rule list, optimal decision list]
+requires: [bayesian-rule-lists]
+related: [intrinsically-interpretable-models, decision-lists-and-rule-sets, boolean-rule-learning, sequential-covering, pattern-mining]
+references: [angelino2018, angelino2017, letham2015, yang2017sbrl, rudin2019, rudin2022]
+status: draft
+updated: 2026-10-17
+---
+
+import { CorelsSearch } from './CorelsSearch'
+
+<Definition>
+**<Gloss name="corels">Certifiably optimal rule lists</Gloss>** are <NoteLink to="decision-lists-and-rule-sets">decision
+lists</NoteLink> that minimise the regularised training risk
+
+$$
+R(d) = \ell(d) + \lambda K
+$$
+
+over all lists $d$ of $K$ distinct antecedents drawn from a pre-mined collection, where $\ell(d)$ is the fraction of
+training rows the list misclassifies and $\lambda \ge 0$ is the price of one rule in training error. CORELS finds such
+a list by branch and bound over the tree of rule-list prefixes. Lower bounds on the risk of every extension of a
+prefix prune most of the tree, and when the search ends the list it returns carries a certificate that no list of
+those antecedents has lower risk <Cite id="angelino2018" />.
+</Definition>
+
+## Problem
+
+Greedy learners build a list one rule at a time and never revisit a choice, so their lists can be longer or less
+accurate than necessary. <NoteLink to="bayesian-rule-lists">Bayesian rule lists</NoteLink> search more widely by
+sampling, but a chain gives no guarantee that it has seen the best list. For a model that will be audited or used for
+high-stakes decisions, the guarantee matters: a reviewer can then ask whether a shorter or more accurate list exists,
+and receive the answer "not among these antecedents" <Cite id="rudin2019" />.
+
+Exhaustive search is hopeless in general. With $M$ antecedents there are $\sum_{K=0}^{M} M!/(M - K)!$ ordered lists,
+about $e \cdot M!$; for $M = 8$ that is 109,601 lists and for $M = 26$ more than $10^{26}$. CORELS keeps the objective
+of BRL's point estimate in a simpler form, error plus a penalty, and replaces sampling by an exact search that can
+prove most of the space irrelevant. It is the same pre-mined, rule-list model as BRL; only the search and the
+objective change.
+
+## Mechanism
+
+### Prefixes and the search tree
+
+A list $d$ is a **prefix** $d_p = (p_1, \dots, p_K)$ of antecedents followed by a default rule. Each rule predicts the
+majority class of the rows it captures, the rows it covers that no earlier rule covers, and the default predicts the
+majority class of the rows the prefix leaves. The prefixes form a tree: the root is the empty prefix and the children of
+$d_p$ append one unused antecedent. Every node is also a complete list, with its default rule.
+
+### The hierarchical lower bound
+
+Split the error of a list into the error of the prefix, $\ell_p(d_p)$, the fraction of rows that a rule of the prefix
+captures and misclassifies, and the error of the default rule, $\ell_0$. Define
+
+$$
+b(d_p) = \ell_p(d_p) + \lambda K.
+$$
+
+Then $b(d_p) \le R(d)$ for the list $d$ with prefix $d_p$, since $\ell_0 \ge 0$. More importantly, $b(d_p)$ bounds
+every list that starts with $d_p$. An extension keeps every rule of $d_p$ in place, so those rules capture the same rows
+and make the same mistakes; the extension can only add mistakes and rules. Hence
+
+$$
+b(d_p) \le b(d'_p) \le R(d') \quad \text{for every prefix } d'_p \text{ that starts with } d_p,
+$$
+
+which is Theorem 1 of Angelino et al. <Cite id="angelino2018" />. Let $R^c$ be the risk of the best list found so far.
+If $b(d_p) \ge R^c$, no list in the subtree of $d_p$ can beat it, and the whole subtree is pruned unseen.
+
+### Further bounds
+
+The basic bound prunes a prefix once its own mistakes are too many. Several more bounds use the structure of the
+problem <Cite id="angelino2018" />.
+
+- **One-step lookahead.** Every child of $d_p$ has at least one more rule, so its risk is at least $b(d_p) + \lambda$.
+  If $b(d_p) + \lambda \ge R^c$, the prefix is evaluated as a list but its children are never generated.
+- **Prefix length.** An optimal list has $\lambda K \le R^c$, so $K \le \lfloor R^c/\lambda \rfloor$. The empty list has
+  risk at most $\frac12$ for two classes, so $K \le \lfloor 1/(2\lambda) \rfloor$ from the start.
+- **Minimum support.** In an optimal list, every antecedent captures at least a fraction $\lambda$ of the rows: deleting
+  a rule that captures less would save $\lambda$ and cost at most the rows it captured. A child whose new antecedent
+  captures fewer rows is pruned with its subtree. The tighter version requires at least a fraction $\lambda$ of rows
+  **correctly** classified by each rule.
+- **Permutations.** Two prefixes with the same antecedents in different orders capture the same rows in total and
+  leave the same rows to everything after them. Their extensions differ only in the prefix error, so only the
+  permutation with the smallest bound needs to be kept.
+- **Equivalent points.** Rows with identical antecedent values but different labels are classified identically by
+  every list, so every list misclassifies at least the minority label of each such group. Adding these unavoidable
+  errors among the rows not yet captured to $b(d_p)$ gives a tighter bound for the prefix and its subtree.
+
+The proof of the minimum support bound is short and is in the derivation below. Together the bounds also justify
+pre-mining: an antecedent with support below $\lambda$ can never appear in an optimal list, so mining with that
+support threshold loses nothing.
+
+<Derivation title="Why every rule of an optimal list captures at least a fraction λ of the rows">
+Let $d^*$ be optimal with $K$ rules, and let rule $i$ capture a fraction $s_i$ of the rows. Delete rule $i$ to get a
+list $d$ with $K - 1$ rules, keeping every other rule in place and re-choosing the labels of later rules and the
+default. The rows that rule $i$ captured now fall to later rules or the default; in the worst case all of them are
+misclassified, so $\ell(d) \le \ell(d^*) + s_i$. The penalty falls by $\lambda$, so
+$R(d) \le R(d^*) + s_i - \lambda$. Optimality of $d^*$ requires $R(d^*) \le R(d)$, hence $s_i \ge \lambda$. Counting
+only the rows rule $i$ classifies correctly, since its misclassified rows can only become correct, gives the tighter
+condition that the correctly classified fraction is at least $\lambda$.
+</Derivation>
+
+### The algorithm and the certificate
+
+CORELS keeps a queue of prefixes, initially the root, and the best list $d^c$ with risk $R^c$
+<Cite id="angelino2018" />.
+
+1. Pop a prefix $d_p$. If $b(d_p) \ge R^c$ (with the equivalent-points term added), discard it.
+2. Evaluate the list with prefix $d_p$ and its default rule. If its risk is below $R^c$, it becomes the best list.
+3. If $b(d_p) + \lambda < R^c$, generate the children of $d_p$, discard those that fail the support, permutation or
+   bound tests, and push the rest.
+4. Repeat until the queue is empty.
+
+Every list not evaluated lies in a pruned subtree, and every pruning step is justified by a bound that holds for every
+list in the subtree. When the queue empties, $d^c$ is optimal: that argument is the certificate. The queue can be
+breadth first, best first by lower bound, or ordered by other priorities; the order changes the running time, not the
+answer. The implementation uses bit vectors for captured rows, a prefix tree that shares work between parents and
+children, and a symmetry map for the permutation bound.
+
+## Worked example
+
+Use the Titanic data (2201 people, 711 survivors) with the eight single-condition antecedents (class = 1st, 2nd, 3rd,
+crew; sex = male, female; age = child, adult) and $\lambda = 0.005$, the price of 11 misclassified people per rule. The
+figure below replays this search.
+
+**Step 1, the root.** The empty list predicts "died" for everyone: $R = 711/2201 = 0.323$, the first best risk. Its
+bound is 0, so its eight children are generated.
+
+**Step 2, "class = 1st → survived".** The rule captures 325 people, 122 of whom died:
+$b = 122/2201 + 0.005 = 0.060$. As a list, the default "died" for the other 1876 misclassifies 508 survivors, so
+$R = (122 + 508)/2201 + 0.005 = 0.291$, the new best.
+
+**Step 6, "sex = male → died".** It captures 1731 men and boys, 367 of whom survived: $b = 0.167 + 0.005 = 0.172$. The
+default "survived" for the 470 women and girls misclassifies 126, so $R = (367 + 126)/2201 + 0.005 = 0.229$, the new
+best.
+
+**A bound prune.** At step 14 the queue reaches "class = 1st → survived, then age = adult → died". Its two rules already
+misclassify $0.263$ of the rows, so $b = 0.263 + 0.010 = 0.273 \ge 0.229$: neither this list nor any of its extensions
+is evaluated.
+
+**An equivalent-points prune.** At step 7 the child "sex = female → survived, then class = 2nd → died" has bound
+$b = (126 + 25)/2201 + 0.010 = 0.079$, far below 0.229. The rows it leaves are the men and boys outside 2nd class.
+Within each group of identical passengers (1st-class men, 3rd-class boys, 3rd-class men, crew men) both outcomes occur,
+and every list misclassifies the minority of each group: $57 + 13 + 75 + 192 = 337$ people, $0.153$ of the rows. The
+bound rises to $0.079 + 0.153 = 0.232 \ge 0.229$, and the subtree is pruned.
+
+**A permutation prune.** At step 3 the child "class = 2nd, then class = 1st" captures the same rows as "class = 1st,
+then class = 2nd", which is already queued with a bound no larger. It is discarded.
+
+**The optimum.** At step 30 the search evaluates
+
+1. if class = 3rd then died (706 captured, 178 errors),
+2. else if sex = female then survived (274 captured, 20 errors),
+3. else if age = child then survived (16 captured, 0 errors),
+4. else died (1205 captured, 263 errors),
+
+with $\ell = 461/2201 = 0.209$ and $R = 0.209 + 3 \times 0.005 = 0.224$. Two more steps empty the queue. The search
+generated 63 of the 109,601 lists and evaluated 14 of them, and the certificate says no list of these antecedents has
+risk below 0.2245. Its training error, 461 people, is the smallest any classifier of class, sex and age can reach.
+
+**The bounds matter.** With the hierarchical bound alone the same search takes 682 steps. With the 26 antecedents of up
+to two conditions and $\lambda = 0.01$, all bounds together certify the optimum, "3rd class died, else adult men died,
+else survived", in 171 steps, while the hierarchical bound alone had not finished after 20,000 evaluations.
+
+<CorelsSearch />
+
+## Cost
+
+The worst case is exponential in the number of antecedents. In practice the bounds decide the running time. Each
+evaluated prefix costs one pass over the captured bit vectors, $O(n/64)$ word operations per rule for $n$ rows, and the
+queue and the permutation map take memory proportional to the prefixes kept. On data sets with thousands of rows and
+hundreds of antecedents, Angelino et al. report that CORELS usually finds the optimal list in seconds and certifies it
+within about ten minutes; the optimum is always found long before the proof is complete <Cite id="angelino2018" />. The
+cost grows fast as $\lambda$ falls, because the prefix-length and support bounds weaken in proportion.
+
+## Trade-offs
+
+- **Optimality against expressiveness.** The guarantee holds only over the pre-mined antecedents. Rules outside the
+  collection, such as long conjunctions or thresholds that were not mined, are not considered.
+- **Against greedy learners.** CORELS's lists are often shorter at equal training accuracy, as in the example, where
+  three rules match the best accuracy attainable. Greedy covering scales to far larger antecedent sets.
+- **Against Bayesian rule lists.** BRL gives probabilities and uncertainty; CORELS gives a classifier and a proof.
+  BRL's prior on length plays the role of $\lambda$ <Cite id="letham2015" />.
+- **Accuracy.** On recidivism data from Broward County, Florida, CORELS found rule lists of three rules on age, sex
+  and prior offences that were about as accurate as the proprietary COMPAS risk tool <Cite id="angelino2018" />.
+- **Related methods.** Scalable Bayesian rule lists borrow CORELS-style bounds for sampling <Cite id="yang2017sbrl" />,
+  and the same branch-and-bound recipe yields optimal sparse <NoteLink to="decision-tree">decision trees</NoteLink> and
+  scoring systems <Cite id="rudin2022" />.
+
+## Pitfalls
+
+- **Choosing $\lambda$.** It sets the exchange rate between rules and errors, and the search time. Choose it by
+  <NoteLink to="cross-validation">cross-validation</NoteLink> or by the size a reader can audit, and report it.
+- **Optimal on the training data.** The certificate is about training risk. A list optimal on one sample can differ
+  from the list optimal on another; check stability across folds.
+- **Imbalanced classes.** With 0–1 loss, the optimum for a rare class can be the empty list predicting the majority.
+  Weight the errors or change the objective before optimising.
+- **Ties.** Many lists can share the optimal risk. The certificate covers the risk, not the uniqueness of the list.

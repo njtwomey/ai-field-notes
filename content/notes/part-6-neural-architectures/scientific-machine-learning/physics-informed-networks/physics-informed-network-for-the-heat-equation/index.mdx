@@ -1,0 +1,123 @@
+---
+title: 'Physics-informed network for the heat equation'
+kind: example
+summary: 'A physics-informed network solves the 1-D heat equation $u_t=\kappa u_{xx}$ on $[-1,1]$ with zero boundary values and a sine initial condition, and is compared with the Fourier-series solution as the number of collocation points grows.'
+tags: [scientific-machine-learning, differential-equations, worked-example]
+aliases: ['heat equation PINN', 'diffusion equation PINN']
+requires: [physics-informed-neural-networks, heat-equation]
+related: [hard-constraints-for-physics-informed-networks, physics-informed-network-for-a-damped-oscillator, physics-informed-network-for-burgers-equation, inverse-problems-with-physics-informed-networks, fourier-series, partial-differential-equations]
+references: [raissi2019, evans2010]
+status: draft
+updated: 2026-10-17
+---
+
+import { CollocationSweep, HeatPinn } from './HeatPinn'
+
+<Definition>
+Solve the heat equation
+
+$$
+u_t = \kappa\, u_{xx}, \qquad x \in [-1, 1], \quad t \in [0, 1],
+$$
+
+with diffusivity $\kappa = 0.1$, initial profile $u(x, 0) = \sin \pi x$ and end values $u(-1, t) = u(1, t) = 0$, by a
+<NoteLink to="physics-informed-neural-networks">physics-informed network</NoteLink> trained without observations inside
+the domain. Compare it with the exact solution from the Fourier series, and measure how its error changes with the
+number of collocation points $N_r$.
+</Definition>
+
+## Setup
+
+- $u(x, t)$ is a temperature and $\kappa > 0$ the diffusivity, the coefficient called $D$ in the
+  <NoteLink to="heat-equation">heat equation</NoteLink> note.
+- The network $u_{\thetavec}(x, t)$ is a <Gloss name="mlp">multilayer perceptron</Gloss> with inputs scaled to
+  $[-1, 1]^2$, two hidden layers of 12 hyperbolic tangent units and one output:
+  $2 \cdot 12 + 12 + 12 \cdot 12 + 12 + 12 + 1 = 205$ parameters.
+- The loss is the mean squared residual $r = u_t - \kappa u_{xx}$ at $N_r$ collocation points, a scrambled Sobol set,
+  plus the mean squared misfits at 50 evenly spaced points on the initial line and 25 on each end, with weight 1.
+- Training is 300 steps of <NoteLink to="adam">Adam</NoteLink> at <Gloss name="learning-rate">learning rate</Gloss>
+  0.005, then 100 steps of full-batch <Gloss name="l-bfgs" />, under a second per run.
+- The error is the relative $L_2$ error $\norm{u_{\thetavec} - u}_2 / \norm{u}_2$ on a grid of $41 \times 21$ points.
+
+## Solution
+
+Separate variables, $u = X(x)\,T(t)$. The equation becomes $T'/(\kappa T) = X''/X$, and both sides equal a constant
+$-\mu$. The space part $X'' = -\mu X$ with $X(\pm 1) = 0$ has the solutions
+
+$$
+X_n(x) = \sin\paren{\frac{n\pi (x + 1)}{2}}, \qquad \mu_n = \paren{\frac{n\pi}{2}}^2, \qquad n = 1, 2, \dots,
+$$
+
+and the time part is $T_n(t) = e^{-\kappa \mu_n t}$. The solution is the
+<NoteLink to="fourier-series">Fourier sine series</NoteLink> $u = \sum_n b_n e^{-\kappa \mu_n t} X_n(x)$ with $b_n$ the
+coefficients of the initial profile <Cite id="evans2010" />. The initial profile is a single term:
+$X_2(x) = \sin(\pi x + \pi) = -\sin \pi x$, so $b_2 = -1$ and every other $b_n = 0$. With $\mu_2 = \pi^2$,
+
+$$
+u(x, t) = e^{-\kappa \pi^2 t} \sin \pi x .
+$$
+
+At $\kappa = 0.1$ the amplitude falls to $e^{-0.987} \approx 0.37$ by $t = 1$. Substituting back checks it:
+$u_t = -\kappa\pi^2 u$ and $u_{xx} = -\pi^2 u$, so $u_t - \kappa u_{xx} = 0$.
+
+Mode $n$ decays at the rate $\kappa (n\pi/2)^2$, so higher modes die faster. An error in the network's fit of the
+initial profile at high frequency is damped by the equation itself as $t$ grows. The problem is smooth, low in
+frequency and stable forward in time: the gentle case for a physics-informed network, whose
+<NoteLink to="failure-modes-of-physics-informed-networks">failure modes</NoteLink> are all about high frequencies and
+steep features.
+
+## Simulation
+
+The first figure trains one network in the compute worker and streams snapshots every 25 steps.
+
+<HeatPinn />
+
+With the defaults ($N_r = 64$), the run ends with a relative error of 1.5% and a largest pointwise error of
+$4.4 \times 10^{-2}$. The error map is smooth, with no structure at the scale of the collocation points.
+
+The second figure repeats the run for $N_r$ from 4 to 64 and compares the mean squared residual at the collocation
+points, which is what the loss sees, with the mean squared residual on the $41 \times 21$ grid.
+
+<CollocationSweep />
+
+| $N_r$ | Relative error | Mean squared residual at the points | Mean squared residual on the grid |
+| --- | --- | --- | --- |
+| 4 | 50% | $4 \times 10^{-7}$ | 1.4 |
+| 8 | 15% | $7 \times 10^{-7}$ | 0.092 |
+| 16 | 5.3% | $1.3 \times 10^{-4}$ | 0.017 |
+| 32 | 0.89% | $1.5 \times 10^{-4}$ | $7.2 \times 10^{-4}$ |
+| 64 | 1.5% | $2.7 \times 10^{-4}$ | $4.9 \times 10^{-4}$ |
+
+With 4 points the network drives the residual at those points to $4 \times 10^{-7}$ while the residual on the grid is
+1.4, three million times larger, and the error is 50%: the network has 205 parameters and only 4 residual
+constraints. At 64 points the two residuals are within a factor of two, and from 32 points on the error stops falling
+with $N_r$ and stays near 1%, the level set by the network's size and the short training. A longer budget (16 units,
+500 Adam and 300 L-BFGS steps, an $81 \times 41$ grid) shows the same pattern one level lower: 17% error at 4 points,
+3.2% at 16, 0.27% at 64 and 0.22% at 256. For this smooth solution, a few dozen points spread over the domain suffice.
+
+## What it illustrates
+
+- **The residual constrains the function only where it is evaluated.** With few collocation points the network meets
+  the equation at those points and departs from it between them. The gap between the residual at the points and on the
+  grid measures it, and it closes as the points become dense relative to the solution's length scale.
+- **The conditions carry the rest.** The initial and boundary points fix the member of the solution family, as in the
+  <NoteLink to="physics-informed-network-for-a-damped-oscillator">damped oscillator</NoteLink>. Building them into the
+  network, $u = \sin \pi x + t(1 - x^2)\, N_{\thetavec}(x, t)$, removes their terms
+  (<NoteLink to="hard-constraints-for-physics-informed-networks">hard constraints</NoteLink>).
+- **A smooth problem is easy.** A network of 337 parameters trained for 800 steps on 128 points reaches 0.25% here,
+  while one of 921 parameters trained for 1500 steps leaves a 24% error on
+  <NoteLink to="physics-informed-network-for-burgers-equation">Burgers' equation</NoteLink>, whose front is 0.0065 wide.
+
+## Variations
+
+- **Larger $\kappa$.** The solution decays faster, $e^{-\kappa\pi^2}$ at $t = 1$, and the relative error is dominated by
+  late times where the solution is small.
+- **A rougher initial profile.** A profile with several modes, such as a step, puts energy into high $n$. The network
+  must fit those modes at $t = 0$, where <NoteLink to="implicit-neural-representation">spectral bias</NoteLink> slows
+  it, before diffusion removes them.
+- **Unknown diffusivity.** With observations of $u$ and $\kappa$ trainable, the same setup becomes an
+  <NoteLink to="inverse-problems-with-physics-informed-networks">inverse problem</NoteLink>, whose figure uses this
+  equation.
+- **Backward in time.** Recovering $u(x, 0)$ from $u(x, 1)$ is ill-posed: mode $n$ must be amplified by
+  $e^{\kappa (n\pi/2)^2}$, so noise at high $n$ explodes. The loss is unchanged in form, and a physics-informed network
+  trained on final-time data returns a smooth initial profile only because of its own spectral bias.

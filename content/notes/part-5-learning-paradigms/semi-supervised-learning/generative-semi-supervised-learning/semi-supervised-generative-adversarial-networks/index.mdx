@@ -1,0 +1,165 @@
+---
+title: 'Semi-supervised generative adversarial networks'
+kind: technique
+summary: 'A semi-supervised GAN gives the discriminator $K+1$ outputs: the $K$ classes and ''generated''. Unlabelled real points train it to put mass on the real classes, and feature matching keeps the generator producing points near the decision boundary (Salimans et al.).'
+tags: [semi-supervised, generative-models, adversarial-training, worked-example]
+aliases: ['K+1 discriminator', 'semi-supervised GAN', 'SGAN', 'feature matching GAN', 'complement generator', 'bad GAN']
+requires: [generative-adversarial-network, generative-semi-supervised-learning]
+related:
+  [
+    low-density-separation,
+    entropy-minimisation,
+    semi-supervised-variational-autoencoders,
+    conditional-generative-adversarial-network,
+    inception-score,
+  ]
+references: [salimans2016, odena2016semi, springenberg2016catgan, dai2017bad, goodfellow2014, sohn2020]
+status: draft
+updated: 2026-10-17
+---
+
+import { SganExplorer } from './SganExplorer'
+
+<Definition>
+A **semi-supervised generative adversarial network** trains a classifier with $K + 1$ outputs as the discriminator of a
+<NoteLink to="generative-adversarial-network">GAN</NoteLink> <Cite id="goodfellow2014" />: one output per real class and
+one for "generated" <Cite id="salimans2016" /> <Cite id="odena2016semi" />. Labelled points train it as an ordinary
+$K$-class classifier. Unlabelled points train it to give low probability to "generated", and the generator's samples to
+give high probability to it. With the logit of "generated" fixed at 0 and $Z(\xvec) = \sum_{k=1}^{K} e^{l_k(\xvec)}$ for
+the class logits $l_k$, the probability that $\xvec$ is real is $D(\xvec) = Z(\xvec) / (Z(\xvec) + 1)$. Salimans and
+coauthors trained the generator by **feature matching**: it matches the mean of an intermediate layer of the
+discriminator on real and generated points.
+</Definition>
+
+## Problem
+
+The <NoteLink to="semi-supervised-variational-autoencoders">semi-supervised VAE</NoteLink> learns from unlabelled data
+by modelling them: it needs a decoder that explains every input, and it pays for every pixel the classifier does not
+need. A GAN's discriminator already learns features of the data without labels, because telling real from generated
+points requires them. The semi-supervised GAN makes that discriminator the classifier itself, so the features learned
+from unlabelled data serve the classification directly. The method keeps the generative idea of using $p(\xvec)$ and
+drops the explicit density: the unlabelled points enter only through the real-versus-generated game.
+
+## Mechanism
+
+### The discriminator's loss
+
+Let the discriminator output logits $l_1(\xvec), \dots, l_{K+1}(\xvec)$ and class probabilities
+$p(y = k \mid \xvec) = e^{l_k} / \sum_j e^{l_j}$. Adding the same function to every logit leaves the probabilities
+unchanged, so $l_{K+1} = 0$ can be fixed without loss. Then $p(y = K+1 \mid \xvec) = 1/(Z + 1)$, and
+$1 - p(y = K + 1 \mid \xvec) = Z/(Z + 1) = D(\xvec)$ is the discriminator of the ordinary GAN.
+
+Assume half the training batch is real and half generated. The cross-entropy of the $(K+1)$-class classifier splits into
+two parts <Cite id="salimans2016" />:
+
+$$
+L_{\text{sup}} = -\expect_{(\xvec, y) \sim L}\brack{\log p(y \mid \xvec, y \le K)}, \qquad
+L_{\text{unsup}} = -\expect_{\xvec \sim U}\brack{\log D(\xvec)} - \expect_{\zvec}\brack{\log\paren{1 - D(G(\zvec))}}.
+$$
+
+$L_{\text{sup}}$ is the ordinary $K$-class cross-entropy of the labelled points, since $p(y \mid \xvec, y \le K)$ is the
+softmax of $l_1, \dots, l_K$ alone. $L_{\text{unsup}}$ is the GAN game value with $D = Z/(Z + 1)$. The discriminator
+minimises $L_{\text{sup}} + L_{\text{unsup}}$. The unlabelled points never say which class they belong to; they say only
+that they belong to some real class, which raises $Z$ at their positions.
+
+The two losses agree on what the best discriminator is. Both are minimised by
+$e^{l_k(\xvec)} = c(\xvec)\, p(y = k, \xvec)$ for $k \le K$ and $e^{l_{K+1}(\xvec)} = c(\xvec)\, p_G(\xvec)$, for any
+positive function $c$ <Cite id="salimans2016" />. So adding $L_{\text{unsup}}$ does not move the optimum of the
+supervised problem; it adds information about where the data lie.
+
+### The generator
+
+The generator is trained either on the usual GAN loss or by feature matching. With $\fvec(\xvec)$ the activations of an
+intermediate layer of the discriminator, feature matching minimises
+
+$$
+\norm{\expect_{\xvec \sim U} \fvec(\xvec) - \expect_{\zvec} \fvec(G(\zvec))}_2^2 .
+$$
+
+Salimans and coauthors found that feature matching gave much better classifiers than a generator trained to produce
+realistic samples, even though the latter's samples looked better <Cite id="salimans2016" />.
+
+### Why a bad generator helps
+
+Dai and coauthors explained this result. If the generator were perfect, $p_G = p$, the generated points would carry no
+information that the unlabelled points do not: for every optimum of the supervised objective there is an optimum of the
+$(K+1)$-class objective with the same class predictions, so the unsupervised term cannot rule out a poor classifier
+<Cite id="dai2017bad" />. What helps is a generator whose samples fall where the data are sparse, which they call a
+**complement generator**. The discriminator must call those regions "generated", so the class logits are pushed down
+there, and the boundary between real classes is forced into them. This is
+<NoteLink to="low-density-separation">low-density separation</NoteLink> by another route: the generated points mark the
+low-density regions, and the discriminator learns not to put a real class there. Feature matching works because its
+samples fill the gaps between the classes rather than reproduce the classes.
+
+Two methods of the same year use the same game. Odena proposed the $(K+1)$-class discriminator independently and named
+it the semi-supervised GAN, SGAN <Cite id="odena2016semi" />. Springenberg's CatGAN has a $K$-way discriminator that
+should be certain on real points and uncertain on generated ones, an entropy criterion close to
+<NoteLink to="entropy-minimisation">entropy minimisation</NoteLink> <Cite id="springenberg2016catgan" />.
+
+## Worked example
+
+Take $K = 2$ classes and one unlabelled real point with class logits $l = (2, -1)$.
+
+**Probabilities.** $Z = e^2 + e^{-1} = 7.389 + 0.368 = 7.757$. The three probabilities are $e^2/(Z + 1) = 0.844$,
+$e^{-1}/(Z + 1) = 0.042$ and $1/(Z + 1) = 0.114$ for "generated". The point is real with probability
+$D = 7.757/8.757 = 0.886$.
+
+**Loss and gradient for the real point.** Its unsupervised loss is $-\log D = 0.121$. The derivative of $-\log D$ in
+$l_k$ is $-(1 - D)\, e^{l_k}/Z$. With $e^{l_k}/Z = (0.953, 0.047)$, the derivatives are $-0.109$ and $-0.005$.
+<NoteLink to="gradient-descent">Gradient descent</NoteLink> raises both logits, mostly the larger: the unlabelled point
+pushes the classifier to be more confident in the class it already favours.
+
+**Loss and gradient for a generated point.** Take a generated point with logits $(0.5, 0.3)$. Then
+$Z = 1.649 + 1.350 = 2.999$, $D = 0.750$, and the loss $-\log(1 - D) = \log(Z + 1) = 1.386$. The derivative of
+$\log(Z + 1)$ in $l_k$ is $D\, e^{l_k}/Z = 0.750 \times (0.550, 0.450) = (0.412, 0.338)$. Gradient descent lowers both
+class logits, so the region around the generated point drifts towards "generated".
+
+Together the two updates raise $Z$ where the data are and lower it where the generator puts its samples. When those
+samples lie between the classes, the boundary between class 1 and class 2 runs through a region claimed by "generated".
+
+<SganExplorer />
+
+At the defaults (500 steps, seed 1) the labels-only classifier labels 85% of the unlabelled points correctly, the
+feature-matching GAN 95% and the complement generator 93%. Over seeds 1 to 6 at 600 steps the averages are 84% with
+labels only, 89% with feature matching, 85% with the non-saturating generator and 91% with the complement generator. The
+generator that tries hardest to imitate the data helps least.
+
+## Cost
+
+Each update trains two networks. The discriminator sees the labelled batch, an unlabelled batch and a generated batch;
+the generator needs a forward pass through itself and the discriminator. In the figure one step costs about 3.5 ms
+against 0.6 ms for the classifier alone. GAN training also needs more tuning than a classifier: Salimans and coauthors
+used weight normalisation and Gaussian noise on the output of each layer of the discriminator on <Gloss name="mnist" />
+<Cite id="salimans2016" />.
+
+## Trade-offs
+
+- **Results.** On permutation-invariant MNIST with 100 labels, the feature-matching GAN made 93 errors in 10,000 test
+  images; on <Gloss name="cifar-10" /> with 4,000 labels its error was 18.6% <Cite id="salimans2016" />. Dai and
+  coauthors trained the generator towards a complement distribution and added a conditional entropy term to the
+  discriminator, and reached 14.4% on CIFAR-10 <Cite id="dai2017bad" />.
+- **Against the generative semi-supervised family.** Unlike
+  <NoteLink to="generative-semi-supervised-learning">semi-supervised EM</NoteLink> and M2, the semi-supervised GAN has
+  no likelihood and makes no explicit assumption about the shape of the classes. Its assumption is low-density
+  separation, enforced through generated points in the gaps.
+- **Good samples and good classifiers conflict.** A generator that matches $p(\xvec)$ makes the unsupervised term
+  uninformative. The same model cannot be the best sampler and the best semi-supervised classifier
+  <Cite id="dai2017bad" />.
+- **Against later methods.** <NoteLink to="consistency-regularisation">Consistency regularisation</NoteLink> methods
+  such as <NoteLink to="fixmatch">FixMatch</NoteLink> reach lower error on the same image benchmarks with one network
+  and no adversarial game <Cite id="sohn2020" />, so semi-supervised GANs are now used mainly when a generator is wanted
+  as well.
+
+## Pitfalls
+
+- **An adversarial game to tune.** <Gloss name="learning-rate">Learning rates</Gloss>, the balance of updates and the
+  architecture of both networks matter, and the classifier's accuracy can oscillate while the game settles. The Player
+  in the figure shows the accuracy moving from checkpoint to checkpoint.
+- **Collapsed generators.** A generator whose samples collapse onto a few places marks only those places as generated,
+  and the rest of the low-density space stays unclaimed. Dai and coauthors added a term that raises the entropy of the
+  generator for this reason <Cite id="dai2017bad" />.
+- **The complement is hard to construct in high dimensions.** In two dimensions, sampling a box and discarding points
+  near the data gives a complement generator directly. In image space no such box exists, which is why the generator is
+  learned and the complement is defined in the discriminator's feature space.
+- **Sample quality is not evidence of classifier quality.** The <NoteLink to="inception-score">Inception
+  score</NoteLink> or a visual check of the samples says nothing about the classifier; only held-out labelled data do.

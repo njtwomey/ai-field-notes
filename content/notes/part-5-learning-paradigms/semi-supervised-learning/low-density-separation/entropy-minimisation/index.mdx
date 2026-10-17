@@ -1,0 +1,242 @@
+---
+title: 'Entropy minimisation'
+kind: technique
+summary: 'Entropy minimisation adds $\lambda$ times the mean entropy of a classifier''s predictions on unlabelled points to its supervised loss. Predictions are confident only far from the boundary, so the penalty moves the boundary into regions with few unlabelled points.'
+tags: [semi-supervised, information-theory, worked-example]
+aliases:
+  [
+    'entropy regularisation for semi-supervised learning',
+    'conditional entropy minimisation',
+    'minimum entropy regularisation',
+    'EntMin',
+  ]
+requires: [entropy, logistic-regression, low-density-separation]
+related:
+  [
+    pseudo-labelling,
+    self-training,
+    transductive-support-vector-machine,
+    virtual-adversarial-training,
+    mixmatch,
+    fixmatch,
+    semantic-loss,
+    test-time-adaptation,
+    classifier-calibration,
+  ]
+references: [grandvalet2005, lee2013pseudo, miyato2019vat, berthelot2019mixmatch, wang2021tent]
+status: draft
+updated: 2026-10-17
+---
+
+import { EntropyBoundary } from './EntropyBoundary'
+
+<Definition>
+**Entropy minimisation** trains a probabilistic classifier $p_{\thetavec}(k \mid \xvec)$, with parameters $\thetavec$
+and classes $k = 1, \dots, K$, on $\ell$ labelled pairs $(\xvec_i, y_i)$ and $u$ unlabelled inputs $\xvec_j$ by
+minimising
+
+$$
+J(\thetavec) = -\frac{1}{\ell}\sum_{i=1}^{\ell}\log p_{\thetavec}(y_i \mid \xvec_i)
++ \frac{\lambda}{u}\sum_{j=1}^{u}\entropy\paren{p_{\thetavec}(\cdot \mid \xvec_j)},
+\qquad \entropy(\pvec) = -\sum_{k=1}^{K} p_k \log p_k .
+$$
+
+The first term is the supervised cross-entropy. The second is the mean Shannon entropy of the predicted class
+distributions on the unlabelled inputs, in nats, weighted by $\lambda \ge 0$ <Cite id="grandvalet2005" />.
+</Definition>
+
+## Problem
+
+With a few labels, many decision boundaries fit the labelled points equally well. The supervised loss cannot choose
+between them, because it never sees the unlabelled inputs. The
+<NoteLink to="low-density-separation">low-density separation</NoteLink> assumption says which boundary to prefer: one
+that passes where the unlabelled inputs are sparse. A method that uses the assumption needs a differentiable measure of
+how many unlabelled points lie near the boundary.
+
+The entropy of a prediction is such a measure. A point far from the boundary receives a confident prediction, close to
+one-hot, with entropy near 0. A point on the boundary receives a prediction near uniform, with entropy near its maximum
+$\log K$. The mean entropy over the unlabelled points therefore counts the points near the boundary, each weighted by
+how close it is. Adding the mean entropy to the loss penalises boundaries through dense regions.
+
+Entropy minimisation keeps the discriminative model of <NoteLink to="supervised-learning">supervised learning</NoteLink>
+and changes only the loss. The method differs from <NoteLink to="generative-semi-supervised-learning">generative
+semi-supervised learning</NoteLink>, which models $p(\xvec)$ and lets the unlabelled points enter through their
+likelihood. Entropy minimisation is the soft form of <NoteLink to="self-training">self-training</NoteLink>, which
+assigns hard labels to confident points, and the probabilistic counterpart of the
+<NoteLink to="transductive-support-vector-machine">transductive support vector machine</NoteLink>, which pushes
+unlabelled points out of a margin.
+
+## Mechanism
+
+### The push on one unlabelled point
+
+Take two classes and a model with logit $z = f_{\thetavec}(\xvec)$, so that $p = \sigma(z) = 1/(1 + e^{-z})$ is the
+probability of class 1. The entropy of one prediction, as a function of the logit, is
+
+$$
+h(z) = -p\log p - (1 - p)\log(1 - p), \qquad p = \sigma(z).
+$$
+
+Its derivative follows from the chain rule. The derivative of $h$ with respect to $p$ is $\log\frac{1 - p}{p}$, which
+equals $-z$ because $z = \log\frac{p}{1 - p}$ is the log-odds. The derivative of $p$ with respect to $z$ is
+$\sigma(z)(1 - \sigma(z))$. Multiplying the two gives
+
+$$
+\frac{dh}{dz} = -z\,\sigma(z)\bigl(1 - \sigma(z)\bigr).
+$$
+
+A gradient step on $h$ moves $z$ by a positive multiple of $z\,\sigma(z)(1 - \sigma(z))$, which has the sign of $z$.
+The step therefore increases $\abs{z}$: it moves the logit away from 0, towards the class the model already prefers.
+Moving the logit of a point away from 0 moves the boundary away from that point. The push is 0 on the boundary
+($z = 0$), largest at $\abs{z} \approx 1.54$, and decays like $\abs{z}e^{-\abs{z}}$ far from it. Every unlabelled point
+near the boundary pushes the boundary away from itself, and the pushes balance only where few points lie near the
+boundary: in a low-density region.
+
+For $K$ classes with logits $z_1, \dots, z_K$ and $p_k = e^{z_k}/\sum_m e^{z_m}$, the same calculation gives
+$\partial\entropy/\partial z_k = -p_k(\log p_k + \entropy)$. The gradient raises the logits of classes whose
+log-probability exceeds $-\entropy$, the most probable ones, and lowers the rest.
+
+### Why the model needs a penalty on its scale
+
+The entropy term alone has a degenerate minimiser. For a linear logit $z = \wvec^\top\xvec + b$, multiplying $\wvec$ and
+$b$ by a constant $c > 1$ keeps the boundary and multiplies every logit by $c$. As $c$ grows, every point not exactly on
+the boundary gets entropy approaching 0, wherever the boundary lies. <Gloss name="weight-decay">Weight decay</Gloss>
+$\frac{\gamma}{2}\norm{\wvec}^2$ keeps the logits finite, so a point near the boundary keeps a high entropy and still
+costs. Grandvalet and Bengio add this penalty and note that it is what places the boundary in a low-density region
+<Cite id="grandvalet2005" />. In a network the same role is played by weight decay, <NoteLink to="early-stopping">early
+stopping</NoteLink> and the limited speed of training.
+
+### Where the objective comes from
+
+Grandvalet and Bengio derive $J$ as a <Gloss name="map-estimate">maximum a posteriori</Gloss> estimate. The prior on the
+parameters is the maximum-entropy distribution subject to a fixed expected conditional entropy $\entropy(Y \mid X)$,
+which is $p(\thetavec) \propto \exp(-\lambda\,\entropy(Y \mid X))$, with $\lambda$ the Lagrange multiplier of the
+constraint. Replacing the expectation over $\xvec$ by the average over the observed inputs gives the entropy term, which
+for a labelled point is 0 because its label is known <Cite id="grandvalet2005" />. The supervised term is the
+log-likelihood of the labels. The prior encodes the assumption that the classes overlap little, which theory links to
+the <NoteLink to="when-unlabelled-data-helps">value of unlabelled data</NoteLink>: the information an unlabelled point
+carries about the classes shrinks as they overlap.
+
+### Relation to self-training and pseudo-labelling
+
+<NoteLink to="pseudo-labelling">Pseudo-labelling</NoteLink> trains on the hard label $\hat y_j = \argmax_k p_k$ with
+loss $-\log\max_k p_k$, which is at most $\entropy(\pvec)$ and equal to 0 exactly where the entropy is. Hard
+pseudo-labelling therefore minimises a lower bound on the entropy <Cite id="lee2013pseudo" />. Grandvalet and Bengio
+show that the criterion of classification EM, a form of self-training, is $J$ with $\lambda = 1$ in their summed form
+<Cite id="grandvalet2005" />. Entropy minimisation keeps every unlabelled point in the loss, weighted by its
+uncertainty, where pseudo-labelling with a threshold keeps only the confident ones at full weight.
+
+Grandvalet and Bengio also note that, in a second limit, minimum entropy approaches the solution of transductive
+large-margin classifiers <Cite id="grandvalet2005" />. The <NoteLink to="low-density-separation">low-density
+separation</NoteLink> note compares the four losses on one unlabelled point.
+
+### Optimisation
+
+The entropy is concave in $\pvec$, so $J$ is not convex in the parameters for $\lambda > 0$, even for
+<NoteLink to="logistic-regression">logistic regression</NoteLink>. The local minima of $J$ correspond to boundaries in
+different gaps of the data. A practical schedule fits $\lambda = 0$ first, which is convex for logistic regression, and
+then raises $\lambda$ in small steps, starting each fit from the previous solution. Grandvalet and Bengio compare this
+slow increase of $\lambda$ with deterministic annealing <Cite id="grandvalet2005" />. Deep networks use the same idea as
+a ramp-up: the weight on the unlabelled term grows from 0 over the first part of training.
+
+## Worked example
+
+The line data of the chapter: ten inputs, a dense run $0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4$ and a short run
+$3.4, 3.8, 4.2$, separated by the only gap wider than $0.4$. The inputs $x = 0$ (class 0) and $x = 4.2$ (class 1) are
+labelled; the other eight are unlabelled, and their true classes are the runs. The model is
+$p(\text{class } 1 \mid x) = \sigma(w(x - t))$, with steepness $w > 0$ and threshold $t$.
+
+**Step 1: compare two thresholds at a fixed steepness.** Take $w = 5$. The table gives the entropy, in nats, of the
+prediction at each unlabelled input for the supervised midpoint $t = 2.1$ and for the middle of the gap, $t = 2.9$.
+
+| $x$       | 0.4   | 0.8   | 1.2   | 1.6   | 2.0   | 2.4   | 3.4   | 3.8   | mean  |
+| --------- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- |
+| $t = 2.1$ | 0.002 | 0.011 | 0.060 | 0.269 | 0.663 | 0.475 | 0.011 | 0.002 | 0.187 |
+| $t = 2.9$ | 0.000 | 0.000 | 0.002 | 0.011 | 0.060 | 0.269 | 0.269 | 0.060 | 0.084 |
+
+At $t = 2.1$ the inputs $1.6$, $2.0$ and $2.4$ sit within $0.5$ of the boundary and carry most of the entropy. At
+$t = 2.9$ the nearest inputs, $2.4$ and $3.4$, are $0.5$ away, and the mean entropy is less than half as large. The
+labelled cross-entropy is negligible for both: $3 \times 10^{-5}$ and $8 \times 10^{-4}$ nats. The entropy term
+prefers the gap.
+
+**Step 2: minimise the full objective.** Add weight decay $0.05\,w^2$ and minimise
+$J(w, t) = \text{mean labelled cross-entropy} + \lambda \times \text{mean unlabelled entropy} + 0.05\,w^2$ over $w$ and
+$t$.
+
+| $\lambda$ | $w$  | $t$  | mean entropy | unlabelled inputs right |
+| --------- | ---- | ---- | ------------ | ----------------------- |
+| 0         | 1.30 | 2.10 | 0.51         | 7 of 8                  |
+| 0.3       | 1.49 | 2.38 | 0.45         | 7 of 8                  |
+| 1         | 1.99 | 3.04 | 0.30         | 8 of 8                  |
+
+With $\lambda = 0$ the problem is logistic regression on two points, and the threshold is their midpoint, which puts
+$2.4$ in class 1. With $\lambda = 0.3$ the threshold moves right but stays inside the dense run. With $\lambda = 1$ it
+crosses into the gap and every unlabelled input is classified correctly. The steepness also grows with $\lambda$:
+sharper predictions lower the entropy of the points far from the boundary.
+
+**Step 3: the local minima.** Fix $w = 3$ and $\lambda = 1$ and scan $J$ over $t$. The scan finds a local minimum at
+$t = 0.85$ with $J = 0.773$, a barrier at $t = 1.20$ with $J = 0.774$, and the global minimum at $t = 2.95$ with
+$J = 0.656$. The local minimum sits between the inputs $0.8$ and $1.2$, a small gap inside the dense run. A gradient
+method started at $t < 1.2$ stops there and cuts the dense run in two. Starting from the supervised solution and raising
+$\lambda$ slowly, as in step 2, avoids this minimum here.
+
+**In two dimensions.** The figure runs the same procedure on two moons and on two Gaussian clusters, with two labels per
+class. On the moons, logistic regression on 40 <NoteLink to="random-fourier-features">random Fourier features</NoteLink>
+with four labels classifies 85% of the unlabelled points correctly at $\lambda = 0$. Raising $\lambda$ to 1 along the
+path brings the accuracy to 99% and the mean entropy from 0.69 to 0.25 bits. On the two clusters the linear model gains
+from 86% to 97%.
+
+<EntropyBoundary />
+
+## Cost
+
+The unlabelled term needs one forward pass over the unlabelled inputs per step, and its gradient one backward pass. For
+a linear model on $d$ features the objective and gradient cost $O((\ell + u)\,dK)$ per evaluation, the same as logistic
+regression on $\ell + u$ points. No parameters are added. In minibatch training the unlabelled batch is usually several
+times larger than the labelled one, which sets the cost per step.
+
+## Trade-offs
+
+- **The weight $\lambda$.** Small $\lambda$ changes little. Large $\lambda$ lets the unlabelled points outvote the
+  labels, which helps when the <NoteLink to="semi-supervised-assumptions">low-density assumption</NoteLink> holds and
+  hurts when it does not. Grandvalet and Bengio choose $\lambda$ by cross-validation on the labelled points. When they
+  make the labels independent of the clusters, so that the unlabelled points carry no information about the boundary,
+  cross-validation selects $\lambda$ near 0 and the method performs about as well as using the labels alone
+  <Cite id="grandvalet2005" />.
+- **Discriminative against generative.** Entropy minimisation never models $p(\xvec)$, so it does not suffer when a
+  generative model of the inputs is wrong. In Grandvalet and Bengio's experiments, Gaussian class densities corrupted
+  by a few outliers made a mixture model fitted by EM worse than ignoring the unlabelled data, while entropy
+  minimisation still improved on supervised logistic regression <Cite id="grandvalet2005" />. When the generative model
+  is exactly right and unlabelled data are plentiful, the mixture model eventually wins.
+- **Soft against hard.** Pseudo-labelling with a confidence threshold ignores uncertain points and gives confident ones
+  full weight; entropy minimisation weights every point by its entropy. The soft form has no threshold to tune and is
+  differentiable everywhere.
+- **Practice since 2018.** Entropy minimisation is rarely used alone in deep
+  <NoteLink to="semi-supervised-learning">semi-supervised learning</NoteLink>. The penalty appears as an extra term next
+  to <NoteLink to="consistency-regularisation">consistency regularisation</NoteLink>, as in
+  <NoteLink to="virtual-adversarial-training">VAT</NoteLink> with entropy minimisation <Cite id="miyato2019vat" />, and
+  implicitly through the sharpened targets of <NoteLink to="mixmatch">MixMatch</NoteLink>
+  <Cite id="berthelot2019mixmatch" /> and the confident pseudo-labels of <NoteLink to="fixmatch">FixMatch</NoteLink>.
+  <NoteLink to="test-time-adaptation">Test-time adaptation</NoteLink> by Tent minimises the entropy of a trained
+  network's predictions on unlabelled test data, updating only the normalisation layers <Cite id="wang2021tent" />.
+
+## Pitfalls
+
+- **Collapse into one class.** Assigning every unlabelled point confidently to the same class has entropy near 0. With
+  few labels, a large $\lambda$ and a flexible model, the minimiser can do exactly that. A common remedy adds a term
+  that keeps the mean prediction over the unlabelled points near the class proportions of the labelled points, the
+  analogue of the transductive SVM's balancing constraint.
+- **Confident mistakes.** The gradient always pushes a prediction towards the class it already favours (see
+  above), so an early mistake becomes a confident mistake, as in
+  <NoteLink to="pseudo-labelling">confirmation bias</NoteLink>.
+- **Low entropy is not correctness.** A boundary that cuts a cluster where it is thin also passes few points and has
+  low entropy. In the figure, moving one label of each class to the outer end of its moon leads to such a boundary,
+  with low mean entropy and a fifth to a quarter of the unlabelled points wrong.
+- **Overlapping classes.** When $p(y \mid \xvec)$ is far from 0 and 1 over a dense region there is no gap to find, and
+  the penalty forces a confident boundary through the overlap (see
+  <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised learning fails</NoteLink>).
+- **Calibration.** The penalty rewards confidence on unlabelled data, so the trained model's probabilities are
+  overconfident there. Recalibrate on held-out labelled data before reading them as probabilities (see
+  <NoteLink to="classifier-calibration">classifier calibration</NoteLink>).
+- **No scale control.** Without weight decay or another limit on the logits, the entropy can be driven to 0 by scaling
+  alone, and the boundary is left wherever the labels put it.

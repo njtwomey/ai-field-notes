@@ -1,0 +1,165 @@
+---
+title: 'Graph generative models'
+kind: concept
+summary: 'Graph generators produce new graphs, such as molecules, either autoregressively node by node (GraphRNN), in one shot from a latent vector (graph VAEs), or by denoising adjacency and features (discrete diffusion, DiGress). Permutation symmetry makes likelihoods hard to define.'
+tags: [graph-neural-networks, generative-models, worked-example]
+aliases: ['graph generation', 'GraphRNN', 'graph VAE', 'DiGress', 'molecular graph generation']
+requires: [message-passing-neural-network, variational-autoencoder]
+related:
+  [
+    molecular-property-prediction-with-graph-networks,
+    deep-generative-models,
+    autoregressive-generative-models,
+    discrete-diffusion,
+    graph-transformer,
+    maximum-mean-discrepancy,
+    link-prediction-with-graph-neural-networks,
+  ]
+references:
+  [
+    you2018graphrnn,
+    li2018graphgen,
+    simonovsky2018graphvae,
+    kipf2016vgae,
+    jin2018jtvae,
+    vignac2023digress,
+    obray2022graphgen,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { SequenceGeneration } from './SequenceGeneration'
+
+<Definition>
+A **graph generative model** learns a distribution over graphs from a set of example graphs and samples new graphs from
+it. A graph with $n$ nodes is stored as an adjacency matrix $\Amat \in \set{0, 1}^{n \times n}$ and node features
+$\Xmat$, but the same graph has up to $n!$ such representations, one per node ordering. <Gloss name="ar">Autoregressive
+models</Gloss> such as GraphRNN fix an ordering and generate nodes and their edges one at a time; one-shot models such
+as GraphVAE decode a whole adjacency matrix from a latent vector; <NoteLink to="diffusion-models">diffusion
+models</NoteLink> such as DiGress corrupt node and edge types step by step and learn to reverse the corruption.
+</Definition>
+
+## Intuition
+
+Molecule design, circuit layout, road networks and synthetic social networks all need new graphs that look like existing
+ones. Classical random graph models, Erdős–Rényi, <Gloss name="sbm">stochastic block models</Gloss> and preferential
+attachment, fix a few statistics by hand: an edge probability, block sizes, a degree exponent. A learned model instead
+captures whatever structure the training graphs share, such as the ring sizes and valence rules of molecules or the
+community structure of social graphs.
+
+Two properties separate graphs from images and text. A graph has no canonical order: an image has a first pixel and a
+sentence a first word, but a graph's nodes can be listed in any order, and every order describes the same graph. And
+graphs are discrete and sparse: an edge is present or absent, and most pairs are absent. Each family of generators deals
+with these two facts in its own way.
+
+## Details
+
+**The likelihood of a graph.** Write $\Amat^\pi$ for the adjacency matrix of graph $G$ under node ordering $\pi$. A
+model that defines probabilities $p(\Amat^\pi)$ of ordered adjacency matrices assigns the unordered graph
+
+$$
+p(G) = \sum_{\Amat \in \set{\Amat^\pi : \pi \in \Pi_n}} p(\Amat),
+$$
+
+the sum over the distinct matrices that represent $G$. Their number is $n! / \abs{\operatorname{Aut}(G)}$, where
+$\operatorname{Aut}(G)$ is the group of relabellings that map $G$ onto itself. For most graphs it grows like $n!$, so
+the sum cannot be computed and maximum likelihood is replaced by a bound or by a canonical choice of ordering.
+
+**Autoregressive generation.** GraphRNN writes $\Amat^\pi$ as a sequence: for $i = 1, \dots, n - 1$ the vector
+$S_i \in \set{0, 1}^{i}$ records which of the $i$ earlier nodes the $i$-th node joins <Cite id="you2018graphrnn" />. A
+graph-level recurrent network carries a state from row to row, and an edge-level network emits the entries of each row,
+so
+
+$$
+p(S^\pi) = \prod_{i=1}^{n-1} \prod_{j=0}^{i-1} p\paren{S_{i,j} \mid S_{<i}, S_{i,<j}}.
+$$
+
+Training uses breadth-first orderings from random roots. Under a breadth-first ordering, each node's neighbours among
+the earlier nodes lie in the current or the previous breadth-first layer, so every edge reaches back at most $M$
+positions, and each row needs only its last $M$ entries. This cuts the work per graph from $O(n^2)$ to $O(nM)$ and
+reduces the number of orderings the model must assign probability to. Generation stops when the model emits an empty
+row. Li et al. use a graph network instead of a recurrent state: at each step it runs <Gloss name="gnn">message
+passing</Gloss> on the partial graph and decides whether to add a node and which edges to give it
+<Cite id="li2018graphgen" />.
+
+**One-shot generation.** GraphVAE decodes a latent vector $\zvec$ into a full probabilistic graph of a fixed maximum
+size $k$: an edge probability for every pair and type distributions for every node and edge
+<Cite id="simonovsky2018graphvae" />. The encoder is a graph network, as in the
+<NoteLink to="variational-autoencoder">variational autoencoder</NoteLink>, and the decoder is an <Gloss name="mlp" />.
+The decoder's nodes come in a fixed order and the target's in an arbitrary one, so the reconstruction loss needs a
+matching between them, an instance of graph matching that is solved approximately; that matching limits the method to
+small graphs. The variational graph autoencoder of Kipf and Welling is different: it decodes edges from
+<NoteLink to="node-embeddings">node embeddings</NoteLink> of a known graph and suits
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink>, not generation of new graphs
+<Cite id="kipf2016vgae" />.
+
+**Diffusion.** DiGress treats every node type and every edge type, including "no edge", as a categorical variable
+<Cite id="vignac2023digress" />. A forward Markov chain resamples each one towards the marginal distribution of types in
+the training data, so after many steps a graph is noise with realistic sparsity. A
+<NoteLink to="graph-transformer">graph transformer</NoteLink> is trained to predict the clean node and edge types from a
+noisy graph, and sampling runs the chain backwards from noise. The denoiser is permutation equivariant, so the learned
+distribution is permutation invariant and no ordering is needed. The <NoteLink to="discrete-diffusion">discrete
+diffusion</NoteLink> note covers the corruption process in general.
+
+**Molecules.** Valence rules make most random graphs invalid molecules. The junction-tree VAE generates a tree of
+chemical substructures (rings, bonds) first and then assembles atoms within it, so every output is a valid molecule
+<Cite id="jin2018jtvae" />. Diffusion and autoregressive models instead check valence during sampling or are
+conditioned on it. A molecular generator is usually paired with a property predictor
+(<NoteLink to="molecular-property-prediction-with-graph-networks">molecular property prediction</NoteLink>) to steer
+sampling towards molecules with wanted properties.
+
+**Evaluation.** Two sets of graphs are compared by the <NoteLink to="maximum-mean-discrepancy">maximum mean
+discrepancy</NoteLink> between distributions of graph statistics: degrees, clustering coefficients and counts of small
+subgraph orbits <Cite id="you2018graphrnn" />. Molecular generators also report the share of valid, unique and novel
+molecules. O'Bray et al. showed that MMD-based comparisons depend on the choice of kernel and its parameters, which
+papers often set differently, so rankings can change with these choices <Cite id="obray2022graphgen" />.
+
+## Worked example
+
+**Orderings of a 4-cycle.** The 4-cycle 0–1–2–3–0 has $4! = 24$ node orderings. Its automorphism group has 8 elements,
+the four rotations and four reflections of a square, so the orderings give $24 / 8 = 3$ distinct adjacency matrices.
+Under the breadth-first ordering from node 0, the nodes are placed as 0, 1, 3, 2: node 0's neighbours 1 and 3 first,
+then node 2. The rows are
+
+$$
+S_1 = (1), \qquad S_2 = (1, 0), \qquad S_3 = (0, 1, 1).
+$$
+
+Node 1 joins node 0. Node 3 joins node 0 and not node 1. Node 2 joins nodes 1 and 3 and not node 0. The longest step
+back is from node 2, at position 3, to node 1, at position 1, so the bandwidth is $M = 2$. Every one of the 8
+breadth-first orderings, four roots times two orders of the root's neighbours, gives this same sequence, so a
+breadth-first model must learn one sequence for this graph instead of three.
+
+**A likelihood by counting.** Under the Erdős–Rényi model $G(4, 1/2)$ every edge is present independently with
+probability $1/2$, so each ordered adjacency matrix on 4 nodes has probability $(1/2)^6 = 1/64$. The unordered 4-cycle
+has 3 distinct matrices, so $p(\text{4-cycle}) = 3/64$. A model that scores only one ordering, the breadth-first one,
+would report $1/64$: the gap is the sum over orderings that exact likelihoods need.
+
+**Growth of the sum.** A 10-cycle has $10! = 3{,}628{,}800$ orderings and 20 automorphisms, so 181,440 distinct
+adjacency matrices represent it.
+
+<SequenceGeneration />
+
+On the $3 \times 4$ grid, a breadth-first ordering from a corner keeps every edge within 4 positions, about one row of
+the grid. A random ordering spreads edges across the whole triangle: with seed 1 its longest edge reaches back 9 of
+the 11 possible positions.
+
+## Assumptions
+
+- The training graphs come from one distribution and are small enough for the method: hundreds of nodes for
+  autoregressive models with a band, tens of nodes for one-shot models with matching.
+- For autoregressive models, the chosen family of orderings, breadth-first from a random root, covers the graphs well;
+  a model trained on one family assigns low probability to sequences from other orderings.
+- For molecules, validity rules are either built into the generator or enforced at sampling time.
+
+## Pitfalls
+
+- **Reporting a likelihood under one ordering.** It is a lower bound on $p(G)$, not $p(G)$, and the bound's looseness
+  depends on the number of automorphisms, so it differs between graphs.
+- **Comparing MMD values across papers.** Different statistics, kernels and kernel parameters give different numbers
+  and rankings <Cite id="obray2022graphgen" />.
+- **Novelty without validity, or validity without novelty.** A molecular generator can score perfect validity by
+  copying training molecules. Report validity, uniqueness and novelty together.
+- **One-shot decoders at large size.** Dense $k \times k$ outputs and graph matching make the cost grow at least
+  quadratically in the maximum size $k$.

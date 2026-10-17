@@ -1,0 +1,215 @@
+---
+title: 'Concept learning and version spaces'
+kind: concept
+summary: 'Concept learning finds a Boolean function, such as a conjunction of attribute tests, consistent with labelled examples. The version space holds all consistent hypotheses; candidate elimination stores its most specific and most general boundaries and updates both per example.'
+tags: [logic, rule-learning, learning-theory, worked-example]
+aliases: ['candidate elimination', 'Find-S', 'concept learning', 'S and G boundaries']
+requires: [inductive-bias, propositional-and-first-order-logic-for-learning]
+related: [generality-ordering-and-refinement, program-synthesis-from-examples, probably-approximately-correct-learning, stream-based-active-learning, bayes-point-machine, least-general-generalisation, decision-lists-and-rule-sets]
+references: [mitchell1982, mitchell1997, mitchell1980, haussler1988, valiant1984, flach2012]
+status: draft
+updated: 2026-10-17
+---
+
+import { CandidateEliminationStepper } from './CandidateEliminationStepper'
+
+<Definition>
+**Concept learning** infers a Boolean function $c : \Xcal \to \set{0, 1}$, the target concept, from training examples
+$\Dcal = \set{(x_1, c(x_1)), \dots, (x_m, c(x_m))}$, by searching a hypothesis space $\Hcal$. A hypothesis $h$ is
+**consistent** with $\Dcal$ when $h(x_i) = c(x_i)$ for every example. The **version space** $VS_{\Hcal, \Dcal}$ is the
+set of all hypotheses in $\Hcal$ consistent with $\Dcal$ <Cite id="mitchell1982" />. When $\Hcal$ is ordered by
+generality, the version space is determined by two boundary sets: $S$, its maximally specific members, and $G$, its
+maximally general members. The **candidate-elimination algorithm** updates $S$ and $G$ one example at a time.
+</Definition>
+
+## Intuition
+
+Most learners return one hypothesis. A version-space learner keeps every hypothesis that the data have not ruled out.
+Each positive example eliminates the hypotheses that exclude it, and each negative example eliminates those that
+include it. What remains is exactly the set of hypotheses the learner still considers possible.
+
+Keeping the whole set makes the learner's uncertainty explicit. A new instance on which every remaining hypothesis
+agrees can be labelled with certainty, given that the target is in $\Hcal$. An instance on which they disagree marks
+what the data have not yet settled, and labelling it is the most useful next query. When a single hypothesis remains,
+the target has been identified.
+
+The set is usually far too large to list, but it has structure. Hypotheses can be ordered from specific to general by
+what they cover. The consistent hypotheses form a contiguous band in that order, so it is enough to store its two
+edges. The specific edge $S$ moves up when a positive example forces more generality, and the general edge $G$ moves
+down when a negative example forces more specificity. Learning is complete when the edges meet.
+
+## Details
+
+### Conjunctive hypotheses
+
+Instances are described by $n$ attributes, attribute $j$ taking one of $k_j$ values. A conjunctive hypothesis states,
+for each attribute, either a required value or "?" (any value). It is written as a tuple, such as
+$\langle \text{sunny}, ?, ?, \text{weak} \rangle$ for "sky is sunny and wind is weak", and classifies an instance as
+positive when every stated value matches. Two extreme hypotheses bound the language: $\langle ?, \dots, ? \rangle$
+covers every instance, and the empty hypothesis $\emptyset$ covers none. The language has $1 + \prod_j (k_j + 1)$
+distinct hypotheses. Mitchell's six-attribute EnjoySport example has 96 instances and 973 distinct conjunctions
+<Cite id="mitchell1997" />, out of $2^{96}$ possible concepts. That restriction is the learner's
+<NoteLink to="inductive-bias">inductive bias</NoteLink>.
+
+### The generality order
+
+$h_1$ is **more general than or equal to** $h_2$, written $h_1 \succeq h_2$, when every instance that $h_2$ covers is
+covered by $h_1$. For conjunctions the test is syntactic: $h_1 \succeq h_2$ when every attribute that $h_1$ constrains
+is constrained to the same value by $h_2$. The relation is a partial order <Cite id="flach2012" />, and
+<NoteLink to="generality-ordering-and-refinement">generality ordering and refinement</NoteLink> studies it as a search
+space. Two operations on it drive concept learning.
+
+- The **minimal generalisation** of $h$ that covers an instance $x$ replaces by "?" every attribute where $h$
+  disagrees with $x$. It is unique for conjunctions, and for $h = \emptyset$ it is $x$ itself.
+- The **minimal specialisations** of $h$ that exclude $x$ replace one "?" of $h$ by a value different from $x$'s. There
+  are $\sum_{j : h_j = ?} (k_j - 1)$ of them.
+
+The **Find-S** algorithm uses only the first. It starts at $\emptyset$ and generalises minimally for each positive
+example, ignoring the negatives. It returns the most specific conjunction that covers all the positives, which is the
+single member of $S$ when the data are noise-free and the target is a conjunction.
+
+### The boundary representation
+
+For a hypothesis space ordered by $\succeq$, the boundaries are
+
+$$
+S = \set{s \in VS : \text{no } h \in VS \text{ has } s \succ h}, \qquad G = \set{g \in VS : \text{no } h \in VS \text{ has } h \succ g},
+$$
+
+where $\succ$ is the strict order. The **version-space representation theorem** states that, for finite $\Hcal$,
+
+$$
+VS_{\Hcal, \Dcal} = \set{h \in \Hcal : \exists s \in S,\; \exists g \in G,\; g \succeq h \succeq s}.
+$$
+
+Every hypothesis between some member of $S$ and some member of $G$ is consistent, and every consistent hypothesis lies
+between them <Cite id="mitchell1982" />.
+
+<Derivation title="The representation theorem">
+**Every hypothesis between the boundaries is consistent.** Let $g \succeq h \succeq s$ with $s \in S$ and $g \in G$.
+For a positive example $x$, $s$ covers $x$ because $s$ is consistent, so $h$ covers $x$ because $h \succeq s$. For a
+negative example $x$, $g$ does not cover $x$, and $h$ covers only instances $g$ covers, so $h$ does not cover $x$.
+Thus $h$ is consistent.
+
+**Every consistent hypothesis lies between the boundaries.** Let $h \in VS$. If $h \in G$, take $g = h$. Otherwise
+some $h' \in VS$ is strictly more general than $h$; if $h' \notin G$, repeat from $h'$. $\Hcal$ is finite and each
+step moves strictly up the order, so the chain ends at a member $g$ of $G$ with $g \succeq h$. The same argument
+downwards gives $s \in S$ with $h \succeq s$.
+</Derivation>
+
+### Candidate elimination
+
+Start with $S = \set{\emptyset}$ and $G = \set{\langle ?, \dots, ? \rangle}$, which bound the whole of $\Hcal$. For
+each example $x$:
+
+- **If $x$ is positive:** remove from $G$ every member that does not cover $x$. Replace each member $s$ of $S$ that
+  does not cover $x$ by its minimal generalisations that cover $x$ and lie below some member of $G$. Remove from $S$
+  any member more general than another member of $S$.
+- **If $x$ is negative:** remove from $S$ every member that covers $x$. Replace each member $g$ of $G$ that covers $x$
+  by its minimal specialisations that exclude $x$ and lie above some member of $S$. Remove from $G$ any member less
+  general than another member of $G$.
+
+The two cases are mirror images. A positive example can only move $S$ up and shrink $G$; a negative example can only
+move $G$ down and shrink $S$. If $S$ or $G$ becomes empty, no hypothesis of $\Hcal$ is consistent with the data. For
+conjunctions $S$ never has more than one member, because the minimal generalisation is unique.
+
+### Classifying with a version space
+
+The version space labels a new instance $x$ by the vote of its members. Because every member lies between the
+boundaries, the vote is unanimous in two cases that the boundaries decide alone. Every member covers $x$ exactly when
+every member of $S$ covers it. No member covers $x$ exactly when no member of $G$ covers it. Otherwise the members
+disagree, and the learner can abstain or report the fraction voting positive. The
+<NoteLink to="bayes-point-machine">Bayes point machine</NoteLink> takes the same view for linear classifiers: it
+predicts with the centre of mass of the version space instead of any single member.
+
+### How many examples
+
+If the learner can choose its queries, an instance that half the members cover removes half of them whatever its label.
+At least $\lceil \log_2 \abs{VS} \rceil$ queries are then needed in the worst case, and that many suffice when such an
+instance exists at every step <Cite id="mitchell1997" />. <NoteLink to="stream-based-active-learning">Stream-based
+active learning</NoteLink> queries labels in the region where the version space disagrees for the same reason. For
+examples drawn at random, any consistent learner over a finite space returns, with probability at least $1 - \delta$, a
+hypothesis with error at most $\epsilon$ once
+
+$$
+m \geq \frac{1}{\epsilon}\paren{\ln \abs{\Hcal} + \ln \frac{1}{\delta}}
+$$
+
+<Cite id="haussler1988" />. Conjunctions of $n$ Boolean attributes have $\abs{\Hcal} = 3^n + 1$, so a number of
+examples linear in $n$ suffices, which is the classical result that conjunctions are
+<NoteLink to="probably-approximately-correct-learning">PAC learnable</NoteLink> <Cite id="valiant1984" />.
+
+## Worked example
+
+A picnic is good or bad depending on four attributes: sky (sunny, cloudy, rainy), temperature (warm, cold), humidity
+(normal, high) and wind (weak, strong). There are $3 \cdot 2 \cdot 2 \cdot 2 = 24$ possible days and
+$1 + 4 \cdot 3 \cdot 3 \cdot 3 = 109$ conjunctions. The six training examples are:
+
+| # | sky | temp | humidity | wind | good picnic |
+| --- | --- | --- | --- | --- | --- |
+| 1 | sunny | warm | normal | weak | yes |
+| 2 | sunny | warm | high | weak | yes |
+| 3 | rainy | cold | high | strong | no |
+| 4 | sunny | cold | high | weak | yes |
+| 5 | cloudy | warm | normal | weak | no |
+| 6 | sunny | warm | normal | strong | no |
+
+1. **Start.** $S_0 = \set{\emptyset}$ and $G_0 = \set{\langle ?, ?, ?, ? \rangle}$. All 109 hypotheses are in the
+   version space.
+2. **Example 1 (positive).** $G$ covers it. The only member of $S$, $\emptyset$, does not, and its minimal
+   generalisation is the example itself: $S_1 = \set{\langle \text{sunny}, \text{warm}, \text{normal}, \text{weak}
+   \rangle}$. The version space holds the $2^4 = 16$ conjunctions that keep or drop each of the four values.
+3. **Example 2 (positive).** It differs from $S_1$ only in humidity, so humidity becomes "?":
+   $S_2 = \set{\langle \text{sunny}, \text{warm}, ?, \text{weak} \rangle}$. The version space has $2^3 = 8$ members.
+4. **Example 3 (negative).** $S_2$ already excludes it. $\langle ?, ?, ?, ? \rangle$ covers it, so it is replaced by its
+   minimal specialisations that exclude $\langle \text{rainy}, \text{cold}, \text{high}, \text{strong} \rangle$. There
+   are $2 + 1 + 1 + 1 = 5$: sky = sunny, sky = cloudy, temp = warm, humidity = normal and wind = weak. Only those above
+   $S_2$ survive, which drops sky = cloudy and humidity = normal:
+   $G_3 = \set{\langle \text{sunny}, ?, ?, ? \rangle, \langle ?, \text{warm}, ?, ? \rangle, \langle ?, ?, ?, \text{weak}
+   \rangle}$. Of the 8 previous members only $\langle ?, ?, ?, ? \rangle$ covered the negative, so 7 remain.
+5. **Example 4 (positive).** $\langle ?, \text{warm}, ?, ? \rangle$ excludes this cold day, so it leaves $G$. $S$
+   generalises temperature: $S_4 = \set{\langle \text{sunny}, ?, ?, \text{weak} \rangle}$. Three hypotheses remain:
+   $S_4$ itself, $\langle \text{sunny}, ?, ?, ? \rangle$ and $\langle ?, ?, ?, \text{weak} \rangle$.
+6. **Example 5 (negative).** $\langle ?, ?, ?, \text{weak} \rangle$ covers this cloudy day. Its only minimal
+   specialisation above $S_4$ is $\langle \text{sunny}, ?, ?, \text{weak} \rangle$, which is less general than
+   $\langle \text{sunny}, ?, ?, ? \rangle$, so it is removed. $G_5 = \set{\langle \text{sunny}, ?, ?, ? \rangle}$ and
+   two hypotheses remain. They agree on 20 of the 24 days: 4 sunny days with weak wind are positive, 16 days that are
+   not sunny are negative, and they disagree on the 4 sunny days with strong wind.
+7. **Example 6 (negative).** A sunny day with strong wind, one of the disputed days. $\langle \text{sunny}, ?, ?, ?
+   \rangle$ covers it and is specialised to $\langle \text{sunny}, ?, ?, \text{weak} \rangle$. Now $S_6 = G_6 =
+   \set{\langle \text{sunny}, ?, ?, \text{weak} \rangle}$: the concept "sky is sunny and wind is weak" is identified.
+
+The version space shrank $109 \to 16 \to 8 \to 7 \to 3 \to 2 \to 1$. Example 6 was the most informative possible
+query at step 6, because it was a day on which the two remaining hypotheses disagreed.
+
+<CandidateEliminationStepper />
+
+## Assumptions
+
+- **The target is in $\Hcal$.** Candidate elimination returns the hypotheses consistent with the data within the
+  chosen language. If the target is outside it, the version space can collapse to empty or converge to a wrong
+  hypothesis.
+- **Noise-free labels.** One mislabelled example removes the true concept from the version space, and the boundaries
+  never recover it.
+- **A finite, discrete language with a computable order.** The representation theorem needs every chain to end at a
+  boundary member, and the updates need minimal generalisations and specialisations. Conjunctions over discrete
+  attributes have both; intervals over real attributes need care at the ends.
+
+## Pitfalls
+
+- **Noise collapses the version space.** The "repeated day with the opposite label" sequence in the figure repeats
+  example 4 as a negative. No conjunction can label the same day both ways, so $S$ and $G$ empty at example 7, and the
+  learner has no answer at all. Practical rule learners such as <NoteLink to="sequential-covering">sequential
+  covering</NoteLink> trade consistency for accuracy instead.
+- **A disjunctive target is outside the language.** For the target "sky is sunny or wind is weak", two positives
+  ($\langle \text{sunny}, \text{warm}, \text{normal}, \text{strong} \rangle$ and $\langle \text{rainy}, \text{warm},
+  \text{normal}, \text{weak} \rangle$) force $S$ to $\langle ?, \text{warm}, \text{normal}, ? \rangle$, which covers the
+  negative $\langle \text{cloudy}, \text{warm}, \text{normal}, \text{strong} \rangle$. The version space is empty after
+  three examples. Allowing arbitrary disjunctions would remove the inductive bias, and an unbiased version space never
+  labels an unseen instance unanimously <Cite id="mitchell1980" />.
+- **$G$ can grow exponentially.** With negatives first, the figure's $G$ grows to 13 members after two examples before
+  the positives prune it to one. Haussler showed that for conjunctions the size of $G$ can grow exponentially in the
+  number of examples <Cite id="haussler1988" />. $S$ stays a single conjunction, which is why Find-S remains practical
+  when $G$ does not.
+- **Order changes the path, not the result.** The final version space depends only on the set of examples. The sizes of
+  the boundaries along the way depend on the order.

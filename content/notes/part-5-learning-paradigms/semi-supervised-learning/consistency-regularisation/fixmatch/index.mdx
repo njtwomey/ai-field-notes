@@ -1,0 +1,183 @@
+---
+title: 'FixMatch'
+kind: technique
+summary: 'FixMatch takes a hard pseudo-label from a weakly augmented view of an unlabelled example and, if its confidence exceeds a threshold such as 0.95, trains the model to predict that label on a strongly augmented view, joining pseudo-labelling and consistency regularisation.'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['weak-strong augmentation consistency', 'weak-to-strong consistency']
+requires: [pseudo-labelling, consistency-regularisation]
+related:
+  [
+    adaptive-confidence-thresholds,
+    mixmatch,
+    unsupervised-data-augmentation,
+    mean-teacher,
+    data-augmentation,
+    classifier-calibration,
+    evaluating-semi-supervised-learning,
+  ]
+references: [sohn2020, xie2020uda, berthelot2020remixmatch, cubuk2020randaugment, zhang2021flexmatch, wang2022usb]
+status: draft
+updated: 2026-10-17
+---
+
+import { FixMatchViews } from './FixMatchViews'
+
+<Definition>
+**FixMatch** is a semi-supervised training rule for classifiers with two augmentations of each unlabelled example: a
+weak one (a flip and a small shift for images) and a strong one (a sequence of heavy distortions). The model's
+prediction on the weak view gives a hard pseudo-label, kept only if its confidence reaches a threshold $\tau$ (0.95 in
+the paper). The model is then trained with cross-entropy to predict that pseudo-label on the strong view, alongside the
+usual cross-entropy on the labelled examples <Cite id="sohn2020" />.
+</Definition>
+
+## Problem
+
+The methods before FixMatch built their unlabelled targets from many parts. <NoteLink to="mixmatch">MixMatch</NoteLink>
+averaged predictions over several augmentations, sharpened them with a temperature and mixed examples with mixup;
+ReMixMatch added distribution alignment and augmentation anchoring <Cite id="berthelot2020remixmatch" />; <NoteLink
+to="unsupervised-data-augmentation">UDA</NoteLink> sharpened soft targets, masked uncertain ones and annealed the
+labelled loss <Cite id="xie2020uda" />. Each part brought hyperparameters, and tuning many hyperparameters is
+unreliable when a validation set must be small.
+
+Each of the two older ideas on its own has a failure. <NoteLink to="pseudo-labelling">Pseudo-labelling</NoteLink>
+computes the label and the loss on the same input, so a wrong confident label is confirmed at every step, and the
+network learns nothing new from a point it already predicts confidently. <NoteLink
+to="consistency-regularisation">Consistency regularisation</NoteLink> with soft targets lets an uncertain prediction
+pull the other view towards uncertainty. FixMatch keeps one part of each: the confidence threshold and hard label of
+pseudo-labelling, and the two views of consistency regularisation, with the target always taken from the easier view.
+
+## Mechanism
+
+### The loss
+
+A minibatch holds $B$ labelled pairs $(\xvec_b, y_b)$ and $\mu B$ unlabelled inputs $\uvec_u$, with $\mu$ the ratio
+of unlabelled to labelled batch size ($\mu = 7$ in the paper). Write $p_{\thetavec}(\cdot \mid \xvec) \in [0, 1]^K$ for
+the network's class probabilities over $K$ classes, $\alpha(\cdot)$ for a random weak augmentation and $\Acal(\cdot)$
+for a random strong one. For each unlabelled input FixMatch computes the weak-view prediction and its arg max,
+
+$$
+\qvec_u = p_{\thetavec}(\cdot \mid \alpha(\uvec_u)), \qquad \hat y_u = \argmax_k q_{u,k},
+$$
+
+and treats both as constants: no gradient flows through them. The loss is
+
+$$
+\Lcal(\thetavec) = \frac{1}{B} \sum_{b=1}^{B} -\log p_{\thetavec}\big(y_b \mid \alpha(\xvec_b)\big)
++ \lambda_u \frac{1}{\mu B} \sum_{u=1}^{\mu B} \indicator\Big[\max_k q_{u,k} \ge \tau\Big]
+\big({-\log p_{\thetavec}(\hat y_u \mid \Acal(\uvec_u))}\big),
+$$
+
+with unlabelled weight $\lambda_u = 1$. The unlabelled sum is divided by the whole batch $\mu B$, not by the number of
+points above the threshold. A point below the threshold therefore contributes zero, and the unlabelled term grows as
+more points become confident. The paper adds no ramp-up of $\lambda_u$: early in training few points reach $\tau$, so
+the threshold supplies the schedule <Cite id="sohn2020" />.
+
+### Why the two views matter
+
+The pseudo-label term on its own is the same as in pseudo-labelling: a hard target and a cross-entropy, which minimise
+the prediction entropy and push the boundary away from the data. The change is where the target and the prediction
+come from. The target uses the weak view, on which the network is most likely to be right. The loss uses the strong
+view, a distorted copy that the network finds harder. A point whose weak view the network already labels confidently
+still produces a large loss if its strong view is predicted differently, so the network keeps learning from it. That
+loss is a consistency penalty between the two views, in the sense of <NoteLink
+to="consistency-regularisation">consistency regularisation</NoteLink>, with a one-hot target.
+
+The paper's ablation makes the roles concrete <Cite id="sohn2020" />. Replacing the weak view by a strong one for
+label guessing made training diverge early. Removing augmentation from the label-guessing view made the network
+overfit its guessed labels. Replacing the strong view by a weak one in the loss reached 45% accuracy and then
+collapsed to 12%. The figure reproduces the last case on two moons: with the strong jitter set equal to the weak one,
+the boundary barely moves from where the eight labels put it.
+
+### Sharpening as a limit
+
+UDA and MixMatch replace the hard label by a sharpened distribution, $q_k^{1/T} / \sum_j q_j^{1/T}$ with temperature
+$T$. As $T \to 0$ the sharpened distribution tends to the one-hot vector of the arg max, so FixMatch's target is the
+zero-temperature limit. Sohn et al. found that adding a temperature to the thresholded loss gave no clear gain and
+only added a hyperparameter <Cite id="sohn2020" />.
+
+### Augmentations
+
+For images the weak augmentation flips horizontally with probability ½ (except on digit data) and translates by up
+to 12.5% of the image size. The strong augmentation is RandAugment <Cite id="cubuk2020randaugment" /> or CTAugment,
+each followed by Cutout, which blanks a random square. RandAugment applies a fixed number of operations drawn from a
+list (rotation, shear, colour, contrast, posterise and others) at a random magnitude, so it needs no learned policy.
+In the paper's ablation, removing either Cutout or CTAugment raised the error rate <Cite id="sohn2020" />. The
+figure uses Gaussian jitter in two dimensions: a small standard deviation for the weak view and a large one for the
+strong view.
+
+<FixMatchViews />
+
+## Worked example
+
+Two labelled and four unlabelled examples ($B = 2$, $\mu = 2$), three classes, $\tau = 0.95$ and $\lambda_u = 1$.
+
+**Step 1: the labelled term.** The network gives the true class probabilities $0.8$ and $0.6$ on the weakly
+augmented labelled examples. The labelled term is $\tfrac12(-\log 0.8 - \log 0.6) = \tfrac12(0.223 + 0.511) = 0.367$.
+
+**Step 2: weak views and the mask.** The weak-view predictions are
+
+| point | $\qvec_u$ | $\max_k q_{u,k}$ | kept at $\tau = 0.95$ | $\hat y_u$ |
+| --- | --- | --- | --- | --- |
+| 1 | $(0.97, 0.02, 0.01)$ | 0.97 | yes | 1 |
+| 2 | $(0.10, 0.85, 0.05)$ | 0.85 | no | 2 |
+| 3 | $(0.01, 0.03, 0.96)$ | 0.96 | yes | 3 |
+| 4 | $(0.50, 0.45, 0.05)$ | 0.50 | no | 1 |
+
+**Step 3: strong views.** On the strong views the network gives $(0.70, 0.20, 0.10)$ for point 1 and $(0.15, 0.25,
+0.60)$ for point 3. Their cross-entropies against the pseudo-labels are $-\log 0.70 = 0.357$ and $-\log 0.60 =
+0.511$. Points 2 and 4 contribute 0.
+
+**Step 4: the unlabelled term.** The sum is divided by $\mu B = 4$, not by the 2 kept points:
+$(0.357 + 0.511)/4 = 0.217$. The total loss is $0.367 + 0.217 = 0.584$.
+
+**Step 5: the gradient.** For point 1 the gradient of its cross-entropy with respect to the strong view's logits is
+$\pvec - \evec_1 = (-0.30, 0.20, 0.10)$, scaled by $1/4$. The step raises the logit of class 1 on the strong
+view, so the network learns to predict on the distorted copy what it already predicts on the clean one.
+
+**Step 6: a lower threshold.** At $\tau = 0.8$ point 2 also passes, with pseudo-label 2. Its strong view gives
+$(0.30, 0.40, 0.30)$ and cross-entropy $-\log 0.40 = 0.916$. The unlabelled term becomes $(0.357 + 0.916 +
+0.511)/4 = 0.446$. The less confident point brings the largest loss and the largest gradient, which is right if its
+label is right and harmful if not.
+
+In the figure, on two moons with eight labels and the default seed, FixMatch at $\tau = 0.95$ raises the accuracy on the
+192 unlabelled points from 84.4% (labels only) to 94.8% after 400 steps. On each of the first three data seeds, raising
+$\tau$ from 0.6 to 0.99 lowers the share of points above the threshold at step 400 from 99% to between 78% and 83%. On
+seeds 1 and 3 it raises the accuracy of their pseudo-labels from 90% and 91% to 94% and 99%; on seed 2 they are nearly
+all right at every $\tau$. This is the quality against quantity trade-off the paper reports.
+
+## Cost
+
+Each step runs a forward pass on the weak views of $\mu B$ unlabelled inputs without gradients, and a forward and
+backward pass on their strong views and on the $B$ labelled inputs. With $\mu = 7$ a step costs roughly eight times a
+supervised step on the labelled batch alone. The paper trains for $2^{20}$ steps with batch size $B = 64$,
+<NoteLink to="momentum-and-nesterov">SGD with momentum</NoteLink> 0.9, a cosine learning-rate decay from 0.03, and
+reports the <Gloss name="ema">exponential moving average</Gloss> of the weights <Cite id="sohn2020" />. With these
+settings FixMatch reached 94.93% accuracy on <Gloss name="cifar-10" /> with 250 labels and 88.61% with 40 (four per
+class).
+
+## Trade-offs
+
+- **One threshold for every class and every step.** A fixed $\tau$ admits few pseudo-labels early in training and
+  favours classes the network learns first. <NoteLink to="adaptive-confidence-thresholds">Adaptive
+  thresholds</NoteLink> (FlexMatch, FreeMatch, SoftMatch) lower it per class or set it from the model's confidence
+  <Cite id="zhang2021flexmatch" />.
+- **Hard against soft targets.** A hard label discards the network's uncertainty between the runner-up classes; soft
+  targets keep it but let uncertain predictions drag each other towards uniform. The threshold makes the hard label
+  safe only to the extent that confidence tracks accuracy, which depends on <NoteLink
+  to="classifier-calibration">calibration</NoteLink>.
+- **A domain-specific strong augmentation.** The gain comes from a strong augmentation that changes the input a lot and
+  keeps its class. Images and text (by back-translation) have one. Tabular data, <NoteLink to="time-series">time
+  series</NoteLink> and many scientific inputs do not, and FixMatch there falls back towards plain pseudo-labelling.
+
+## Pitfalls
+
+- **Confirmation bias survives.** A wrong pseudo-label above the threshold is still trained on, now on two views at
+  once. Overconfident networks admit more of them.
+- **Class mismatch.** Unlabelled examples of classes absent from the labelled set get confident pseudo-labels from the
+  known classes and pull the boundary towards them.
+- **Barely supervised runs vary.** With one label per class the paper reports test accuracy between 48.58% and 85.32%
+  over four runs on different label sets, with a median of 64.28% <Cite id="sohn2020" />. Which examples are labelled
+  matters as much as how many.
+- **Baselines.** Current benchmarks such as USB start from pretrained networks <Cite id="wang2022usb" />, and a strong
+  supervised fine-tune of a pretrained network is the baseline FixMatch must beat; see <NoteLink
+  to="evaluating-semi-supervised-learning">evaluating semi-supervised learning</NoteLink>.

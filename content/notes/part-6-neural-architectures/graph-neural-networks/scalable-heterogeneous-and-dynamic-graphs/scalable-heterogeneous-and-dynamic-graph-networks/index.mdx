@@ -1,0 +1,84 @@
+---
+title: 'Scalable, heterogeneous and dynamic graph networks'
+kind: overview
+summary: 'Graph networks for graphs that are large, typed or changing: neighbour sampling, Cluster-GCN and precomputed propagation for memory, per-relation weights and type-aware attention for typed graphs, node memories for event streams, and hyperedges joining many nodes.'
+tags: [graph-neural-networks, overview]
+aliases: []
+requires: [message-passing-neural-network]
+related:
+  [
+    graph-neural-networks,
+    heterogeneous-and-temporal-graphs,
+    message-passing-layers,
+    graph-learning-tasks,
+    graph-splits-and-sampling,
+  ]
+references: [hamilton2020grl, chiang2019clustergcn, schlichtkrull2018rgcn, rossi2020tgn, feng2019hgnn]
+status: draft
+updated: 2026-10-17
+---
+
+<Definition>
+The standard <NoteLink to="message-passing-neural-network">message passing network</NoteLink> assumes one graph that
+fits in memory, with one kind of node, one kind of edge, pairwise edges and no time. This chapter relaxes each
+assumption in turn. It covers training on graphs too large for one device, graphs whose nodes and edges have types,
+graphs that arrive as a stream of timed events, and hypergraphs whose edges join any number of nodes.
+</Definition>
+
+## What it is for
+
+Graphs in practice break the textbook setting. A social or citation graph can have a hundred million nodes and over a
+billion edges. A knowledge graph or a relational database has many entity types and hundreds of relation types.
+Payments, messages and purchases arrive with timestamps, and their order matters. Co-authorship, shopping baskets and
+group chats relate several nodes at once. Each case needs a change to how messages are computed, which nodes are
+visited, or what an edge is. The changes keep the core of <Gloss name="gnn">message passing</Gloss>: local aggregation
+by functions shared across the graph.
+
+## Main ideas
+
+**Bound the part of the graph a step touches.** An $L$-layer network's output at one node depends on up to $d^L$ nodes
+for average degree $d$, the neighbourhood explosion.
+<NoteLink to="neighbour-sampling-and-scalable-graph-networks">Neighbour sampling and scalable graph networks</NoteLink>
+compares the remedies. GraphSAGE samples a fixed number of neighbours per node and layer. Cluster-GCN trains on dense
+clusters of a partitioned graph <Cite id="chiang2019clustergcn" />. GraphSAINT samples subgraphs and reweights them to
+stay unbiased. SGC and SIGN precompute the graph products, so training is a <Gloss name="mlp">multilayer
+perceptron</Gloss> on node rows. The trade is between exact aggregation, memory, and the variance of the gradient.
+
+**Give each type its own parameters.** In a <NoteLink to="heterogeneous-graph-networks">heterogeneous graph
+network</NoteLink>, the edge type selects the message function. The relational graph convolution keeps one weight matrix
+per relation and shares them through a few basis matrices when relations are many <Cite id="schlichtkrull2018rgcn" />.
+HAN aggregates along hand-chosen meta-paths, typed paths such as author–paper–author, and HGT builds attention from
+projections chosen by the types of the two endpoints and the edge.
+
+**Let time order the messages.** A <NoteLink to="temporal-graph-networks">temporal graph network</NoteLink> keeps a
+memory per node, updated by a recurrent cell whenever the node takes part in an event, and computes embeddings at query
+time by attention over recent neighbours with encoded time gaps <Cite id="rossi2020tgn" />. Information then flows only
+along paths whose events happen in increasing time, and the evaluation must split by time to avoid training on the
+future.
+
+**Let an edge join many nodes.** <NoteLink to="hypergraph-neural-networks">Hypergraph neural networks</NoteLink> pass
+messages from nodes to hyperedges and back through the incidence matrix <Cite id="feng2019hgnn" />. Replacing each
+hyperedge by a clique loses which nodes belonged together; the two-stage pass keeps it.
+
+## How the notes fit together
+
+- Start with the scalable-training note: its sampling and precomputation apply to every model in the chapter, and
+  heterogeneous and temporal models at scale use the same loaders.
+- The heterogeneous and temporal notes both require the Part III note on
+  <NoteLink to="heterogeneous-and-temporal-graphs">heterogeneous and temporal graphs</NoteLink>, which describes the
+  data: type maps, meta-paths, snapshots, event streams and time-respecting splits.
+- The hypergraph note needs only message passing. It pairs with the heterogeneous note, since the star expansion of a
+  hypergraph is a graph with two node types.
+
+## Prerequisites and next steps
+
+The chapter assumes <NoteLink to="message-passing-neural-network">message passing</NoteLink>,
+<NoteLink to="graph-convolutional-network">graph convolution</NoteLink> and
+<NoteLink to="graphsage">GraphSAGE</NoteLink> from the <NoteLink to="message-passing-layers">message-passing
+layers</NoteLink> chapter, and a <NoteLink to="recurrent-neural-network">recurrent network</NoteLink> for the temporal
+note. Hamilton's book covers the background <Cite id="hamilton2020grl" />. The models lead to
+<NoteLink to="graph-learning-tasks">graph learning tasks</NoteLink>, in particular
+<NoteLink to="link-prediction-with-graph-neural-networks">link prediction</NoteLink>, to
+<NoteLink to="knowledge-graph-embeddings">knowledge graph embeddings</NoteLink> for typed link prediction, and to the
+graph recommenders of Part VII, such as <NoteLink to="pinsage">PinSage</NoteLink>, which run sampled graph networks on
+billions of nodes.

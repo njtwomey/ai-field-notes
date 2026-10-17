@@ -1,0 +1,229 @@
+---
+title: 'Symmetry and equivariance'
+kind: concept
+summary: 'A map $f$ is equivariant to a group $G$ acting on inputs and outputs if $f(g\cdot x)=g\cdot f(x)$ for every $g$, and invariant if $f(g\cdot x)=f(x)$. Circular convolution is the only linear map equivariant to cyclic shifts; pooling over positions makes it invariant.'
+tags: [geometric-deep-learning, deep-learning, worked-example]
+aliases: ['equivariance', 'invariance', 'group action', 'equivariant layer', 'invariant network']
+requires: [convolutional-layer]
+related:
+  [
+    geometric-deep-learning,
+    deep-sets,
+    group-equivariant-convolutional-network,
+    canonicalisation-and-frame-averaging,
+    graphs-as-neural-network-inputs,
+    data-augmentation,
+    invariance-and-equivariance,
+  ]
+references:
+  [bronstein2021, kondor2018generalization, zaheer2017, cohen2016gcnn, zhang2019antialiased, azulay2019, abramson2024alphafold3, batzner2022nequip]
+status: draft
+updated: 2026-10-17
+---
+
+import { EquivarianceCheck } from './EquivarianceCheck'
+
+<Definition>
+A group $G$ acts on an input space $\Xcal$ and an output space $\Ycal$, written $g \cdot x$ and $g \cdot y$. A map
+$f : \Xcal \to \Ycal$ is **equivariant** to $G$ if $f(g \cdot x) = g \cdot f(x)$ for every $g \in G$ and every $x$:
+transforming the input transforms the output in the matching way. It is **invariant** if $f(g \cdot x) = f(x)$, the
+case where $G$ leaves the outputs unchanged. Equivariant layers followed by an invariant pooling give an invariant
+network.
+</Definition>
+
+## Intuition
+
+A photograph of a cat shifted ten pixels to the right is still a photograph of a cat. A classifier should give it the
+same label: the label is invariant to shifts. An edge detector run on the shifted photograph should find the same edges,
+ten pixels to the right: the edge map is equivariant to shifts. A list of the atoms of a molecule describes the same
+molecule in any order, and a rotated molecule has the same energy and forces that rotate with it.
+
+Each of these statements names a set of transformations that leave the meaning of the input alone and says how the
+output should respond. A network can obtain the property in three ways:
+
+- **Learn it from data.** <NoteLink to="data-augmentation">Data augmentation</NoteLink> shows the network transformed
+  copies of each example with the same label. The network becomes approximately invariant near the training data, and
+  pays for it in data and compute.
+- **Remove it from the input.** Map each input to a standard pose before the network sees it, or average the network
+  over the transformations. <NoteLink to="canonicalisation-and-frame-averaging" /> describes both.
+- **Build it into the layers.** Restrict every layer to maps that commute with the transformations. The network is
+  then equivariant exactly, for every input and every weight setting, and spends no parameters on learning the
+  symmetry.
+
+The third way is the subject of <NoteLink to="geometric-deep-learning" /> <Cite id="bronstein2021" />. A
+<NoteLink to="convolutional-layer">convolutional layer</NoteLink> is its oldest example.
+
+## Groups and actions
+
+The transformations of interest form a **group**: a set $G$ with a composition $gh$ that is associative, an identity
+$e$ with $eg = ge = g$, and an inverse $g^{-1}$ for every element. Composing two symmetries gives a symmetry, doing
+nothing is a symmetry, and every symmetry can be undone.
+
+A group **acts** on a set $\Xcal$ when each $g$ maps $\Xcal$ to itself with $e \cdot x = x$ and
+$g \cdot (h \cdot x) = (gh) \cdot x$. When $\Xcal = \reals^n$ and each $g$ acts by a matrix $\rho(g)$ with
+$\rho(gh) = \rho(g)\rho(h)$, the map $\rho$ is a **representation** of $G$. The same group can act on inputs and
+outputs through different representations. The groups used in networks are:
+
+| Group                      | Acts on                       | Network family                                                                         |
+| -------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| cyclic shifts $\integers_n$ | signals and images on a torus | convolutional layer                                                                    |
+| permutations $S_n$         | sets, graph nodes             | <NoteLink to="deep-sets" />, <NoteLink to="message-passing-neural-network">message passing</NoteLink> |
+| $p4$, $p4m$                | images                        | <NoteLink to="group-equivariant-convolutional-network">group-equivariant CNN</NoteLink>       |
+| $SO(2)$, $O(2)$            | images, planar fields         | <NoteLink to="steerable-and-spherical-networks">steerable CNN</NoteLink>               |
+| $E(n)$, $SE(3)$            | point clouds, molecules       | <NoteLink to="euclidean-equivariant-graph-network">EGNN</NoteLink>, <NoteLink to="se3-equivariant-networks">SE(3) networks</NoteLink> |
+
+Here $p4$ is the group of translations and rotations by multiples of $90°$, $p4m$ adds reflections, $SO(n)$ is the
+group of rotations of $\reals^n$, $O(n)$ adds reflections, $E(n)$ adds translations to $O(n)$, and $SE(3)$ is the
+group of rotations and translations of 3-D space.
+
+## Building equivariant networks
+
+Three facts make equivariance a property of the architecture rather than of individual weights.
+
+**Composition.** If $f_1$ and $f_2$ are equivariant, so is $f_2 \circ f_1$:
+
+$$
+f_2(f_1(g \cdot x)) = f_2(g \cdot f_1(x)) = g \cdot f_2(f_1(x)).
+$$
+
+A stack of equivariant layers is equivariant, however deep. One layer that breaks the symmetry breaks it for the whole
+stack.
+
+**Pointwise nonlinearities.** An elementwise function $\sigma$, such as $\max(0, z)$, commutes with every permutation
+matrix $\Pmat$: $\sigma(\Pmat \xvec) = \Pmat\, \sigma(\xvec)$, because it treats each entry alike. Shifts and
+reflections of a signal, permutations of a set and $90°$ rotations of a pixel grid all act by permuting entries, so
+$\sigma$ is equivariant to them. It is not equivariant to a rotation matrix acting on a vector. Let $\Rmat$ rotate the
+plane by $90°$, $\Rmat(a, b) = (-b, a)$, and take $\vvec = (1, -1)$. Then $\sigma(\Rmat\vvec) = \sigma(1, 1) = (1, 1)$,
+while $\Rmat\, \sigma(\vvec) = \Rmat(1, 0) = (0, 1)$. Networks whose features are vectors therefore use nonlinearities
+that act on vector lengths only, as in <NoteLink to="se3-equivariant-networks" />.
+
+**Invariant pooling.** Summing over the orbit of the group turns equivariant features into invariant ones. For cyclic
+shifts $S$ of a signal, $\sum_i (S\xvec)_i = \sum_i x_i$, because a shift only reorders the terms. A global sum, mean or
+maximum over positions, over set elements or over graph nodes is invariant for the same reason.
+
+A fourth construction makes any map equivariant when $G$ is finite and acts linearly on the outputs. The **group
+average** of $f$ is
+
+$$
+\bar f(x) = \frac{1}{\abs{G}} \sum_{g \in G} g^{-1} \cdot f(g \cdot x).
+$$
+
+For $h \in G$, substitute $g' = gh$, so that $g^{-1} = h g'^{-1}$ and $g'$ runs over $G$ as $g$ does:
+$\bar f(h \cdot x) = h \cdot \frac{1}{\abs{G}} \sum_{g'} g'^{-1} \cdot f(g' \cdot x) = h \cdot \bar f(x)$. The cost is
+$\abs{G}$ evaluations of $f$ per input, which is affordable for the 8 elements of a square's symmetry group and not for
+the $n!$ permutations of a set.
+
+## Convolution is the linear shift-equivariant map
+
+The central result says which linear layers commute with shifts. Take signals $\xvec \in \reals^n$ on a cycle of $n$
+positions, indexed $0, \dots, n - 1$ modulo $n$. The shift $S$ moves every entry one place on: $(S\xvec)_i = x_{i-1}$.
+A linear layer is a matrix $\Amat \in \reals^{n \times n}$. It is equivariant to all shifts exactly when
+$\Amat S = S \Amat$, since every shift is a power of $S$.
+
+Let $\evec_j$ be the $j$-th standard basis vector, a single 1 at position $j$. Then $S \evec_j = \evec_{j+1}$, so
+$\evec_j = S^j \evec_0$. Column $j$ of $\Amat$ is
+
+$$
+\Amat \evec_j = \Amat S^j \evec_0 = S^j \Amat \evec_0,
+$$
+
+using $\Amat S = S \Amat$ $j$ times. So every column is the first column shifted down by $j$ places. Write the first
+column as $\avec = (a_0, \dots, a_{n-1})$. Then $A_{ij} = a_{i - j}$, and
+
+$$
+y_i = \sum_{j=0}^{n-1} a_{i-j}\, x_j,
+$$
+
+which is the circular convolution of $\xvec$ with the kernel $\avec$. Such a matrix is called circulant. Conversely,
+every circulant matrix commutes with $S$, by the same index shift. A general linear layer has $n^2$ parameters; a
+shift-equivariant one has $n$. Locality, the second assumption of the convolutional layer, cuts them to the $k$ taps of
+a short kernel.
+
+The result generalises: for a compact group acting on the input and output, a linear layer is equivariant exactly when
+it is a convolution over the group, suitably defined <Cite id="kondor2018generalization" />. Group-equivariant,
+steerable and spherical CNNs are instances.
+
+<Derivation title="Linear maps that commute with every permutation">
+Let $\Amat \in \reals^{n \times n}$ satisfy $\Pmat \Amat \Pmat^\tr = \Amat$ for every permutation matrix $\Pmat$, which
+is $\Amat \Pmat = \Pmat \Amat$ because $\Pmat^\tr = \Pmat^{-1}$. Entry $(i, j)$ of $\Pmat \Amat \Pmat^\tr$ is
+$A_{\pi(i)\pi(j)}$, where $\pi$ is the permutation. For any two diagonal positions $i, k$, some $\pi$ maps $i$ to $k$,
+so $A_{ii} = A_{kk}$: all diagonal entries are equal. For any two off-diagonal pairs $(i, j)$ and $(k, l)$ with
+$i \neq j$ and $k \neq l$, some $\pi$ maps $i$ to $k$ and $j$ to $l$, so all off-diagonal entries are equal. Hence
+$\Amat = a\I + b\ones\ones^\tr$ for two numbers $a, b$, and
+
+$$
+\Amat\xvec = a\xvec + b\,\paren{\textstyle\sum_j x_j}\ones.
+$$
+
+Each element is updated from itself and from the sum over the set. Two parameters remain of $n^2$, whatever $n$ is.
+This is the linear layer of <NoteLink to="deep-sets" /> <Cite id="zaheer2017" />.
+</Derivation>
+
+<EquivarianceCheck />
+
+## Invariant or equivariant
+
+The output's type decides which property a layer should have. A classifier needs an invariant output. A segmentation
+map, a force on each atom or an updated vector per node needs an equivariant one. Invariance should come late. A
+network that pools over the group in its first layers throws away the relative pose of parts: a face and a scramble of
+its eyes, nose and mouth give the same pooled features. Cohen and Welling measured this on rotated handwritten digits: a
+network that pooled over rotations after every layer had 3.21% test error, and one that kept rotation channels until
+the last layer had 2.28% <Cite id="cohen2016gcnn" />. The blueprint of geometric deep learning is therefore a stack of
+equivariant layers, optional local pooling to coarsen the domain, and one invariant pooling at the end
+<Cite id="bronstein2021" />.
+
+## Worked example
+
+Take a signal of length $n = 6$ on a cycle, $\xvec = (1, 3, 0, 2, 0, 0)$, and the difference kernel $a_0 = 1$,
+$a_1 = -1$, so that $y_i = x_i - x_{i-1}$ with indices modulo 6.
+
+**Convolve.** Position 0 reads $x_0 - x_5 = 1 - 0 = 1$. Position 1 reads $x_1 - x_0 = 3 - 1 = 2$. Position 2 reads
+$0 - 3 = -3$, position 3 reads $2 - 0 = 2$, position 4 reads $0 - 2 = -2$ and position 5 reads $0 - 0 = 0$. So
+$\yvec = (1, 2, -3, 2, -2, 0)$.
+
+**Shift, then convolve.** The shifted input is $S\xvec = (0, 1, 3, 0, 2, 0)$: every entry moves one place on, and the
+last entry wraps to the front. Its convolution is $(0 - 0, 1 - 0, 3 - 1, 0 - 3, 2 - 0, 0 - 2) = (0, 1, 2, -3, 2, -2)$,
+which is $S\yvec$. The two orders agree, as the derivation requires.
+
+**A position-dependent layer fails.** Let $\Dmat = \diag(0, 1, 2, 3, 4, 5)$ weight each position by its index. Then
+$\Dmat\xvec = (0, 3, 0, 6, 0, 0)$ and $S\Dmat\xvec = (0, 0, 3, 0, 6, 0)$, but $\Dmat S\xvec = (0, 1, 6, 0, 8, 0)$.
+Shifting the input does not shift the output, because the weights belong to positions, not to the pattern.
+
+**<Gloss name="relu" /> and pooling.** Rectifying gives $\max(0, \yvec) = (1, 2, 0, 2, 0, 0)$, and rectifying $S\yvec$
+gives its shift. The sum over positions is $1 + 2 + 2 = 5$ for both: the composition "convolve, rectify, sum" is
+invariant to shifts.
+
+**Reflection.** Let $(F\xvec)_i = x_{-i}$, so $F\xvec = (1, 0, 0, 2, 0, 3)$. Its convolution is
+$(1 - 3, 0 - 1, 0 - 0, 2 - 0, 0 - 2, 3 - 0) = (-2, -1, 0, 2, -2, 3)$, while $F\yvec = (1, 0, -2, 2, -3, 2)$. The
+difference kernel is not symmetric, so the layer is not equivariant to reflections. A symmetric kernel, such as
+$y_i = x_{i-1} + 2x_i + x_{i+1}$, is.
+
+**Count.** A dense layer on 6 positions has 36 weights. A circular convolution has 6. The difference kernel uses 2. A
+layer equivariant to all $6! = 720$ permutations has 2, the $a$ and $b$ of the derivation above.
+
+## Assumptions
+
+- **The symmetry holds for the task.** Upright photographs are not rotation-invariant: gravity fixes "up", and a
+  rotated 6 is a 9. Building in a symmetry the labels do not have removes information the model needs.
+- **The group acts in a known way.** Equivariance needs the action on the input and the output written down: a shift of
+  pixels, a rotation of coordinates and of force vectors, a relabelling of nodes.
+- **The domain supports the action.** Shifts are exact on a cycle. A finite image with borders, a pixel grid under
+  non-right-angle rotations, or a mesh with irregular sampling supports the action only approximately.
+
+## Pitfalls
+
+- **Borders, strides and pooling break shift equivariance.** Zero padding makes outputs near the border depend on
+  absolute position, and a stride $s$ keeps equivariance only to shifts by multiples of $s$. Standard image classifiers
+  change their output under one-pixel shifts for this reason <Cite id="azulay2019" />; blurring before subsampling
+  restores most of the lost equivariance <Cite id="zhang2019antialiased" />.
+- **One non-equivariant layer spoils the stack.** A <NoteLink to="positional-encoding">positional embedding</NoteLink>,
+  a flatten followed by a dense layer, or a learned per-position bias makes the network depend on absolute position.
+- **Pointwise nonlinearities on vectors.** A ReLU applied to the coordinates of a vector feature breaks rotation
+  equivariance, as the example under "Building equivariant networks" shows.
+- **Exact symmetry is not always worth its cost.** Equivariant layers are more expensive per parameter and narrower in
+  what they can express. With enough data and augmentation, unconstrained models can match them:
+  <NoteLink to="protein-structure-prediction">AlphaFold 3</NoteLink> predicts atom coordinates with a non-equivariant
+  network trained on randomly rotated and translated structures <Cite id="abramson2024alphafold3" />. Equivariance pays
+  most when data are scarce and the symmetry is exact, as for
+  <NoteLink to="machine-learned-interatomic-potentials">interatomic potentials</NoteLink>
+  <Cite id="batzner2022nequip" />.

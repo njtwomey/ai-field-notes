@@ -1,0 +1,165 @@
+---
+title: 'Noisy Student'
+kind: technique
+summary: 'Noisy Student training labels unlabelled images with a teacher, trains an equal or larger student on them with dropout, stochastic depth and strong augmentation, and makes the student the next teacher. The noise forces the student to generalise beyond the teacher (Xie et al.).'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['Noisy Student training', 'iterative self-training with noise', 'teacher-student self-training']
+requires: [pseudo-labelling, knowledge-distillation]
+related: [self-training, dropout, data-augmentation, weak-to-strong-generalisation, fixmatch, consistency-regularisation]
+references:
+  [xie2020, yalniz2019billion, hinton2015, srivastava2014, huang2016stochastic, cubuk2020randaugment, zoph2020rethinking, pham2021meta, burns2023weak]
+status: draft
+updated: 2026-10-17
+---
+
+import { NoisyStudentGenerations } from './NoisyStudentGenerations'
+
+<Definition>
+**Noisy Student training** is iterated <NoteLink to="self-training">self-training</NoteLink> with a separate student
+<Cite id="xie2020" />. A teacher network is trained on the labelled images. The teacher, run without noise, gives a soft
+or hard pseudo-label to every unlabelled image. A student as large as the teacher or larger is trained on the labelled
+and pseudo-labelled images with noise added to the student: data augmentation on its inputs, and dropout and stochastic
+depth in its layers. The student then becomes the teacher, and the loop repeats.
+</Definition>
+
+## Problem
+
+<NoteLink to="pseudo-labelling">Pseudo-labelling</NoteLink> lets one network label data for itself, so its errors come
+back as targets. <NoteLink to="knowledge-distillation">Knowledge distillation</NoteLink> uses a separate student, but
+trains it to match a teacher, and a student that matches its teacher exactly can never be better than it. Noisy
+Student keeps distillation's teacher-student split and changes the goal: the student should exceed the teacher.
+
+Two changes make that possible. The student is given more capacity than the teacher, so it can fit more than the
+teacher knew. The student is noised while the teacher is not, so the student cannot reach a low loss by copying the
+teacher's function: it must give the teacher's answer for every augmented version of an image and for every dropout
+sub-network of itself. Xie and colleagues describe this as "knowledge expansion", the opposite of distillation's
+compression <Cite id="xie2020" />.
+
+## Mechanism
+
+### The loop
+
+Let $\set{(\xvec_i, y_i)}_{i=1}^{n}$ be the labelled images and $\set{\tilde\xvec_j}_{j=1}^{m}$ the unlabelled ones,
+with $m \gg n$. Write $f(\xvec; \theta)$ for a network's class probabilities and $f^{\text{noised}}$ for the same
+network with noise switched on.
+
+1. Train a teacher $\theta_t$ to minimise $\frac1n\sum_i \ell\bigl(y_i, f^{\text{noised}}(\xvec_i; \theta_t)\bigr)$, the
+   cross-entropy $\ell$ on labelled images (noise here is ordinary regularisation).
+2. Pseudo-label the clean unlabelled images with the clean teacher: $\tilde y_j = f(\tilde\xvec_j; \theta_t)$, a soft
+   distribution, or its one-hot arg max.
+3. Train an equal-or-larger student $\theta_s$ to minimise
+   $$
+   \frac1n\sum_{i=1}^{n}\ell\bigl(y_i, f^{\text{noised}}(\xvec_i; \theta_s)\bigr)
+   + \frac1m\sum_{j=1}^{m}\ell\bigl(\tilde y_j, f^{\text{noised}}(\tilde\xvec_j; \theta_s)\bigr).
+   $$
+4. Make the student the new teacher and return to step 2.
+
+The student is trained from scratch: initialising it from the teacher was sometimes worse and still needed long
+training. Each batch holds far more unlabelled images than labelled ones (14 to 28 unlabelled per labelled image on
+<Gloss name="imagenet" />) <Cite id="xie2020" />.
+
+### The noise
+
+Xie and colleagues used two kinds <Cite id="xie2020" />.
+
+- **Input noise:** RandAugment, which applies two random image operations of magnitude 27 to each image
+  <Cite id="cubuk2020randaugment" />. The student must give a translated or recoloured image the label that the
+  teacher gave the clean one. See <NoteLink to="data-augmentation">data augmentation</NoteLink>.
+- **Model noise:** <NoteLink to="dropout">dropout</NoteLink> of rate 0.5 on the final layer
+  <Cite id="srivastava2014" />, and stochastic depth, which skips each residual block at random during training, with
+  survival probability 0.8 for the last block and linearly higher for earlier ones <Cite id="huang2016stochastic" />.
+  The clean teacher acts like the average of all its dropout sub-networks, an ensemble, while the noised student must
+  match that ensemble with each single sub-network.
+
+Removing the noise from the student's unlabelled images lowers the gain. With a 130M-image unlabelled set and an
+EfficientNet-B5 teacher, the student reached 85.1% top-1 accuracy on ImageNet with noise, 84.3% with augmentation,
+dropout and stochastic depth removed, and 84.0% for the supervised teacher <Cite id="xie2020" />. Noising the teacher
+when it labels also hurts (84.4%): the pseudo-labels should come from the strongest, clean model.
+
+### Filtering and balancing
+
+The unlabelled images (300M from JFT) were labelled by the teacher, and those whose top confidence was below 0.3 were
+dropped as probably out of domain. Each of the 1000 ImageNet classes then kept its 130,000 most confident images, and
+classes with fewer were filled by duplicating images, so the student saw $1000 \times 130{,}000 = 130$M images, 81M of
+them unique <Cite id="xie2020" />. Balancing keeps the pseudo-labelled set at the class proportions of the labelled
+one; it mattered most for small models.
+
+### Soft or hard pseudo-labels
+
+Both work; soft labels were slightly better for out-of-domain unlabelled data <Cite id="xie2020" />. A soft label
+carries the teacher's uncertainty, as in distillation <Cite id="hinton2015" />. Without student noise a soft label is a
+fixed point: a student that reproduces the teacher's function attains the loss's minimum on unlabelled data and gets
+no gradient from them. The worked example makes this concrete.
+
+## Worked example
+
+**The noiseless student copies.** One unlabelled image reaches a final layer with features $\mathbf h = (1.2, 0.8)$,
+weights $(1, 1)$ and bias $-1$, so the teacher's logit is $z = 1.2 + 0.8 - 1 = 1.0$ and its soft pseudo-label is
+$t = \sigma(1.0) = 0.731$. A student with the same weights and no noise predicts $0.731$ too. The cross-entropy
+$-\bigl(t \log q + (1 - t)\log(1 - q)\bigr)$ at $q = t$ is the entropy of $t$, $0.582$, its minimum over $q$: the
+student has nothing to learn from this image.
+
+**The noised student cannot copy.** Train the same student with dropout of rate $0.5$ on the two features: each is
+kept with probability $\tfrac12$ and, when kept, doubled. Four masks are equally likely:
+
+| features kept | logit                  | student's $q$ | cross-entropy with $t = 0.731$ |
+| ------------- | ---------------------- | ------------- | ------------------------------ |
+| both          | $2(1.2 + 0.8) - 1 = 3.0$ | 0.953         | 0.855                          |
+| first only    | $2(1.2) - 1 = 1.4$     | 0.802         | 0.597                          |
+| second only   | $2(0.8) - 1 = 0.6$     | 0.646         | 0.599                          |
+| neither       | $-1$                   | 0.269         | 1.044                          |
+
+The expected loss is $0.774$, well above the floor of $0.582$. The teacher's weights are no longer a minimiser: to
+lower the loss the student must change its weights so that every masked sub-network predicts close to $0.731$, which
+means spreading the evidence over features rather than relying on their sum. At test time the student runs without
+dropout, which approximates the average of these sub-networks, as the teacher's clean prediction did.
+
+**Generations on two moons.** The figure runs the loop on 200 points of two moons with four labels per class. The
+teacher is a <NoteLink to="logistic-regression">logistic regression</NoteLink> on 40
+<NoteLink to="random-fourier-features">random Fourier features</NoteLink>; each student has 80 features at a shorter
+lengthscale, is trained with three jittered copies of every point (standard deviation 0.15) and with dropout of rate 0.3
+on its features, and pseudo-labels every unlabelled point. With data seed 7 the teacher has test accuracy $0.921$ and
+8.3% of its pseudo-labels are wrong. The same larger student without noise reaches $0.910$ and reproduces the teacher's
+pseudo-labels exactly, so the loop stops after one generation. The noisy students reach $0.938$, $0.944$ and $0.949$ in
+generations 1 to 3, and the share of wrong pseudo-labels falls to 6.3%. Jitter of 0.35 is too much: the second student
+falls to $0.898$.
+
+<NoisyStudentGenerations />
+
+## Cost
+
+Each generation trains a student from scratch on $n + m$ images, and the students grow. On ImageNet the best result
+took three generations, from an EfficientNet-B7 teacher to EfficientNet-L2 students of 480M parameters, whose training
+takes about five times as long as B7's; accuracy rose from 87.6% to 88.1% and then 88.4% <Cite id="xie2020" />. The
+teacher's labelling pass over 300M images is cheap by comparison. The method is expensive in compute and simple in
+code: no new losses, only the ordinary cross-entropy on a larger, noised dataset.
+
+## Trade-offs
+
+- **Noise strength.** Too little noise makes the student a copy; too much makes it unable to fit the pseudo-labels.
+  The ImageNet settings were not tuned extensively <Cite id="xie2020" />, but the figure shows the failure at both ends.
+- **Student size.** A student no larger than the teacher gains less; Xie and colleagues found a large student
+  important <Cite id="xie2020" />. Size and noise work together: capacity to fit more, noise to stop it fitting only
+  the teacher.
+- **Joint training against pretraining.** Yalniz and colleagues first trained the student on pseudo-labelled data and
+  then fine-tuned it on labels, raising a ResNet-50 to 81.2% top-1 with a billion unlabelled images
+  <Cite id="yalniz2019billion" />. Noisy Student trains on both at once, which was simpler and better in its
+  experiments.
+- **Self-training against pretraining.** On <Gloss name="coco" /> detection, self-training with strong augmentation
+  helped at every labelled-data size (by 1.3 to 3.4 <Gloss name="ap" />), while ImageNet pretraining hurt when all
+  labels were used <Cite id="zoph2020rethinking" />.
+- **A fixed teacher against a learning one.** Meta Pseudo Labels updates the teacher from the student's performance on
+  labelled data, so the pseudo-labels improve during training <Cite id="pham2021meta" />.
+
+## Pitfalls
+
+- **A biased teacher stays biased.** Noise corrects scattered errors, where a few wrong labels sit among many right
+  ones nearby. A teacher wrong on a whole region labels it consistently, and the student learns the region
+  consistently wrong.
+- **Out-of-domain unlabelled data.** Without the confidence filter, images of other kinds are forced into some class.
+  The 0.3 threshold is low because the filter only needs to reject what is clearly off-domain.
+- **Evaluation leakage.** A large web-scale unlabelled set can contain near-duplicates of test images, which flatters
+  the student.
+- **Weak-to-strong settings.** A strong pretrained model fine-tuned on a weaker model's labels already exceeds its
+  supervisor without noise, but recovers only part of the gap to training on true labels <Cite id="burns2023weak" />.
+  See <NoteLink to="weak-to-strong-generalisation">weak-to-strong generalisation</NoteLink>.

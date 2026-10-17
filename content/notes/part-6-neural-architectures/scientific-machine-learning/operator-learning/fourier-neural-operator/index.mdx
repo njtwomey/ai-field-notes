@@ -1,0 +1,162 @@
+---
+title: 'Fourier neural operator'
+kind: concept
+summary: 'A Fourier neural operator layer transforms the input field by FFT, multiplies its lowest $k$ modes by learned complex weights, transforms back and adds a pointwise linear path. The weights live on modes, not grid points, so a trained model runs at other resolutions.'
+tags: [scientific-machine-learning, deep-learning, signal-processing, worked-example]
+aliases: ['FNO', 'spectral convolution layer', 'mode truncation', 'Fourier layer', 'zero-shot super-resolution']
+requires: [operator-learning, fast-fourier-transform]
+related: [deeponet, long-convolution-models, machine-learning-weather-forecasting, convolution-theorem, convolutional-layer, physics-informed-neural-operator, graph-and-mesh-neural-operators, discrete-fourier-transform]
+references: [li2021fno, kovachki2023neuraloperator, kovachki2021fnouniversal, lu2022fairoperators, li2023geofno, azizzadenesheli2024neuraloperators]
+status: draft
+updated: 2026-10-17
+---
+
+import { FnoBurgers } from './FnoBurgers'
+import { FnoDiagram } from './FnoDiagram'
+
+<Definition>
+A **Fourier neural operator** (<Gloss name="fno" />) maps an input function $a(x)$ on a periodic domain to an output
+function $u(x)$. A pointwise linear map lifts $a(x)$ to a vector $v_0(x) \in \reals^c$ of $c$ channels at each point,
+$L$ **Fourier layers** follow, and a pointwise network projects $v_L(x)$ to $u(x)$. A Fourier layer is
+
+$$
+v_{\ell+1}(x) = \sigma\paren{W v_\ell(x) + \Fcal^{-1}\brack{R_k\, (\Fcal v_\ell)_k \text{ for } \abs{k} < k_{\max}}(x) + b},
+$$
+
+where $\Fcal$ is the <NoteLink to="fourier-transform">Fourier transform</NoteLink> of each channel,
+$R_k \in \complex^{c \times c}$ is a learned matrix for each of the lowest $k_{\max}$ frequencies, the other frequencies
+are set to zero, $W \in \reals^{c \times c}$ acts at every point, $b \in \reals^c$ is a bias and $\sigma$ is an
+activation. On a uniform grid $\Fcal$ is computed by the <Gloss name="fft" /> <Cite id="li2021fno" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="convolutional-layer">convolutional layer</NoteLink> mixes each point with its few neighbours, and it
+takes many layers before information crosses the domain. The solution operators of many <Gloss name="pde" plural /> are
+global: in the <NoteLink to="heat-equation">heat equation</NoteLink>, a change of the initial temperature anywhere is
+felt everywhere at once. A Fourier layer mixes every point with every other point in one step, by doing a convolution
+with a kernel as wide as the domain. The <NoteLink to="convolution-theorem">convolution theorem</NoteLink> makes such a
+convolution cheap: it is a product of Fourier coefficients.
+
+The Fourier coefficients also give the layer its resolution independence. The coefficient of $e^{i2\pi kx}$ is a
+property of the function, not of the grid it is sampled on. A weight attached to frequency $k$ means the same thing on a
+grid of 32 points and on a grid of 1,024 points, so a trained model can be run on either. A convolution kernel stored
+as $3 \times 3$ grid weights covers a different physical width at every resolution.
+
+The lowest frequencies carry most of the energy of a smooth solution. Keeping only $k_{\max}$ of them makes the layer
+cheap and acts as a smoothness prior. The pointwise path $W v(x)$ and the activation restore what the truncation
+discards: products of low-frequency fields contain higher frequencies, so a stack of layers can represent outputs with
+detail beyond $k_{\max}$.
+
+<FnoDiagram />
+
+## Details
+
+**The spectral convolution.** The general layer of a neural operator contains the integral
+$\int_D \kappa(x, y)\, v(y)\, dy$ with a learned kernel $\kappa$
+(<NoteLink to="operator-learning">operator learning</NoteLink>). The Fourier neural operator assumes the kernel depends
+only on the difference, $\kappa(x, y) = \kappa(x - y)$, so that the integral is a convolution. On a periodic domain the
+convolution theorem gives
+
+$$
+\paren{\kappa * v}(x) = \Fcal^{-1}\brack{\paren{\Fcal\kappa}_k \paren{\Fcal v}_k}(x).
+$$
+
+Instead of learning $\kappa$ and transforming it, the layer learns its transform directly: $R_k = (\Fcal\kappa)_k$, a
+$c \times c$ complex matrix that mixes the channels at frequency $k$. The kernel then never appears. Truncating to
+$\abs{k} < k_{\max}$ limits the parameters of one spectral convolution to $k_{\max} c^2$ complex numbers, whatever the
+grid. For a real field the coefficients at $-k$ are the conjugates of those at $k$, so only non-negative frequencies are
+stored, and the real FFT (rfft) computes them.
+
+**The pointwise path.** The term $W v_\ell(x)$ is a $1 \times 1$ convolution. It carries the frequencies above
+$k_{\max}$ through the layer, which the spectral path would set to zero, and with the bias it handles the
+non-periodic part of the output. Without it, every layer would output a band-limited function.
+
+**Resolution independence.** On a grid of $n$ points, the real FFT gives $n/2 + 1$ coefficients, the layer multiplies
+the lowest $k_{\max}$ and pads the rest with zeros, and the inverse FFT returns $n$ values. With the convention that
+the forward transform is a sum and the inverse divides by $n$, a band-limited input sampled on any grid with
+$n \ge 2(k_{\max} - 1)$ gives the same output function, sampled on the same grid. The lift, $W$ and the projection act
+pointwise and do not depend on $n$ at all. Li et al. trained on one resolution and evaluated on finer ones with the
+same error, and called this **zero-shot super-resolution** <Cite id="li2021fno" />. The output on the finer grid has no
+detail above what the trained layers can produce: the finer grid samples the same function more densely.
+
+**Cost.** The FFT and its inverse cost $O(c\, n \log n)$ per layer and the <NoteLink to="one-by-one-convolution">channel
+mixing</NoteLink> costs $O(k_{\max} c^2)$ per input. On a $256 \times 256$ grid Li et al. measured 0.005 s for one
+<NoteLink to="multilayer-perceptron">forward pass</NoteLink> of a trained Fourier neural operator, against 2.2 s for the
+pseudo-spectral solver that produced the Navier–Stokes training data <Cite id="li2021fno" />.
+
+**Universality.** Kovachki, Lanthaler and Mishra proved that Fourier neural operators approximate any continuous
+operator between Sobolev spaces on the torus, and that for the operators of some elliptic and fluid problems the size
+of the network grows only slowly with the inverse of the error <Cite id="kovachki2021fnouniversal" />.
+
+**Several dimensions.** For a field on a $d$-dimensional grid the transform is the $d$-dimensional FFT and the kept
+frequencies are the vectors $\kvec$ with every $\abs{k_j} < k_{\max}$. Li et al. used $k_{\max} = 16$ and $c = 64$ for
+one-dimensional problems and $k_{\max} = 12$, $c = 32$ for two-dimensional ones, with four Fourier layers
+<Cite id="li2021fno" />.
+
+<FnoBurgers />
+
+The figure trains a small Fourier neural operator (4 channels, two Fourier layers) on 16 Burgers pairs at 32 points
+and evaluates the same weights on the solver's 64-point grid. The two test errors coincide to within a fraction of a
+percent at every checkpoint, which is the resolution independence of the layer. With the defaults, 4 modes and 200 Adam
+steps, the test error is about 4%. One mode leaves it near 40%, because the spectral path then carries only the mean;
+2 to 8 modes all give about 4 to 5%. More modes lower the training error but not the test error: with 16 training
+pairs the extra weights fit the training set rather than the operator.
+
+## Worked example
+
+One spectral convolution with one channel, $k_{\max} = 2$ and weights $R_0 = 0.5$ and $R_1 = 1 - i$, applied to the
+input $v(x) = 1 + \cos 2\pi x$.
+
+1. **Sample on $n = 4$ points**, $x_j = j/4$: $v = (2, 1, 0, 1)$.
+2. **Transform.** $V_k = \sum_{j=0}^{3} v_j e^{-i 2\pi jk/4}$. For $k = 0$: $V_0 = 2 + 1 + 0 + 1 = 4$. For $k = 1$:
+   $V_1 = 2 + 1 \cdot (-i) + 0 + 1 \cdot i = 2$. For $k = 2$: $V_2 = 2 - 1 + 0 - 1 = 0$.
+3. **Multiply and truncate.** $Y_0 = 0.5 \times 4 = 2$, $Y_1 = (1 - i) \times 2 = 2 - 2i$, and $Y_2 = 0$ because
+   $k = 2 \ge k_{\max}$.
+4. **Transform back.** For a real signal $y_j = \tfrac14\brack{Y_0 + 2\operatorname{Re}\paren{Y_1 e^{i2\pi j/4}}}$. With
+   $e^{i2\pi j/4} = 1, i, -1, -i$: $\operatorname{Re}(Y_1 e^{i2\pi j/4}) = 2, 2, -2, -2$, so
+   $y = (1.5, 1.5, -0.5, -0.5)$.
+5. **Read the weights.** $R_0 = 0.5$ halves the mean, from 1 to 0.5. $R_1 = 1 - i = \sqrt2\, e^{-i\pi/4}$ scales the
+   first harmonic by $\sqrt2$ and delays it by an eighth of a period: $\cos 2\pi x$ becomes
+   $\sqrt2\cos(2\pi x - \pi/4) = \cos 2\pi x + \sin 2\pi x$. The output function is
+   $y(x) = 0.5 + \cos 2\pi x + \sin 2\pi x$, and its values at $x = 0, 0.25, 0.5, 0.75$ are those of step 4.
+6. **Same weights, $n = 8$.** Now $V_0 = 8$ and $V_1 = 4$; the products are $Y_0 = 4$ and $Y_1 = 4 - 4i$, and the
+   inverse transform divides by 8 instead of 4. The output is again $0.5 + \cos 2\pi x + \sin 2\pi x$, sampled at eight
+   points: $(1.5, 1.91, 1.5, 0.5, -0.5, -0.91, -0.5, 0.5)$. Every second value repeats the four-point output. The
+   weights were never tied to the grid.
+
+A full layer adds $W v(x) + b$ at every point and applies $\sigma$; with $W = 0.2$, $b = 0$ and the identity in place of
+$\sigma$, the first output value on the four-point grid is $1.5 + 0.2 \times 2 = 1.9$.
+
+## Practice
+
+Current implementations follow Li et al. with small changes: <Gloss name="gelu" /> activations, four Fourier layers, 12
+to 32 modes per dimension, 32 to 128 channels, the grid coordinates appended as input channels, Adam with a decaying
+<Gloss name="learning-rate">learning rate</Gloss> and the relative $L^2$ loss. Non-periodic inputs are padded with zeros
+before the FFT so that the periodic convolution does not wrap the two ends together. Variants change the geometry:
+geo-FNO learns a deformation that maps an irregular domain onto a uniform grid, where the FFT applies
+<Cite id="li2023geofno" />. In a comparison on 16 benchmarks the Fourier neural operator matched
+<Gloss name="deeponet" /> on simple problems and degraded on complex geometries and on inputs with noise
+<Cite id="lu2022fairoperators" />. A review of neural operators in science and engineering is Azizzadenesheli et al.
+<Cite id="azizzadenesheli2024neuraloperators" />.
+
+## Assumptions
+
+- The domain is a periodic box sampled on a uniform grid, or can be mapped onto one.
+- The operator is close to translation-equivariant in its global part, so that a convolution with a learned kernel and
+  pointwise corrections can represent it.
+- The relevant information in the input and output is carried by a modest number of low frequencies per layer.
+
+## Pitfalls
+
+- **Irregular domains.** The FFT needs a uniform grid. Interpolating mesh data onto a grid adds error at boundaries,
+  and graph or deformation-based operators are the alternatives.
+- **Wrap-around.** Without padding, a non-periodic input is treated as periodic, and the jump between its two ends
+  produces ringing that the network has to learn to cancel.
+- **Aliasing from the nonlinearity.** The activation of a band-limited field creates frequencies above the grid's
+  Nyquist frequency, which fold back onto lower ones. The aliased part depends on the grid, so resolution independence
+  holds only approximately.
+- **Super-resolution read as accuracy.** Evaluating on a finer grid gives a denser sample of the same output, not detail
+  the training data did not contain.
+- **Too many modes for the training grid.** $k_{\max}$ above $n/2 + 1$ cannot be used at the training resolution, and
+  modes near the Nyquist frequency of coarse data are learned from aliased values.

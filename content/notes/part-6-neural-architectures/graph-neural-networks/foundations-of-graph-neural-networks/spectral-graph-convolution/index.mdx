@@ -1,0 +1,246 @@
+---
+title: 'Spectral graph convolution'
+kind: concept
+summary: 'A spectral filter $g_\theta(\Lmat)=\Umat g_\theta(\Lambdamat)\Umat^\tr$ needs the eigendecomposition and acts on the whole graph. A degree-$K$ Chebyshev polynomial in $\tilde\Lmat$ needs no eigenvectors and reaches only $K$ hops (ChebNet); GCN is the case $K=1$.'
+tags: [graph-neural-networks, graphs, deep-learning, worked-example]
+aliases: ['ChebNet', 'Chebyshev graph filter', 'spectral GCN', 'polynomial graph filter']
+requires: [graph-laplacian-and-graph-fourier-transform]
+related: [graph-convolutional-network, oversmoothing, message-passing-neural-network, convolution-theorem, polynomial-interpolation-and-runge, graph-neural-networks-under-heterophily]
+references: [bruna2014, defferrard2016, hammond2011, kipf2017, wu2019sgc, chien2021gprgnn, he2021bernnet, he2022chebnetii, shuman2013]
+status: draft
+updated: 2026-10-17
+---
+
+import { ChebyshevFilter } from './ChebyshevFilter'
+
+<Definition>
+A **spectral graph convolution** filters a graph signal $\xvec \in \reals^n$ by a learned
+<NoteLink to="frequency-response">frequency response</NoteLink> $g_\theta$ of the Laplacian's eigenvalues,
+$\yvec = \Umat\, g_\theta(\Lambdamat)\, \Umat^\tr\xvec$, where $\Lmat = \Umat\Lambdamat\Umat^\tr$ is the
+eigendecomposition of a graph Laplacian <Cite id="bruna2014" />. A **Chebyshev filter** restricts $g_\theta$ to a
+polynomial of degree $K$ in the Chebyshev basis,
+
+$$
+g_\theta(\Lmat)\,\xvec = \sum_{k=0}^{K} \theta_k\, T_k(\tilde\Lmat)\,\xvec, \qquad \tilde\Lmat = \frac{2}{\lambda_{\max}}\Lmat - \I,
+$$
+
+which needs no eigenvectors, costs $K$ sparse <NoteLink to="matrix-vector-product">matrix-vector products</NoteLink>,
+and mixes only nodes at most $K$ hops apart (<Gloss name="chebnet" />) <Cite id="defferrard2016" />. The graph
+convolutional network is the case $K = 1$ with tied coefficients.
+</Definition>
+
+## Intuition
+
+On an image, convolution is the linear map that commutes with translation. The Fourier basis diagonalises every such
+map, so a convolution is a pointwise product of Fourier coefficients: the
+<NoteLink to="convolution-theorem" />. A graph has no translations, which rules out defining a "shifted copy" of a
+filter. The frequency side survives. The eigenvectors of the Laplacian are the
+<NoteLink to="graph-laplacian-and-graph-fourier-transform">graph Fourier basis</NoteLink>, and a filter is a choice of
+gain for each frequency.
+
+Learning one free gain per frequency fails for three reasons. It needs the full eigendecomposition. Its parameters
+number $n$ per filter. And a free set of gains acts on the whole graph at once, so nothing makes the filter local the
+way a 3 × 3 image kernel is. The classical remedy is the same as on images: a smooth frequency response corresponds to a
+localised filter in space. On a graph the cleanest smooth family is the polynomials, and a polynomial of degree $K$ in
+$\Lmat$ is local by construction.
+
+## Free-form spectral filters
+
+Bruna et al. defined the first spectral graph network <Cite id="bruna2014" />. A layer with $F$ input and $F'$ output
+channels computes, for output channel $j$,
+
+$$
+\yvec_j = \sigma\paren{\sum_{i=1}^{F} \Umat\, \diag(\thetavec_{ij})\, \Umat^\tr\xvec_i},
+$$
+
+with a gain vector $\thetavec_{ij} \in \reals^n$ for each pair of channels. The layer has $nFF'$ parameters, each
+<NoteLink to="multilayer-perceptron">forward pass</NoteLink> multiplies by the dense $n \times n$ matrix $\Umat$, and
+$\Umat$ itself costs $O(n^3)$ to compute. The gains are tied to one graph's eigenvectors, so a trained filter has no
+meaning on a different graph. Bruna et al. kept the eigenvectors of only the smallest eigenvalues and interpolated the
+gains smoothly to reduce the parameter count, which already pointed at smooth responses.
+
+## Polynomial filters are local
+
+Let the response be a polynomial, $g_\theta(\lambda) = \sum_{k=0}^{K} \theta_k \lambda^k$. Because
+$\Umat\Lambdamat^k\Umat^\tr = \Lmat^k$ for an orthogonal $\Umat$,
+
+$$
+\Umat\, g_\theta(\Lambdamat)\, \Umat^\tr = \sum_{k=0}^{K} \theta_k \Lmat^k = g_\theta(\Lmat).
+$$
+
+The filter is now a matrix polynomial in $\Lmat$, with $K + 1$ parameters and no eigenvectors.
+
+**Locality.** $(\Lmat^k)_{ij} = 0$ whenever nodes $i$ and $j$ are more than $k$ hops apart. The proof is by induction on
+$k$. For $k = 0$, $\Lmat^0 = \I$ is non-zero only on the diagonal, at distance 0. For $k \ge 1$,
+$(\Lmat^k)_{ij} = \sum_l (\Lmat^{k-1})_{il}L_{lj}$. The factor $L_{lj}$ is non-zero only when $l = j$ or $l$ is a
+neighbour of $j$, and by induction $(\Lmat^{k-1})_{il}$ is non-zero only when $l$ is within $k - 1$ hops of $i$. A
+non-zero term therefore needs a node $l$ within $k - 1$ hops of $i$ and at most one hop from $j$, so $j$ is within $k$
+hops of $i$. A degree-$K$ filter thus computes each output node from its $K$-hop neighbourhood, like a kernel of
+radius $K$ <Cite id="hammond2011" />.
+
+**The basis matters.** In the monomial basis $\Lmat^k$ the entries grow like $\lambda_{\max}^k$ and the columns
+$\Lmat^k\xvec$ become nearly parallel, so learning $\theta_k$ is badly conditioned. Defferrard et al. use the Chebyshev
+polynomials of the first kind, $T_0(t) = 1$, $T_1(t) = t$, $T_k(t) = 2tT_{k-1}(t) - T_{k-2}(t)$, which are bounded by 1
+on $[-1, 1]$ and orthogonal there <Cite id="defferrard2016" />. The Laplacian's spectrum $[0, \lambda_{\max}]$ is mapped
+to $[-1, 1]$ by $\tilde\Lmat = 2\Lmat/\lambda_{\max} - \I$. Any upper bound on the largest eigenvalue works; for the
+normalised Laplacian the bound 2 is standard, and for $\Lmat = \Dmat - \Amat$ the bound $2d_{\max}$ always holds.
+
+<Derivation title="Chebyshev polynomials: boundedness and the recurrence">
+For $t = \cos\phi \in [-1, 1]$, define $T_k(t) = \cos(k\phi)$. The identity
+$\cos((k + 1)\phi) + \cos((k - 1)\phi) = 2\cos\phi\cos(k\phi)$ gives $T_{k+1}(t) = 2tT_k(t) - T_{k-1}(t)$, and with
+$T_0 = 1$, $T_1 = t$ this shows that $T_k$ is a polynomial of degree $k$. The definition gives
+$\abs{T_k(t)} \le 1$ on $[-1, 1]$. Substituting $t = \cos\phi$,
+$\int_{-1}^{1} T_j(t)T_k(t)(1 - t^2)^{-1/2}\,\mathrm{d}t = \int_0^\pi \cos(j\phi)\cos(k\phi)\,\mathrm{d}\phi$, which is
+zero for $j \ne k$: the polynomials are orthogonal under the weight $(1 - t^2)^{-1/2}$.
+</Derivation>
+
+**The recurrence on signals.** The filter never forms $T_k(\tilde\Lmat)$ as a matrix. With
+$\bar\xvec_k = T_k(\tilde\Lmat)\xvec$,
+
+$$
+\bar\xvec_0 = \xvec, \qquad \bar\xvec_1 = \tilde\Lmat\xvec, \qquad \bar\xvec_k = 2\tilde\Lmat\bar\xvec_{k-1} - \bar\xvec_{k-2},
+$$
+
+and $\yvec = \sum_k \theta_k\bar\xvec_k$. Each step is one product with the sparse $\tilde\Lmat$, so a filter costs
+$O(K\abs{\Ecal})$ operations <Cite id="hammond2011" />. The ChebNet layer applies it with weight matrices
+$\Thetamat_k \in \reals^{F \times F'}$:
+
+$$
+\Hmat' = \sigma\paren{\sum_{k=0}^{K} T_k(\tilde\Lmat)\,\Hmat\,\Thetamat_k}.
+$$
+
+It has $(K + 1)FF'$ parameters, independent of $n$, and the same weights apply to any graph, because the filter is
+defined through $\Lmat$ rather than through one graph's eigenvectors.
+
+## Approximating a target response
+
+A polynomial filter of degree $K$ can match a prescribed response $g$ only approximately. Interpolating $g$ at the
+$K + 1$ Chebyshev nodes $\lambda_j = \tfrac{\lambda_{\max}}{2}\paren{\cos\frac{\pi(j + 1/2)}{K + 1} + 1}$ gives the
+coefficients
+
+$$
+\theta_k = \frac{2 - [k = 0]}{K + 1}\sum_{j=0}^{K} g(\lambda_j)\cos\frac{\pi k(j + 1/2)}{K + 1},
+$$
+
+which avoid the large oscillations of interpolation at equally spaced points
+(<NoteLink to="polynomial-interpolation-and-runge" />). Hammond et al. used Chebyshev expansions this way to apply
+wavelets on large graphs <Cite id="hammond2011" />, and ChebNetII learns the values $g(\lambda_j)$ at the nodes rather
+than the $\theta_k$ directly <Cite id="he2022chebnetii" />.
+
+How fast the approximation improves depends on the smoothness of $g$. On the 30-node graph of the figure, the heat
+kernel $e^{-\lambda/2}$ is matched at every eigenvalue to within 0.078 with $K = 2$ and 0.016 with $K = 3$. The ideal
+low-pass with a cut-off at $\lambda = 2$ is still off by 0.25 at some eigenvalue with $K = 10$, because a jump cannot be
+fitted by a polynomial without ringing. A sharp response needs a high degree, and a high degree means a wide
+neighbourhood. That is the graph version of the time-frequency trade-off.
+
+<ChebyshevFilter />
+
+## From ChebNet to the graph convolutional network
+
+Kipf and Welling simplified the Chebyshev filter to first order <Cite id="kipf2017" />. Take the symmetric normalised
+Laplacian $\Lmat_{\text{sym}} = \I - \Dmat^{-1/2}\Amat\Dmat^{-1/2}$, $K = 1$, and $\lambda_{\max} \approx 2$, so
+$\tilde\Lmat = \Lmat_{\text{sym}} - \I = -\Dmat^{-1/2}\Amat\Dmat^{-1/2}$:
+
+$$
+g_\theta(\Lmat)\,\xvec \approx \theta_0\xvec + \theta_1\tilde\Lmat\xvec = \theta_0\xvec - \theta_1\Dmat^{-1/2}\Amat\Dmat^{-1/2}\xvec.
+$$
+
+Tying $\theta = \theta_0 = -\theta_1$ leaves one parameter per channel pair,
+$\theta\paren{\I + \Dmat^{-1/2}\Amat\Dmat^{-1/2}}\xvec$, whose response $2 - \lambda$ is a low-pass on $[0, 2]$. The
+matrix $\I + \Dmat^{-1/2}\Amat\Dmat^{-1/2}$ has eigenvalues up to 2, so stacked layers can blow up activations. The
+renormalisation $\hat\Amat = \tilde\Dmat^{-1/2}(\Amat + \I)\tilde\Dmat^{-1/2}$ adds self-loops before normalising and
+keeps the eigenvalues in $(-1, 1]$. The result is the <NoteLink to="graph-convolutional-network" /> layer
+$\Hmat' = \sigma(\hat\Amat\Hmat\Wmat)$, a one-hop filter whose depth replaces the polynomial degree: $L$ layers reach
+$L$ hops, with a nonlinearity between hops.
+
+## Practice
+
+Polynomial filters are <Gloss name="gnn">message passing</Gloss>. A degree-$K$ filter is $K$ rounds of
+<NoteLink to="message-passing-neural-network">neighbourhood aggregation</NoteLink> with fixed coefficients, which is why
+the spectral and spatial views of graph networks met in the GCN. The descendants of ChebNet keep that equivalence and
+change how the polynomial is parametrised:
+
+- **<NoteLink to="neighbour-sampling-and-scalable-graph-networks">SGC</NoteLink>** fixes the filter to $\hat\Amat^K$,
+  precomputes $\hat\Amat^K\Xmat$ once, and trains only a linear classifier on top. It is a fixed low-pass filter
+  followed by <NoteLink to="logistic-regression">logistic regression</NoteLink> <Cite id="wu2019sgc" />.
+- **GPR-GNN** learns one weight per propagation step, $\sum_k \gamma_k\hat\Amat^k\Hmat$. Learned weights can make the
+  response high-pass, which suits graphs where neighbours tend to differ <Cite id="chien2021gprgnn" />.
+- **BernNet** writes the response in the Bernstein basis on $[0, 2]$, whose non-negative coefficients give a
+  non-negative response by construction <Cite id="he2021bernnet" />.
+- **ChebNetII** returns to the Chebyshev basis with coefficients from interpolation, and attributes ChebNet's weak
+  benchmark results to ill-behaved learned coefficients rather than to the basis <Cite id="he2022chebnetii" />.
+
+These models are used mainly for node classification on a single graph, where the spectral view explains when a low-pass
+filter helps (homophily) and when it hurts (<NoteLink to="graph-neural-networks-under-heterophily" />). For graph-level
+tasks and large-scale use, <NoteLink to="message-passing-layers">message-passing layers</NoteLink> with learned,
+nonlinear messages dominate. The spectral view also explains <NoteLink to="oversmoothing" />. Without weights and
+nonlinearities, $L$ GCN layers apply $\hat\Amat^L$, whose response is $(1 - \lambda)^L$ in the eigenvalues $\lambda$ of
+the symmetric Laplacian of the graph with self-loops. Every factor except the one at $\lambda = 0$ has magnitude below
+1, so the output converges to a projection onto the lowest frequency.
+
+## Worked example
+
+Take the graph of <NoteLink to="graphs-as-neural-network-inputs" />: a triangle on nodes 1, 2, 3, the edge $3{-}4$, and
+nodes 5 and 6 attached to node 4. The degrees are $(2, 2, 3, 3, 1, 1)$, and $\Lmat = \Dmat - \Amat$ is unnormalised.
+Use the bound $\lambda_{\max} \le 2d_{\max} = 6$, so $\tilde\Lmat = \Lmat/3 - \I$. Filter an impulse at node 1,
+$\xvec = (1, 0, 0, 0, 0, 0)$, with $K = 2$.
+
+**Order 0.** $\bar\xvec_0 = \xvec = (1, 0, 0, 0, 0, 0)$.
+
+**Order 1.** $\Lmat\xvec$ is the first column of $\Lmat$, $(2, -1, -1, 0, 0, 0)$. Then
+
+$$
+\bar\xvec_1 = \tfrac13\Lmat\xvec - \xvec = \paren{-\tfrac13, -\tfrac13, -\tfrac13, 0, 0, 0}.
+$$
+
+The signal has reached nodes 2 and 3, the one-hop neighbours.
+
+**Order 2.** First $\Lmat\bar\xvec_1 = -\tfrac13\Lmat(1, 1, 1, 0, 0, 0)$. For the indicator of the triangle, row $i$ of
+$\Lmat$ gives $d_i$ times the indicator minus the number of triangle neighbours: 0 at nodes 1 and 2, $3 - 2 = 1$ at node
+3, and $-1$ at node 4. So $\Lmat\bar\xvec_1 = (0, 0, -\tfrac13, \tfrac13, 0, 0)$ and
+$\tilde\Lmat\bar\xvec_1 = \tfrac13\Lmat\bar\xvec_1 - \bar\xvec_1 = (\tfrac13, \tfrac13, \tfrac29, \tfrac19, 0, 0)$. The
+recurrence gives
+
+$$
+\bar\xvec_2 = 2\tilde\Lmat\bar\xvec_1 - \bar\xvec_0 = \paren{-\tfrac13, \tfrac23, \tfrac49, \tfrac29, 0, 0}.
+$$
+
+Node 4, two hops from node 1, is now non-zero. Nodes 5 and 6 are three hops away and stay exactly zero.
+
+**Combine.** Choose $\thetavec = (0.375, -0.5, 0.125)$. Then
+
+$$
+\yvec = 0.375\,\bar\xvec_0 - 0.5\,\bar\xvec_1 + 0.125\,\bar\xvec_2 = (0.5,\ 0.25,\ 0.222,\ 0.028,\ 0,\ 0).
+$$
+
+**Check against the spectral form.** With $t = \lambda/3 - 1$, the response is
+$0.375 - 0.5t + 0.125(2t^2 - 1) = \tfrac14(1 - t)^2 = (1 - \lambda/6)^2$, a low-pass that falls from 1 at $\lambda = 0$
+to 0 at $\lambda = 6$. So $\yvec$ must equal $(\I - \Lmat/6)^2\xvec$. One step gives
+$(\I - \Lmat/6)\xvec = (\tfrac23, \tfrac16, \tfrac16, 0, 0, 0)$, and a second step gives
+$(\tfrac12, \tfrac14, \tfrac29, \tfrac1{36}, 0, 0) = (0.5, 0.25, 0.222, 0.028, 0, 0)$. The two computations agree, and
+neither needed an eigenvector.
+
+## Assumptions
+
+- **A symmetric Laplacian.** The derivation uses real eigenvalues and an orthonormal eigenbasis, which require an
+  undirected graph with non-negative weights.
+- **A bound on the spectrum.** $\tilde\Lmat$ must have its eigenvalues in $[-1, 1]$, where the $T_k$ are bounded. An
+  underestimate of $\lambda_{\max}$ lets $T_k(\tilde\Lmat)$ grow like the polynomial outside $[-1, 1]$.
+- **Smooth responses.** Low degrees fit smooth responses well. Tasks that need a sharp frequency selection need high
+  degrees, and with them wide <NoteLink to="receptive-field-and-dilated-convolution">receptive fields</NoteLink>.
+
+## Pitfalls
+
+- **Free-form spectral filters do not transfer.** Gains attached to one graph's eigenvectors are meaningless on another
+  graph, and even on the same graph after an edge changes. Polynomial filters transfer because they are defined through
+  $\Lmat$.
+- **Eigenvector ambiguity.** A free-form filter written in terms of $\Umat$ inherits the sign and rotation ambiguity of
+  eigenvectors with repeated eigenvalues. Polynomial filters do not, because $g(\Lmat)$ depends only on the eigenvalues
+  and eigenspaces.
+- **The choice of Laplacian changes the filter.** Responses learned with $\Lmat$, $\Lmat_{\text{sym}}$ or the
+  self-loop-renormalised $\hat\Amat$ differ on irregular graphs, and $\lambda_{\max}$ differs between them.
+- **High degree without nonlinearity is not depth.** One degree-10 filter mixes 10 hops linearly. Ten GCN layers mix the
+  same neighbourhood with nonlinearities in between, at the risk of <NoteLink to="oversmoothing" />.
+- **Learned coefficients can overfit.** Unconstrained $\theta_k$ can produce responses with large oscillations between
+  eigenvalues. Interpolation-based or non-negative parametrisations regularise them <Cite id="he2022chebnetii" />
+  <Cite id="he2021bernnet" />.

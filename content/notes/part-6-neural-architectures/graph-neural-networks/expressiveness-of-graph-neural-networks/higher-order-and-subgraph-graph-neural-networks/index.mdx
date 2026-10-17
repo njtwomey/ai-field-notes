@@ -1,0 +1,158 @@
+---
+title: 'Higher-order and subgraph graph neural networks'
+kind: concept
+summary: '$k$-GNNs pass messages between $k$-tuples of nodes and match the $k$-WL test at $O(n^k)$ cost. Subgraph GNNs run message passing on a bag of node-deleted or ego-network subgraphs and pool the results; both distinguish graphs that 1-WL cannot.'
+tags: [graph-neural-networks, expressivity, worked-example]
+aliases: ['k-GNN', 'k-WL', 'k-dimensional Weisfeiler-Leman test', 'folklore Weisfeiler-Leman test', 'subgraph GNN', 'ESAN', 'ego-network GNN', 'provably powerful graph network', 'PPGN']
+requires: [expressive-power-of-message-passing]
+related: [positional-and-structural-encodings, weisfeiler-leman-test, link-prediction-with-graph-neural-networks]
+references: [morris2019weisfeiler, maron2019ppgn, bevilacqua2022esan, frasca2022subgraph, you2021idgnn, zhang2021nested, cai1992, morris2023wl, arvind2020wl]
+status: draft
+updated: 2026-10-17
+---
+
+import { SubgraphBags } from './SubgraphBags'
+
+<Definition>
+Higher-order and subgraph graph networks are graph architectures whose separating power exceeds colour refinement
+(<Gloss name="wl" form="short" />). A **higher-order** network keeps a vector for every $k$-tuple or $k$-subset of nodes
+and passes messages between tuples that differ in one node, matching the $k$-dimensional Weisfeiler-Leman test at
+$O(n^k)$ memory for $n$ nodes <Cite id="morris2019weisfeiler" /> <Cite id="maron2019ppgn" />. A **subgraph** network
+turns a graph into a bag of subgraphs by a fixed policy, such as deleting one node or keeping one node's neighbourhood,
+runs an ordinary <Gloss name="gnn">message passing</Gloss> network on each, and pools the results
+<Cite id="bevilacqua2022esan" />.
+</Definition>
+
+## Intuition
+
+A message passing network fails on the 6-cycle and two triangles because every node sees the same thing: two neighbours,
+each with two neighbours. The failure is one of symmetry. No node is special, so nothing breaks the tie.
+
+Two ways to break it follow from that diagnosis.
+
+- **Look at pairs or triples.** A pair of nodes knows whether its two members are adjacent, at distance two, or in
+  different components. In the 6-cycle some non-adjacent pairs share a neighbour; in two triangles none do. Colouring
+  pairs instead of nodes exposes the difference.
+- **Make one node special.** Delete a node, or mark it, and run message passing again. Deleting a node from the 6-cycle
+  leaves a path of five nodes; deleting one from two triangles leaves an edge and a triangle. Plain message passing
+  tells those apart.
+
+Both cost more than message passing. The first stores $n^2$ or $n^3$ vectors; the second runs message passing $n$
+times. The rest of this note makes the two ideas precise and compares their power and cost.
+
+## Details
+
+### The Weisfeiler-Leman hierarchy
+
+The $k$-dimensional **folklore** test ($k$-FWL) colours every ordered $k$-tuple $\vvec = (v_1, \dots, v_k)$. The initial
+colour is the tuple's **atomic type**: which entries are equal, which pairs are adjacent, and the node labels. For $k =
+2$, a pair $(u, v)$ is refined by the multiset, over all nodes $w$, of the colours of the two pairs that route through
+$w$:
+
+$$
+c^{(t+1)}(u, v) = \operatorname{relabel}\paren{c^{(t)}(u, v),\ \mset{\paren{c^{(t)}(u, w),\ c^{(t)}(w, v)} : w \in
+\Vcal}}.
+$$
+
+The **oblivious** test $k$-WL refines a tuple by the $k$ separate multisets obtained by replacing one position at a
+time. The two conventions are offset by one: $k$-FWL is as strong as $(k + 1)$-WL, and 2-WL is no stronger than 1-WL.
+Each level is strictly stronger than the one below <Cite id="morris2023wl" />, and no fixed level separates all graphs
+<Cite id="cai1992" />. Strongly regular graphs with equal parameters, such as the 4-by-4 rook's graph and the Shrikhande
+graph, tie under 2-FWL <Cite id="arvind2020wl" />.
+
+The 2-FWL update has the shape of a matrix product: entry $(u, v)$ combines row $u$ with column $v$ over the middle
+index $w$. One round costs $O(n^3)$ time and the colours take $O(n^2)$ memory.
+
+### Higher-order networks
+
+- **$k$-GNNs.** Morris et al. learn a vector for every $k$-element subset of nodes, initialised by the isomorphism type
+  of the subgraph it induces, and pass messages between subsets that share $k - 1$ nodes
+  <Cite id="morris2019weisfeiler" />. To save memory they keep only local neighbours, subsets whose differing nodes are
+  adjacent. Their hierarchical 1-2-3-GNN feeds node vectors into pair vectors and pair vectors into triple vectors.
+- **Provably powerful graph networks** (PPGN) keep an $n \times n \times F$ tensor of pair features and update it by
+  applying <Gloss name="mlp" plural /> to the feature dimension and multiplying the resulting $n \times n$ matrices,
+  which is the 2-FWL update with learned functions. They match 3-WL in separating power with $O(n^2)$ memory and
+  $O(n^3)$ time per layer <Cite id="maron2019ppgn" />.
+
+Cubic cost limits these models to graphs with tens to a few hundred nodes, such as molecules.
+
+### Subgraph networks
+
+A **subgraph selection policy** $\pi$ maps a graph $G$ to a bag $\pi(G) = \mset{G_1, \dots, G_b}$ of subgraphs on the
+same nodes <Cite id="bevilacqua2022esan" />.
+
+- **Node-deleted:** one subgraph per node $v$, with $v$'s edges removed ($b = n$).
+- **Edge-deleted:** one subgraph per edge, with that edge removed ($b = m$).
+- **Ego network:** one subgraph per root $v$, keeping the edges within $r$ hops of $v$; in the marked variant (EGO+)
+  the root carries an extra feature ($b = n$).
+
+DS-GNN encodes each subgraph independently with a shared message passing network $E$ and pools the subgraph vectors with
+a set network, $f(G) = \rho\paren{\sum_{i} E(G_i)}$. DSS-GNN also passes information between corresponding nodes of
+different subgraphs inside every layer. The DS-WL test, colour refinement on every subgraph followed by comparison of
+the bags of colour histograms, bounds DS-GNN with a message passing encoder <Cite id="bevilacqua2022esan" />.
+
+Related designs mark a root node instead of deleting it. Identity-aware networks give the root its own message
+functions <Cite id="you2021idgnn" />, and nested networks encode the rooted subgraph around every node and pool them
+<Cite id="zhang2021nested" />. All of these use one subgraph per node, a **node-based** policy, and every node-based
+subgraph network is bounded by 3-WL <Cite id="frasca2022subgraph" />.
+
+### Cost
+
+A node-based policy runs the encoder on $n$ subgraphs, so a layer costs $O(n(n + m))$ instead of $O(n + m)$, and an
+edge-based policy $O(m(n + m))$. For molecules with 20 to 50 atoms the factor is affordable. For large graphs, subgraph
+networks sample a few subgraphs per graph during training, or restrict ego networks to small radii
+<Cite id="bevilacqua2022esan" />.
+
+## Worked example
+
+**2-FWL on the 6-cycle and two triangles.** Both graphs have 6 nodes, so 36 ordered pairs.
+
+1. **Atomic types.** Each graph has 6 pairs $(v, v)$, 12 ordered adjacent pairs and 18 ordered non-adjacent pairs. The
+   round-0 histograms are equal.
+2. **Round 1, adjacent pairs.** For an adjacent pair $(u, v)$, count the nodes $w$ for which both $(u, w)$ and
+   $(w, v)$ are adjacent: the common neighbours. In the 6-cycle an edge has none. In a triangle an edge has one, the
+   third corner.
+3. **Round 1, non-adjacent pairs.** In the 6-cycle, the 12 ordered pairs at distance 2 have one common neighbour, and
+   the 6 ordered pairs at distance 3 have none. In two triangles, all 18 non-adjacent pairs lie in different triangles
+   and have none.
+4. **Compare.** The 6-cycle has 12 adjacent pairs with no common neighbour; two triangles have 12 adjacent pairs with
+   one. The histograms differ at round 1, so 2-FWL separates the graphs that 1-WL ties.
+
+**Node deletion on the same pair.** Delete node 1 from each graph.
+
+1. The 6-cycle becomes the path $2{-}3{-}4{-}5{-}6$ plus the isolated node 1. Two triangles become the edge $2{-}3$,
+   the triangle $4{-}5{-}6$ and the isolated node 1.
+2. **Round 1** colours by degree. Both subgraphs have degrees $\set{0, 1, 1, 2, 2, 2}$, so the histograms tie.
+3. **Round 2** colours by neighbours' degrees. The path's ends have a neighbour of degree 2. The edge's ends have a
+   neighbour of degree 1. The histograms differ.
+
+Every node of either graph gives the same subgraph up to isomorphism, so the two bags hold six copies each of two
+different subgraphs, and DS-WL separates the graphs.
+
+**Where node deletion stops.** Deleting a node of the rook's graph or of the Shrikhande graph leaves two 15-node graphs
+that colour refinement ties, so the node-deleted bags tie. This agrees with the 3-WL bound on node-based policies, since
+2-FWL already ties these graphs. Edge deletion is not node-based, and the figure shows that its bags separate them
+<Cite id="bevilacqua2022esan" />.
+
+<SubgraphBags />
+
+## Assumptions
+
+- **Small graphs.** Both families pay a factor of $n$ or more over message passing. They suit molecules and other
+  graphs of up to a few hundred nodes.
+- **Symmetry is the bottleneck.** The extra power helps when graphs are symmetric and features repeat. On graphs with
+  distinct node features, message passing already separates almost everything.
+- **Fixed policy.** A subgraph network's power depends on its policy. Depth-1 ego networks of decalin and bicyclopentyl
+  are stars with the same shapes, and those bags tie.
+
+## Pitfalls
+
+- **Confusing the two conventions.** "3-WL" in one paper is "2-FWL" in another. Check which test a bound refers to
+  before comparing models.
+- **Memory before time.** A $k$-tuple model with $k = 3$ stores $n^3$ vectors. At $n = 100$ and 64 features in 32-bit
+  floats this is 256 MB per layer for one graph.
+- **Bag pooling must be invariant.** The subgraphs come in no natural order. Pooling them by concatenation would break
+  <NoteLink to="deep-sets">permutation invariance</NoteLink>; a sum or mean over the bag keeps it.
+- **More power is not more accuracy.** Synthetic expressiveness benchmarks reward separating power directly. On real
+  data the gain must be weighed against a cost of $n$ times or more, and cheaper
+  <NoteLink to="positional-and-structural-encodings" /> are the usual first step.

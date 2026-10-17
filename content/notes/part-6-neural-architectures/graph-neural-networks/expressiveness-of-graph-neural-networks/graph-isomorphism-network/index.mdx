@@ -1,0 +1,211 @@
+---
+title: 'Graph isomorphism network'
+kind: concept
+summary: 'GIN updates $\hvec_v=\mathrm{MLP}((1+\epsilon)\hvec_v+\sum_{u\in\Ncal(v)}\hvec_u)$. Sum aggregation followed by an injective map can tell apart any neighbourhoods 1-WL tells apart, so GIN matches the 1-WL test; mean and max aggregation are strictly weaker.'
+tags: [graph-neural-networks, expressivity, deep-learning, worked-example]
+aliases: ['GIN', 'GIN-0', 'GIN-epsilon', 'sum aggregation', 'injective aggregation']
+requires: [weisfeiler-leman-test, message-passing-neural-network]
+related: [graph-pooling-and-readout, principal-neighbourhood-aggregation, graph-convolutional-network, deep-sets, expressive-power-of-message-passing]
+references: [xu2019, morris2019weisfeiler, hu2020pretraining, rampasek2022gps, corso2020pna]
+status: draft
+updated: 2026-10-17
+---
+
+import { AggregatorComparison } from './AggregatorComparison'
+
+<Definition>
+A graph isomorphism network (GIN) is a <NoteLink to="message-passing-neural-network">message passing network</NoteLink>
+whose layer $k$ updates the vector $\hvec_v^{(k-1)} \in \reals^{d}$ of every node $v$ by
+
+$$
+\hvec_v^{(k)} = \mathrm{MLP}^{(k)}\paren{(1 + \epsilon^{(k)})\,\hvec_v^{(k-1)} + \sum_{u \in \Ncal(v)} \hvec_u^{(k-1)}},
+$$
+
+with a <Gloss name="mlp">multilayer perceptron</Gloss> $\mathrm{MLP}^{(k)}$ shared by all nodes and a scalar
+$\epsilon^{(k)}$, learned or fixed at 0. A graph's vector concatenates the sums of node vectors from every layer, $\hvec_G = \big\Vert_{k=0}^{K} \sum_{v}
+\hvec_v^{(k)}$. With enough layers, GIN separates every pair of graphs that the
+<NoteLink to="weisfeiler-leman-test">Weisfeiler-Leman test</NoteLink> separates, which is the most any
+<Gloss name="gnn">message passing</Gloss> network can do <Cite id="xu2019" />.
+</Definition>
+
+## Intuition
+
+Graph networks before 2019 chose their aggregation by habit. A <NoteLink to="graph-convolutional-network">graph
+convolutional network</NoteLink> averages neighbours with degree weights, and <Gloss name="graphsage" /> uses a mean or
+an elementwise maximum. Xu et al. asked which choice keeps the most information, and measured information by the ability
+to tell graphs apart <Cite id="xu2019" />.
+
+The answer comes from <Gloss name="wl" />. A message passing layer computes each node's new vector from its old vector
+and the multiset of its neighbours' old vectors. Colour refinement computes each node's new colour from exactly the same
+two things. A layer can therefore never separate two nodes that colour refinement keeps together, and it matches colour
+refinement only if it loses nothing, that is, if it maps different (vector, multiset) pairs to different vectors. GIN is
+the simplest layer built to have that property.
+
+Each ingredient has a job.
+
+- **The sum** keeps the multiset. A mean forgets how many neighbours there are, and a maximum also forgets how often
+  each value repeats.
+- **The MLP** makes the map injective and nonlinear. The sum of linear functions of the neighbours collapses many
+  multisets onto one value; an MLP can represent the function the proof needs.
+- **The factor $1 + \epsilon$** keeps the node's own vector apart from its neighbours'. Without it, a node with
+  feature $a$ and a neighbour with feature $b$ gives the same sum as a node with feature $b$ and a neighbour with
+  feature $a$.
+
+GIN keeps the message passing template. It changes three choices: the aggregator (sum instead of mean or max), the
+update (an MLP instead of one linear layer and a nonlinearity) and the readout (a sum over nodes from every layer).
+
+## Details
+
+### Message passing is bounded by colour refinement
+
+Write the generic layer as $\hvec_v^{(k)} = \phi^{(k)}\paren{\hvec_v^{(k-1)}, \mset{\hvec_u^{(k-1)} : u \in
+\Ncal(v)}}$, where $\phi^{(k)}$ is any function and $\mset{\cdot}$ is a multiset. Start colour refinement and the
+network from the same discrete node labels, so that $\hvec_v^{(0)}$ is a function of $c^{(0)}(v)$.
+
+**Claim.** If $c^{(k)}(v) = c^{(k)}(w)$, then $\hvec_v^{(k)} = \hvec_w^{(k)}$, for any nodes $v$ and $w$ of any two
+graphs.
+
+The proof is by induction on $k$. The case $k = 0$ holds by the choice of inputs. Suppose the claim holds for $k - 1$
+and $c^{(k)}(v) = c^{(k)}(w)$. The relabelling in colour refinement is injective, so the two signatures are equal:
+$c^{(k-1)}(v) = c^{(k-1)}(w)$, and the multisets of neighbour colours are equal. Equal multisets of colours can be
+matched up one-to-one, neighbour to neighbour, with equal colours in each matched pair. By the induction hypothesis,
+matched neighbours have equal vectors, so the two multisets of neighbour vectors are equal, and $\hvec_v^{(k-1)} =
+\hvec_w^{(k-1)}$. The function $\phi^{(k)}$ receives identical arguments, so $\hvec_v^{(k)} = \hvec_w^{(k)}$.
+
+Equal colours imply equal vectors, so equal colour histograms imply equal multisets of node vectors in every layer. Any
+readout that is a function of that multiset then gives the two graphs the same output. A message passing network
+therefore cannot separate two graphs that colour refinement fails to separate <Cite id="xu2019" />
+<Cite id="morris2019weisfeiler" />.
+
+### Reaching the bound
+
+The converse needs the opposite implication: different colours give different vectors. That holds when every layer is
+**injective** on (vector, multiset of vectors) pairs and the readout is injective on multisets of node vectors. The same
+induction then shows that $\hvec_v^{(k)}$ is a one-to-one function of $c^{(k)}(v)$, and the network separates every pair
+of graphs that colour refinement separates, after as many layers as refinement needs rounds <Cite id="xu2019" />.
+
+Sum aggregation can be made injective. Suppose node features come from a countable set $\Xcal$ and every neighbourhood
+has fewer than $N$ members. Then there is a function $f : \Xcal \to \reals$ for which the multiset sum $\sum_{x \in X}
+f(x)$ differs for every two different multisets $X$ (proof below). Every function $g$ of a multiset can then be written
+as $g(X) = \varphi\paren{\sum_{x \in X} f(x)}$ for some $\varphi$, because the sum identifies the multiset. The node's
+own vector joins with weight $1 + \epsilon$: the map $(c, X) \mapsto (1 + \epsilon) f(c) + \sum_{x \in X} f(x)$ is
+injective for every irrational $\epsilon$ <Cite id="xu2019" />.
+
+<Derivation title="Why a sum can identify a multiset">
+Number the elements of $\Xcal$ by an injective map $Z : \Xcal \to \set{1, 2, 3, \dots}$, and let $N$ exceed the size of
+every multiset considered. Set $f(x) = N^{-Z(x)}$. For a multiset $X$, let $m_j$ be the number of copies of the element
+numbered $j$; then $0 \le m_j < N$ and
+
+$$
+\sum_{x \in X} f(x) = \sum_{j \ge 1} m_j N^{-j} = 0.m_1 m_2 m_3 \dots \text{ (in base } N\text{)}.
+$$
+
+Each count $m_j$ is a digit of the base-$N$ expansion, and digits below $N$ give a unique expansion of a terminating
+fraction. Two different multisets differ in some count $m_j$, so their sums differ.
+
+For the node's own vector, suppose $(1 + \epsilon) f(c) + \sum_{x \in X} f(x) = (1 + \epsilon) f(c') + \sum_{x \in X'}
+f(x)$. If $c = c'$, the sums over $X$ and $X'$ are equal, so $X = X'$. If $c \ne c'$, rearranging gives
+$\epsilon\,(f(c) - f(c')) = \sum_{X'} f + f(c') - \sum_{X} f - f(c)$. The right side and $f(c) - f(c')$ are rational,
+and $f(c) - f(c') \ne 0$, so $\epsilon$ would be rational. An irrational $\epsilon$ rules this out.
+</Derivation>
+
+GIN implements $f$ and $\varphi$ with one MLP per layer. The MLP of layer $k$ represents $\varphi^{(k)}$ composed with
+the $f^{(k+1)}$ that layer $k + 1$ needs, which the <NoteLink to="universal-approximation-theorem">universal
+approximation theorem</NoteLink> allows. A single linear layer with a <Gloss name="relu" /> does not suffice: there are
+different multisets $X_1$ and $X_2$ with $\sum_{x \in X_1} \mathrm{ReLU}(\Wmat\xvec) =
+\sum_{x \in X_2} \mathrm{ReLU}(\Wmat\xvec)$ for every weight matrix $\Wmat$ <Cite id="xu2019" />.
+
+### What mean and max keep
+
+Mean and maximum are permutation invariant, so they are valid aggregators, but they are not injective on multisets
+<Cite id="xu2019" />.
+
+- **Mean** keeps the **distribution** of the multiset: the proportion of each value. The multisets $\mset{2, 3}$ and
+  $\mset{2, 2, 3, 3}$ have the same mean. With equal features on every node, every node's mean is that feature, so a
+  mean aggregator sees no structure at all.
+- **Max** keeps the **set** of distinct values. The multisets $\mset{2, 3}$ and $\mset{2, 3, 3}$ have the same
+  elementwise maximum under every <NoteLink to="convolutional-layer">feature map</NoteLink>.
+- **Sum** keeps the whole multiset: the set, the proportions and the size.
+
+The mean suits <NoteLink to="graphs-as-neural-network-inputs">node classification</NoteLink> on graphs whose features
+are rich and rarely repeat, such as citation networks, where the neighbourhood's distribution is the signal and sums
+would grow with degree. When features are distinct, the mean loses little <Cite id="xu2019" />.
+
+### Readout and practice
+
+The graph vector concatenates sum readouts from every layer, so the classifier sees structures of every depth from 0
+to $K$. Summing instead of averaging over nodes keeps the readout injective on multisets of node vectors.
+
+Xu et al. compare GIN-$\epsilon$, which learns $\epsilon$, with GIN-0, which fixes $\epsilon = 0$. Both fit the training
+sets equally well, and GIN-0 generalised slightly better on their graph classification benchmarks <Cite id="xu2019" />.
+Their configuration, five layers counting the input layer, two-layer MLPs, <NoteLink to="batch-normalisation">batch
+normalisation</NoteLink> and 64 hidden units <Cite id="xu2019" />, became the standard one. GINE extends the layer to
+edge features by adding an embedding of each edge's features to the neighbour's vector before the sum
+<Cite id="hu2020pretraining" />. In 2024 to 2026, GIN and GINE remain standard baselines on molecular benchmarks, and
+GINE is one of the local message passing modules inside <NoteLink to="graph-transformer">GPS graph
+transformers</NoteLink> <Cite id="rampasek2022gps" />.
+
+## Worked example
+
+**Aggregators on three pairs of multisets.** Each line lists a pair of neighbourhoods with scalar features and the three
+aggregates, written as (first, second).
+
+| neighbours | sum | mean | max |
+| --- | --- | --- | --- |
+| $\mset{1, 1}$ against $\mset{1}$ | (2, 1) | (1, 1) | (1, 1) |
+| $\mset{2, 3}$ against $\mset{2, 3, 3}$ | (5, 8) | (2.5, 2.67) | (3, 3) |
+| $\mset{2, 3}$ against $\mset{2, 2, 3, 3}$ | (5, 10) | (2.5, 2.5) | (3, 3) |
+
+Sum separates all three pairs. Mean separates only the second, where the proportion of 3s changes from one half to two
+thirds. Max separates none, because each pair has the same set of values.
+
+**One GIN-0 layer on a path and a star.** Both graphs have four nodes and three edges, and every node starts with
+feature $h^{(0)} = 1$. Take $\epsilon = 0$. The argument of the MLP is $z_v = h_v + \sum_{u \in \Ncal(v)} h_u = 1 +
+\deg(v)$.
+
+- Path: the two ends have $z = 2$, the two middle nodes $z = 3$.
+- Star: the three leaves have $z = 2$, the centre $z = 4$.
+
+The multisets $\mset{2, 2, 3, 3}$ and $\mset{2, 2, 2, 4}$ differ, as the colour histograms of round 1 do. The readout
+must keep that difference. With the identity in place of the MLP, the sum readout gives $2 + 2 + 3 + 3 = 10$ for the
+path and $2 + 2 + 2 + 4 = 10$ for the star: a linear layer followed by a sum adds up $\sum_v (1 + \deg v) = n + 2m$,
+which the two graphs share. With the nonlinear map $z \mapsto z^2$ standing in for the MLP, the readouts are
+$4 + 4 + 9 + 9 = 26$ and $4 + 4 + 4 + 16 = 28$, and the graphs are separated.
+
+With mean aggregation the argument is $1 + \operatorname{mean}\mset{1, \dots} = 2$ at every node of both graphs, and
+with max it is $1 + 1 = 2$ as well. Every node of both graphs gets the same vector in every layer.
+
+**Why $\epsilon$.** Take one edge whose ends carry features 1 and 2. GIN-0 gives both ends $z = 1 + 2 = 3$, so one
+layer erases the difference between them, while colour refinement keeps their colours apart. With $\epsilon = 0.5$ the
+ends get $1.5 \cdot 1 + 2 = 3.5$ and $1.5 \cdot 2 + 1 = 4$.
+
+The figure runs three GIN layers with fixed random MLPs on such pairs. Switch the aggregator to watch the marked nodes
+merge or separate, and compare the layer at which they first differ with the round at which their colours split.
+
+<AggregatorComparison />
+
+## Assumptions
+
+- **Countable features.** The injectivity argument needs node features from a countable set, such as atom types or
+  one-hot categories. Real-valued features break it: no single continuous aggregator is injective on multisets of two or
+  more real numbers, which motivates <NoteLink to="principal-neighbourhood-aggregation" /> <Cite id="corso2020pna" />.
+- **Bounded neighbourhoods.** The construction needs a bound $N$ on the multiset size, which holds for any finite set
+  of graphs.
+- **Representable functions.** The theorem says weights exist that make GIN as strong as colour refinement. Training
+  need not find them.
+- **Enough layers.** GIN separates a pair only after as many layers as colour refinement needs rounds, at most the
+  number of nodes.
+
+## Pitfalls
+
+- **Expressive power is not accuracy.** Matching colour refinement concerns which graphs can be told apart, not which
+  model generalises. On node classification with rich features, mean aggregators often match or beat sum.
+- **The bound is still the bound.** GIN ties on every pair that colour refinement ties on: the 6-cycle and two
+  triangles, any two regular graphs of equal degree and size. See
+  <NoteLink to="expressive-power-of-message-passing" /> for what goes beyond it.
+- **Degree scale.** Sums grow with degree. On graphs whose degrees range over orders of magnitude, sums of hundreds of
+  neighbours saturate activations and shift under small changes of degree. Normalisation layers, or the logarithmic
+  degree scalers of principal neighbourhood aggregation, temper this.
+- **GIN-0 collisions.** With $\epsilon = 0$ a node and its neighbour can swap roles without changing the sum, as in the
+  edge example. GIN-0 still performs well in practice, but it is not exactly as strong as colour refinement on every
+  pair of graphs <Cite id="xu2019" />.

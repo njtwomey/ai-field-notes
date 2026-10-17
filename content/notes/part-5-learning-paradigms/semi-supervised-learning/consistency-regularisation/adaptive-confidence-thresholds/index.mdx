@@ -1,0 +1,172 @@
+---
+title: 'Adaptive confidence thresholds'
+kind: technique
+summary: 'A fixed confidence threshold admits few pseudo-labels early and favours easy classes. FlexMatch lowers the threshold per class by how well the class is learnt, FreeMatch sets it from the model''s mean confidence, and SoftMatch weights pseudo-labels softly instead.'
+tags: [semi-supervised, deep-learning, worked-example]
+aliases: ['FlexMatch', 'FreeMatch', 'SoftMatch', 'curriculum pseudo-labelling', 'self-adaptive thresholding', 'dynamic thresholds']
+requires: [fixmatch]
+related: [pseudo-labelling, class-imbalance, classifier-calibration, mixmatch]
+references: [sohn2020, zhang2021flexmatch, wang2023freematch, chen2023softmatch, berthelot2020remixmatch, wang2022usb]
+status: draft
+updated: 2026-10-17
+---
+
+import { ThresholdTrajectories } from './ThresholdTrajectories'
+
+<Definition>
+**Adaptive confidence thresholds** replace FixMatch's single fixed threshold $\tau$ on pseudo-label confidence by
+thresholds that change during training, per class or with the model's overall confidence. **FlexMatch** scales $\tau$
+for each class by how many confident predictions the class already receives <Cite id="zhang2021flexmatch" />.
+**FreeMatch** sets a global threshold from a moving average of the model's confidence and modulates it per class
+<Cite id="wang2023freematch" />. **SoftMatch** drops the hard cut and weights each pseudo-label by a truncated
+Gaussian function of its confidence <Cite id="chen2023softmatch" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="fixmatch">FixMatch</NoteLink> keeps a pseudo-label only if the weak-view confidence reaches $\tau = 0.95$
+<Cite id="sohn2020" />. One number serves every class at every step, and that causes two failures.
+
+- **Slow start.** Early in training almost no prediction reaches 0.95, so almost all unlabelled data are ignored and
+  training proceeds on the labels alone.
+- **Unequal classes.** Classes differ in difficulty. An easy class soon has many points above the threshold; a hard
+  class, whose points the network still confuses with a neighbour, has few. The easy classes get most of the
+  pseudo-labels, the hard class gets little training signal, and its region shrinks further. A fixed threshold turns a
+  difference in difficulty into a difference in data.
+
+Lowering $\tau$ admits more points in every class at once, including wrong ones. The methods of this note lower the
+threshold where and when the evidence says the model is ready, and keep it high elsewhere. Zhang et al. call the
+per-class version **curriculum pseudo-labelling**.
+
+## Mechanism
+
+Throughout, $q_{u}$ is the weak-view class distribution of unlabelled point $u$, $c_u = \max_k q_{u,k}$ its
+confidence, $\hat y_u$ its arg max, and the unsupervised loss is FixMatch's cross-entropy on the strong view, weighted
+by $w_u \in [0, 1]$ and divided by the batch size. FixMatch has $w_u = \indicator[c_u \ge \tau]$.
+
+### FlexMatch: thresholds from the class's learning effect
+
+For each class $c$ FlexMatch counts the unlabelled points whose latest prediction is confident and of class $c$:
+
+$$
+\sigma_t(c) = \sum_{n=1}^{N} \indicator\big[c_n > \tau\big]\,\indicator\big[\hat y_n = c\big],
+$$
+
+over all $N$ unlabelled points, each with the prediction from the last step that saw it. A class with many confident
+points is taken to be well learnt. The counts are normalised and mapped through a convex function:
+
+$$
+\beta_t(c) = \frac{\sigma_t(c)}{\max\big(\max_j \sigma_t(j),\; N - \sum_j \sigma_t(j)\big)}, \qquad
+\Tcal_t(c) = \Mcal\big(\beta_t(c)\big)\,\tau, \qquad \Mcal(x) = \frac{x}{2 - x} .
+$$
+
+The second term in the denominator, the number of points not yet confident in any class, is the **warm-up**: while
+most points are unused, every $\beta_t(c)$ stays small and rises gradually. Without it, the class that happens to lead
+early would set $\beta = 1$ for itself. The map $\Mcal$ is convex with $\Mcal(0) = 0$ and $\Mcal(1) =
+1$, so thresholds rise slowly for poorly learnt classes and quickly near the top <Cite id="zhang2021flexmatch" />. The
+best-learnt class keeps the full $\tau$; the others are lowered in proportion. A point is used if $c_u >
+\Tcal_t(\hat y_u)$. The counts are a by-product of the forward passes FixMatch already makes, so FlexMatch adds no
+computation.
+
+### FreeMatch: a threshold set by the model's confidence
+
+FreeMatch drops the base threshold $\tau$. Its global threshold is an <Gloss name="ema">exponential moving
+average</Gloss> of the mean confidence over unlabelled batches, and its per-class factor is a moving average of the mean
+predicted probability of each class, normalised by its largest entry:
+
+$$
+\tau_t = \lambda\tau_{t-1} + (1 - \lambda)\frac{1}{\mu B}\sum_{u} c_u, \qquad
+\tilde p_t(c) = \lambda\tilde p_{t-1}(c) + (1 - \lambda)\frac{1}{\mu B}\sum_{u} q_{u,c}, \qquad
+\tau_t(c) = \frac{\tilde p_t(c)}{\max_j \tilde p_t(j)}\,\tau_t ,
+$$
+
+with momentum $\lambda$ (0.999 in the paper) and $\tau_0 = \tilde p_0(c) = 1/C$ for $C$ classes. The threshold starts
+at chance level, so early training uses most unlabelled points, and it rises as the model grows confident. A class
+the model predicts rarely gets a lower threshold. FreeMatch also adds a fairness term that pushes the model's average
+prediction towards a balanced histogram of pseudo-labels <Cite id="wang2023freematch" />.
+
+### SoftMatch: weights instead of a cut
+
+SoftMatch views every threshold rule as a weighting function $w(c)$ and asks for one that admits many pseudo-labels
+(quantity) without admitting many wrong ones (quality). Its weight is 1 above the mean confidence and falls off as a
+Gaussian below it:
+
+$$
+w(c_u) =
+\begin{cases}
+1 & c_u \ge \mu_t, \\
+\exp\Big(-\dfrac{(c_u - \mu_t)^2}{2\sigma_t^2}\Big) & c_u < \mu_t,
+\end{cases}
+$$
+
+where $\mu_t$ and $\sigma_t^2$ are moving averages (momentum 0.999) of the batch mean and variance of the confidence,
+starting at $1/C$ and 1. The implementation divides the estimated variance by 4, so the fall-off is twice as steep as
+the raw spread suggests <Cite id="chen2023softmatch" />. No point is discarded outright; a point well below the mean
+confidence contributes little. SoftMatch also applies **uniform alignment**, which rescales each weak-view prediction so
+that the model's average prediction moves towards uniform, an analogue of
+<NoteLink to="mixmatch">ReMixMatch</NoteLink>'s distribution alignment <Cite id="berthelot2020remixmatch" />.
+
+<ThresholdTrajectories />
+
+## Worked example
+
+Three classes, $N = 1000$ unlabelled points, base threshold $\tau = 0.95$.
+
+**Step 1: FlexMatch early in training.** Suppose $\sigma = (300, 150, 60)$. Then $\sum_j \sigma(j) = 510$, so 490
+points are unused, and the denominator is $\max(300, 490) = 490$. The normalised effects are $\beta = (0.612, 0.306,
+0.122)$; the map gives $\Mcal(\beta) = (0.441, 0.181, 0.065)$; the thresholds are $(0.419, 0.172, 0.062)$. All
+three are far below $0.95$, so most confident-ish predictions are used, the third class most generously.
+
+**Step 2: FlexMatch later.** With $\sigma = (320, 300, 250)$, only 130 points are unused and the denominator is the
+largest count, 320. Now $\beta = (1, 0.938, 0.781)$, $\Mcal(\beta) = (1, 0.882, 0.641)$ and the thresholds are
+$(0.95, 0.838, 0.609)$. The best-learnt class is back at the full threshold; the weakest class still admits points at
+confidence $0.61$.
+
+**Step 3: FreeMatch.** With $\lambda = 0.999$, $\tau_{t-1} = 0.70$ and a batch mean confidence of $0.80$, the global
+threshold moves to $0.999 \times 0.70 + 0.001 \times 0.80 = 0.7001$. If $\tilde p_t = (0.40, 0.35, 0.25)$, the
+max-normalised factors are $(1, 0.875, 0.625)$ and the class thresholds $(0.700, 0.613, 0.438)$.
+
+**Step 4: SoftMatch.** With $\mu_t = 0.80$ and $\sigma_t^2/4 = 0.0025$, a point at confidence $0.80$ or more gets
+weight 1, one at $0.75$ gets $e^{-0.05^2/0.005} = e^{-0.5} = 0.61$, and one at $0.70$ gets $e^{-2} = 0.14$. Under
+FixMatch at $\tau = 0.95$ all three would get 0.
+
+The figure runs all four rules on three blobs with two labels per class. On the default balanced data and seed, the
+fixed threshold never recovers class A, which the labelled-only network puts largely on the wrong side: after 300
+steps class A's accuracy is 33% and the overall accuracy 74.8%, below the 81.2% of the labelled points alone.
+FlexMatch lowers class A's threshold to about 0.7 and reaches 90.2% (class A 87%); FreeMatch reaches 89.3%. SoftMatch
+uses most points from the start and, like the fixed threshold, never recovers class A (73.5%).
+
+## Cost
+
+All three methods reuse the weak-view predictions FixMatch already computes. FlexMatch stores one class index per
+unlabelled point; FreeMatch and SoftMatch store a few running averages. The extra computation is negligible. Zhang et
+al. report that FlexMatch reaches FixMatch's accuracy in about a fifth of the training time, because it uses more
+unlabelled points early <Cite id="zhang2021flexmatch" />.
+
+## Trade-offs
+
+- **Quantity against quality.** Lower thresholds use more points and include more wrong pseudo-labels. Every method
+  here chooses a different point on that curve, and none removes the trade-off; SoftMatch names it explicitly
+  <Cite id="chen2023softmatch" />.
+- **Assumption of balanced unlabelled data.** FlexMatch reads a low count $\sigma(c)$ as a poorly learnt class. Zhang et
+  al. state the assumption: the count reflects learning only when the unlabelled classes are about equally frequent
+  <Cite id="zhang2021flexmatch" />. On <NoteLink to="class-imbalance">imbalanced data</NoteLink> a rare class has a low
+  count however well it is learnt, its threshold drops, and it absorbs points of the common classes. The figure's
+  imbalanced setting shows this: on the default seed FlexMatch ends at 90.2% against 94.0% for the fixed threshold, and
+  its two small classes have thresholds of 0.38 and 0.10.
+- **New hyperparameters.** FreeMatch removes $\tau$ but adds a momentum; SoftMatch adds a momentum and the variance
+  scaling. FreeMatch reports little sensitivity to its momentum on <Gloss name="cifar-10" /> with 40 labels, and warns
+  that a very large value slows the thresholds' updates <Cite id="wang2023freematch" />.
+
+## Pitfalls
+
+- **Momentum against run length.** A momentum of 0.999 averages over about 1000 steps. FixMatch trains for $2^{20}$
+  steps on its image benchmarks <Cite id="sohn2020" />; a short run with that momentum leaves FreeMatch's and
+  SoftMatch's thresholds near their starting values for much of training. The figure uses 0.99 for its 300 steps.
+- **Thresholds that follow mistakes.** An adaptive threshold lowers itself for a class that the model rarely predicts,
+  including a class it rarely predicts because it has mislabelled the class's region. The pseudo-labels it then
+  admits can be the wrong ones, as SoftMatch's run on the default seed shows.
+- **Comparing under different budgets.** The reported gains are largest when labels are scarcest <Cite
+  id="wang2023freematch" />, and part of FlexMatch's advantage is faster convergence <Cite id="zhang2021flexmatch" />.
+  Comparisons should hold the training budget and the backbone fixed, as the USB benchmark does with pretrained
+  networks <Cite id="wang2022usb" />.

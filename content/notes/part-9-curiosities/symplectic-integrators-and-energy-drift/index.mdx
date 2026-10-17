@@ -1,0 +1,191 @@
+---
+title: 'Symplectic integrators and energy drift'
+kind: concept
+summary: 'A symplectic integrator such as leapfrog preserves phase-space volume, so on a Kepler orbit its energy error stays in a fixed band for thousands of periods, while the error of a classical Runge–Kutta method grows steadily with time.'
+tags: [orbital-mechanics, numerical-integration, worked-example]
+aliases: [symplectic integrator, geometric integrator, Störmer–Verlet method, velocity Verlet, symplectic Euler, shadow Hamiltonian, modified Hamiltonian, energy drift, backward error analysis]
+requires: [numerical-ode-solvers, kepler-orbits]
+related: [hamiltonian-monte-carlo, hamiltonian-neural-network, keplers-equation, three-body-problem, periodic-three-body-orbits]
+references: [hairer2006]
+status: draft
+updated: 2026-10-17
+---
+
+import { PhaseArea } from './PhaseArea'
+import { EnergyDrift } from './EnergyDrift'
+
+<Definition>
+A one-step method $\Phi_h$ for a Hamiltonian system with state $(\qvec, \pvec) \in \reals^{2d}$ is **symplectic** if
+every step is a symplectic map: its Jacobian $\Phi_h'$ satisfies $(\Phi_h')^\top \Jmat\,\Phi_h' = \Jmat$, with
+$\Jmat = \begin{pmatrix} \zeros & \eye \\ -\eye & \zeros \end{pmatrix}$. For one degree of freedom this says that each
+step preserves area in the $(q, p)$ plane; in general it preserves phase-space volume and more. The exact flow of
+every Hamiltonian system is symplectic. A symplectic method of order $r$ exactly conserves a **shadow Hamiltonian**
+$\tilde H = H + O(h^r)$ over exponentially long times, so its energy error stays bounded instead of drifting
+<Cite id="hairer2006" />.
+</Definition>
+
+## Intuition
+
+A simulation of a planet, a molecule or a pendulum often runs for millions of steps. A classical solver such as
+<Gloss name="rk4" /> makes a tiny error in each step, and in a conservative system
+those errors add up in one direction: the energy creeps down (or up) a little each orbit. After many orbits the planet
+has spiralled inwards, although each single step was excellent. Making the steps smaller slows the drift but never
+stops it.
+
+A symplectic integrator makes errors of the same size per step but of a different kind. It never solves the original
+problem exactly, but it solves a slightly different conservative problem almost exactly. The energy it conserves is
+the shadow Hamiltonian, which differs from the true energy by an amount that depends on the step size $h$ and not on
+how long the simulation has run. The true energy therefore wobbles inside a fixed band for ever. What does accumulate
+is an error in phase: the simulated planet runs slightly ahead of or behind the real one, and its ellipse slowly turns.
+For questions about long-term behaviour, such as whether an orbit stays bounded or a system is stable, a phase error
+does no harm, while an energy drift gives the wrong answer.
+
+## Hamiltonian flows preserve area
+
+A Hamiltonian system with **Hamiltonian** $H(\qvec, \pvec)$, positions $\qvec \in \reals^d$ and momenta
+$\pvec \in \reals^d$ moves by Hamilton's equations
+
+$$
+\dot{\qvec} = \nabla_{\pvec} H, \qquad \dot{\pvec} = -\nabla_{\qvec} H.
+$$
+
+The energy $H$ is constant along every solution, because $\dot H = \nabla_{\qvec}H \cdot \dot{\qvec} +
+\nabla_{\pvec}H \cdot \dot{\pvec} = 0$. A second, less visible invariant is geometric. Take one degree of freedom and
+a small patch of starting states in the $(q, p)$ plane. The patch moves with the flow, and its area changes at a rate
+equal to the area times the divergence of the velocity field $(\partial H/\partial p, -\partial H/\partial q)$. That
+divergence is $\partial^2 H/\partial q\,\partial p - \partial^2 H/\partial p\,\partial q = 0$, so the area never
+changes. This is **Liouville's theorem**. In $d$ dimensions the flow preserves a stronger structure: the sum of the
+oriented areas of a surface's projections onto the $d$ planes $(q_i, p_i)$. That property is **symplecticity**,
+expressed by the Jacobian condition of the definition, and it implies volume preservation <Cite id="hairer2006" />.
+
+A numerical method is a map $\Phi_h$ from one state to the next. It is symplectic if that map has the same property as
+the exact flow. In one dimension the test is that the Jacobian of one step has determinant 1.
+
+## Leapfrog
+
+Many Hamiltonians are **separable**: $H(\qvec, \pvec) = T(\pvec) + V(\qvec)$, a kinetic energy plus a potential
+energy. For a body of unit mass, $T = \tfrac12\norm{\pvec}^2$. The **Störmer–Verlet** method splits each step of size
+$h$ into three substeps. In its **velocity Verlet** form (kick, drift, kick),
+
+$$
+\pvec_{n+1/2} = \pvec_n - \tfrac{h}{2}\nabla V(\qvec_n), \qquad \qvec_{n+1} = \qvec_n + h\,\pvec_{n+1/2}, \qquad
+\pvec_{n+1} = \pvec_{n+1/2} - \tfrac{h}{2}\nabla V(\qvec_{n+1}).
+$$
+
+The **leapfrog** form (drift, kick, drift) exchanges the roles of $\qvec$ and $\pvec$. Both forms alternate full kicks
+and full drifts and differ only in whether a step begins and ends with a half kick or a half drift. Both are second
+order and time-reversible, and both need one new force evaluation per step, because the force at the end of one step is
+the force at the start of the next <Cite id="hairer2006" />. The same integrator moves the sampler in
+<NoteLink to="hamiltonian-monte-carlo">Hamiltonian Monte Carlo</NoteLink>.
+
+Each substep is symplectic, and a composition of symplectic maps is symplectic. A kick changes $\pvec$ by an amount
+that depends on $\qvec$ only. For one degree of freedom its Jacobian is
+$\begin{pmatrix} 1 & 0 \\ -\tfrac h2 V''(q) & 1 \end{pmatrix}$, a shear with determinant 1. A drift changes $\qvec$ by
+an amount that depends on $\pvec$ only, with Jacobian $\begin{pmatrix} 1 & h \\ 0 & 1 \end{pmatrix}$, also a shear.
+The product of the three has determinant 1, so leapfrog preserves area exactly, whatever the step size.
+
+Explicit methods that evaluate the whole right-hand side at once lack this structure. One step of explicit Euler,
+$q_{n+1} = q_n + h p_n$ and $p_{n+1} = p_n - h V'(q_n)$, has Jacobian
+$\begin{pmatrix} 1 & h \\ -hV''(q) & 1 \end{pmatrix}$ with determinant $1 + h^2V''(q)$. No explicit Runge–Kutta method
+is symplectic <Cite id="hairer2006" />. RK4 changes areas too, by much less: on the harmonic oscillator the factor per
+step is $1 - h^6/72 + h^8/576$.
+
+The figure shows the three methods on the pendulum $H = \tfrac12 p^2 - \cos q$, applied to a disc of starting states.
+
+<PhaseArea />
+
+## The shadow Hamiltonian
+
+Area preservation explains bounded energy through **backward error analysis**. The question it asks is not how far
+the numerical solution is from the true one, but which equation the numerical solution solves exactly. For a
+symplectic method of order $r$ applied with step $h$, the answer is the Hamiltonian system of a **modified** (shadow)
+Hamiltonian
+
+$$
+\tilde H = H + h^r H_{r+1} + h^{r+1} H_{r+2} + \cdots,
+$$
+
+whose correction terms $H_k$ are built from derivatives of $H$. The series does not converge in general, but truncated
+at the right order it describes the numerical solution up to an error that is exponentially small in $1/h$. Because the
+numerical solution follows a Hamiltonian flow, it conserves $\tilde H$ to that accuracy, and so
+
+$$
+H(\qvec_n, \pvec_n) - H(\qvec_0, \pvec_0) = O(h^r) \quad\text{for } nh \le e^{c/h}
+$$
+
+for a constant $c > 0$, provided the solution stays in a compact region <Cite id="hairer2006" />. A non-symplectic
+method also has a modified equation, but that equation is not Hamiltonian. It contains a small dissipative or
+anti-dissipative part, and the energy error then grows in proportion to time, as $O(t\,h^r)$, for a method of order $r$
+<Cite id="hairer2006" />.
+
+The shadow Hamiltonian also explains the precession. Its orbits are those of a slightly different force law, and only
+the exact inverse-square law closes its bound orbits (see <NoteLink to="kepler-orbits">Kepler orbits</NoteLink>). The
+leapfrog orbit therefore keeps its size and shape but turns slowly, and the error that would have gone into the
+energy goes into the angle of the ellipse instead.
+
+Störmer–Verlet also conserves the angular momentum $\qvec \times \pvec$ of a central-force problem exactly, up to
+rounding, because each kick is along $\qvec$ and each drift is along $\pvec$ <Cite id="hairer2006" />. Runge–Kutta
+methods conserve linear invariants, but not quadratic ones like angular momentum, unless they are symplectic.
+
+## Worked example
+
+Take the harmonic oscillator $H = \tfrac12(q^2 + p^2)$, the step $h = 0.1$ and the start $(q_0, p_0) = (1, 0)$, so
+$H_0 = 0.5$. The exact solution circles the origin with constant $H$.
+
+1. **Explicit Euler** takes $q_1 = q_0 + h p_0 = 1$ and $p_1 = p_0 - h q_0 = -0.1$, so $H_1 = \tfrac12(1 + 0.01) =
+   0.505$. The step is the linear map $\begin{pmatrix} 1 & h \\ -h & 1 \end{pmatrix}$, which multiplies $q^2 + p^2$ by
+   exactly $1 + h^2 = 1.01$. After 100 steps ($t = 10$), $H = 0.5 \times 1.01^{100} = 1.35$, and areas have grown by
+   the same factor 2.70. The orbit spirals out.
+2. **Symplectic Euler** kicks first and then drifts with the new momentum: $p_1 = p_0 - h q_0 = -0.1$ and $q_1 = q_0 +
+   h p_1 = 0.99$. The energy is $H_1 = \tfrac12(0.9801 + 0.01) = 0.49505$. The step is the map
+   $\begin{pmatrix} 1 - h^2 & h \\ -h & 1 \end{pmatrix}$, whose determinant is $(1 - h^2) + h^2 = 1$.
+3. **Its shadow Hamiltonian** is $\tilde H = \tfrac12(q^2 + p^2 - h\,qp)$. At the start $\tilde H = 0.5$. After one step
+   $\tilde H = \tfrac12(0.9801 + 0.01 - 0.1 \times 0.99 \times (-0.1)) = \tfrac12(0.9901 + 0.0099) = 0.5$, and the
+   same algebra shows that it is unchanged by every step. The numerical states lie on the ellipse $\tilde H = 0.5$
+   for ever.
+4. **The energy stays in a band.** On that ellipse, $q^2 + p^2$ ranges between $1/(1 + h/2)$ and $1/(1 - h/2)$, the
+   reciprocals of the eigenvalues of the quadratic form. So $H$ oscillates between $0.5/1.05 = 0.476$ and
+   $0.5/0.95 = 0.526$, an error of about 5%, which is $O(h)$ for this first-order method. It never grows.
+5. **Velocity Verlet** on the same problem conserves $\tilde H = \tfrac12\paren{p^2 + (1 - h^2/4)\,q^2}$, and $H$
+   stays between $0.49875$ and $0.5$, an error of $h^2/8 = 0.25\%$, which is $O(h^2)$ for a second-order method.
+
+## Long runs on a Kepler orbit
+
+The figure integrates a Kepler orbit with semi-major axis 1 and eccentricity $e$, in units with $GM = 1$ (period
+$2\pi$), started at pericentre. It runs RK4 and leapfrog with the same step for hundreds of periods. At the defaults
+($e = 0.6$ and $h = 0.05$, about 126 steps per period), the energy $H_0 = -0.5$ evolves as follows.
+
+- **RK4** loses energy at a constant rate: $H - H_0$ is $-0.0034$ after 100 periods, $-0.010$ after 300 and $-0.035$
+  after 1000. The semi-major axis shrinks with it, since $a = -1/(2H)$. Its angular momentum drifts too, by $-0.0018$
+  after 300 periods.
+- **Leapfrog** keeps $H - H_0$ between $-0.0005$ and $+0.0016$ for all 1000 periods. The band is set by the passage
+  through pericentre, where the orbit is most curved and the step is coarsest. Halving $h$ shrinks the band by about a
+  factor of four. Its angular momentum is conserved to $10^{-14}$.
+- **The leapfrog ellipse precesses** by about $-0.9°$ per period, so after 300 periods its pericentre has turned
+  through $-276°$. The RK4 ellipse barely turns, by $1.8°$ in the same time, but it shrinks.
+- **Velocity Verlet**, the other choice in the figure, keeps $H - H_0$ between 0 and $+0.009$ at the defaults. The
+  band is wider than leapfrog's at this step size and just as fixed in time.
+
+RK4 is more accurate per step than leapfrog: it is fourth order against second order. At low eccentricity and over a
+few hundred periods its drift can still be smaller than leapfrog's band. The difference is the trend. RK4's error has
+no bound as $t$ grows; leapfrog's does. RK4 also costs four force evaluations per step against one, so at equal cost
+leapfrog could take a step four times smaller.
+
+<EnergyDrift />
+
+## Pitfalls
+
+- **Bounded energy is not accuracy.** The energy error stays in its band, but the phase error grows linearly in time,
+  so after many periods the simulated body is in the wrong place on a nearly right orbit. Predicting where a planet is
+  needs a small step or a high-order method; asking whether an orbit stays bounded suits a symplectic one.
+- **Adaptive steps break the shadow.** Changing $h$ from step to step according to the state destroys the single
+  modified Hamiltonian, and the energy drifts again. Variable steps need a reparametrisation of time that keeps the
+  system Hamiltonian <Cite id="hairer2006" />.
+- **The step must resolve the fastest part of the orbit.** On an eccentric orbit the energy band is set at pericentre.
+  If $h$ is comparable with the pericentre passage time, the error band grows large and the backward error series no
+  longer describes the method.
+- **Separability.** Leapfrog's explicit form needs $H = T(\pvec) + V(\qvec)$. A non-separable Hamiltonian needs an
+  implicit symplectic method such as the implicit midpoint rule.
+- **General-purpose adaptive solvers.** The adaptive Runge–Kutta solvers of <NoteLink
+  to="numerical-ode-solvers">numerical ODE solvers</NoteLink> control the local error, not the structure, and on long
+  conservative runs they drift like RK4 <Cite id="hairer2006" />.

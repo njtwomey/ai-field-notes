@@ -1,0 +1,174 @@
+---
+title: 'Virtual adversarial training'
+kind: technique
+summary: 'Virtual adversarial training perturbs each input along the direction, found by one power-iteration step, that most changes the predictive distribution, and penalises the KL divergence between predictions before and after. It needs neither labels nor designed augmentations.'
+tags: [semi-supervised, robustness, worked-example]
+aliases: ['VAT', 'local distributional smoothness', 'virtual adversarial loss']
+requires: [consistency-regularisation, kullback-leibler-divergence]
+related: [adversarial-examples, entropy-minimisation, fixmatch, eigendecomposition, hessian]
+references: [miyato2019vat, goodfellow2015, grandvalet2005, berthelot2019mixmatch, oliver2018realistic]
+status: draft
+updated: 2026-10-17
+---
+
+import { VirtualAdversarialDirections } from './VirtualAdversarialDirections'
+
+<Definition>
+**Virtual adversarial training** (<Gloss name="vat" form="short" />) regularises a classifier by making its predictive
+distribution smooth around every input, labelled or not. For each input it finds the perturbation of length $\epsilon$
+that most increases the <Gloss name="kl">Kullback–Leibler (KL) divergence</Gloss> between the predictions at the input
+and at the perturbed input, using one step of power iteration with <Gloss name="finite-difference">finite
+differences</Gloss>, and it adds that divergence to the loss. The word "virtual" refers to the target: the model's own
+current prediction stands in for the unknown label <Cite id="miyato2019vat" />.
+</Definition>
+
+## Problem
+
+<NoteLink to="consistency-regularisation">Consistency regularisation</NoteLink> asks the prediction to stay put under a
+perturbation, but its strength depends on which perturbation is used. Random noise in a high-dimensional input space
+points almost entirely in directions the prediction does not depend on, so it tests very little. Hand-designed
+augmentations such as crops and colour changes test useful directions, but only for data types where someone has
+designed them, and each choice encodes an assumption about which changes keep the class.
+
+<NoteLink to="adversarial-examples">Adversarial training</NoteLink> answers the same question for labelled data: it
+perturbs each input in the direction that most increases the loss on its true label <Cite id="goodfellow2015" />. That
+needs a label. VAT replaces the label by the model's own prediction and asks for the direction that most changes the
+prediction. The direction is found from the model alone, so it works on unlabelled inputs and on any input type with
+a continuous representation.
+
+## Mechanism
+
+### Local distributional smoothness
+
+Let $p(\cdot \mid \xvec, \thetavec)$ be the model's predictive distribution over $K$ classes, and $\hat\thetavec$ the
+current parameters, treated as constants when they define a target. For an input $\xvec$ VAT defines
+
+$$
+\rvec_{\text{adv}} = \argmax_{\norm{\rvec}_2 \le \epsilon} \KL\big(p(\cdot \mid \xvec, \hat\thetavec)\,\|\,
+p(\cdot \mid \xvec + \rvec, \hat\thetavec)\big),
+\qquad
+\mathrm{LDS}(\xvec, \thetavec) = \KL\big(p(\cdot \mid \xvec, \hat\thetavec)\,\|\,
+p(\cdot \mid \xvec + \rvec_{\text{adv}}, \thetavec)\big).
+$$
+
+The **local distributional smoothness** $\mathrm{LDS}$ is small when no perturbation within the ball of radius
+$\epsilon$ changes the prediction much. The regulariser is its average over all labelled and unlabelled inputs, added
+to the supervised loss with a weight $\alpha$ ($\alpha = 1$ in most of the paper's experiments), and the gradient flows
+only through the second argument at the fixed perturbation <Cite id="miyato2019vat" />.
+
+### The direction from the curvature
+
+Write $D(\rvec) = \KL(p(\cdot \mid \xvec, \hat\thetavec) \,\|\, p(\cdot \mid \xvec + \rvec, \hat\thetavec))$ for the
+divergence as a function of the perturbation. It is zero at $\rvec = \zeros$ and never negative, so $\rvec = \zeros$ is
+a minimum and the gradient there is zero. The <NoteLink to="hessian">second-order Taylor expansion</NoteLink> is
+therefore
+
+$$
+D(\rvec) \approx \tfrac12 \rvec^\top \Hmat \rvec, \qquad \Hmat = \nabla_{\rvec}^2 D(\rvec)\big|_{\rvec = \zeros},
+$$
+
+with $\Hmat$ a positive semidefinite $d \times d$ matrix. On the sphere $\norm{\rvec} = \epsilon$ the quadratic form
+is largest along the dominant eigenvector $\uvec$ of $\Hmat$, so $\rvec_{\text{adv}} \approx \epsilon\,\uvec$.
+
+Forming $\Hmat$ costs $d^2$ entries, too many for an image. Power iteration (see
+<NoteLink to="eigendecomposition">eigendecomposition</NoteLink>) finds $\uvec$ from products $\Hmat\dvec$ alone: start
+from a random unit vector $\dvec$ and repeat $\dvec \leftarrow
+\Hmat\dvec / \norm{\Hmat\dvec}$. The product needs no matrix either. Since $\nabla D(\zeros) = \zeros$, a finite
+difference of the gradient gives
+
+$$
+\Hmat\dvec \approx \frac{\nabla_{\rvec} D(\rvec)\big|_{\rvec = \xi\dvec} - \nabla_{\rvec} D(\rvec)\big|_{\rvec = \zeros}}{\xi}
+= \frac{\nabla_{\rvec} D(\rvec)\big|_{\rvec = \xi\dvec}}{\xi}
+$$
+
+for a small $\xi > 0$ ($\xi = 10^{-6}$ in the paper). The scale $1/\xi$ disappears in the normalisation, so one power
+iteration is: compute $\gvec = \nabla_{\rvec} D(\rvec)$ at $\rvec = \xi\dvec$ by one forward and one backward pass, and
+set $\rvec_{\text{adv}} = \epsilon\,\gvec / \norm{\gvec}$. Miyato et al. found that one iteration was enough for good
+performance; more iterations sharpen the estimate of $\uvec$ and cost one more pass each <Cite id="miyato2019vat" />.
+
+### One step of VAT
+
+1. Compute $p(\cdot \mid \xvec, \hat\thetavec)$ on each input of the batch and hold it fixed.
+2. Draw a random unit vector $\dvec$ per input; compute $\gvec = \nabla_{\rvec} D$ at $\rvec = \xi\dvec$; set
+   $\rvec_{\text{adv}} = \epsilon\,\gvec/\norm{\gvec}$.
+3. Compute $\mathrm{LDS} = \KL(p(\cdot \mid \xvec, \hat\thetavec) \,\|\, p(\cdot \mid \xvec + \rvec_{\text{adv}},
+   \thetavec))$ and add $\alpha$ times its batch mean to the supervised loss.
+4. Take a gradient step in $\thetavec$.
+
+Two forward-backward pairs per input in total: one for the direction, one for the loss.
+
+### VAT with entropy minimisation
+
+The smoothness term spreads predictions evenly around each input, but by itself it does not prefer confident
+predictions. Adding the conditional entropy of the predictions on unlabelled inputs, the <NoteLink
+to="entropy-minimisation">entropy minimisation</NoteLink> of Grandvalet and Bengio <Cite id="grandvalet2005" />,
+pushes the boundary further from the data. The paper reports this combination, VAT + EntMin, as its best variant on
+the image benchmarks <Cite id="miyato2019vat" />.
+
+<VirtualAdversarialDirections />
+
+## Worked example
+
+A two-class logistic model $p = \sigma(\wvec^\top\xvec + b)$ with $\wvec = (2, 1)$, $b = 0$, at the input $\xvec =
+(0.3, 0.1)$, with $\epsilon = 0.3$.
+
+**Step 1: the prediction.** $z = 2 \times 0.3 + 1 \times 0.1 = 0.7$ and $p = \sigma(0.7) = 0.668$.
+
+**Step 2: the gradient of the divergence.** For two <NoteLink to="bernoulli-distribution">Bernoulli
+distributions</NoteLink> with success probabilities $p$ and $q =
+\sigma(z + \wvec^\top\rvec)$, the derivative of $\KL(p \,\|\, q)$ with respect to $\rvec$ is $(q - p)\,\wvec$.
+
+**Step 3: one power iteration.** Start from the random direction $\dvec = (0, 1)$. At $\rvec = \xi\dvec$ with $\xi =
+10^{-6}$, $q - p \approx p(1 - p)\,\wvec^\top\xi\dvec = 0.222 \times 10^{-6}$, so $\gvec = (4.43, 2.22) \times
+10^{-7}$. Normalised, $\gvec/\norm{\gvec} = (0.894, 0.447) = \wvec/\norm{\wvec}$: one iteration lands on the exact
+adversarial direction, because the model's curvature $\Hmat = p(1 - p)\,\wvec\wvec^\top$ has rank one.
+
+**Step 4: the perturbation and its divergence.** $\rvec_{\text{adv}} = 0.3 \times (0.894, 0.447) = (0.268, 0.134)$.
+The logit moves by $\wvec^\top\rvec_{\text{adv}} = 0.3 \times \norm{\wvec} = 0.671$ to $1.371$, so $q = 0.798$ and
+$\KL(p \,\|\, q) = 0.668 \ln\frac{0.668}{0.798} + 0.332 \ln\frac{0.332}{0.202} = 0.046$. The quadratic approximation
+$\frac12\epsilon^2 p(1 - p)\norm{\wvec}^2 = 0.050$ is close.
+
+**Step 5: against a random direction.** The random direction $(0, 1)$ moves the logit by only $0.3$, to $q = 0.731$,
+and $\KL = 0.0096$, a fifth of the adversarial value. The ratio is $\cos^2$ of the angle between the directions,
+$0.447^2 = 0.2$.
+
+**Step 6: why the dimension matters.** For a uniformly random unit vector in $\reals^d$ and a fixed unit vector,
+$\expect[\cos^2] = 1/d$. With a rank-one curvature a random perturbation therefore captures on average $1/d$ of the
+adversarial divergence: a half in the figure's two dimensions, $1/3072$ for a $32 \times 32$ colour image. VAT's search
+for the direction matters in proportion to the dimension.
+
+The figure trains the regulariser on two moons with eight labels. On the default data seed, VAT with $\epsilon = 0.3$
+raises the accuracy on the 192 unlabelled points from 84.4% (labels only) to 99.0% after 400 steps. Setting the
+power iterations to 0 keeps the random direction; in two dimensions that does as well (99.5%), as Step 6 predicts.
+
+## Cost
+
+Each step costs two forward and two backward passes per input on top of the supervised pass, one pair for the
+direction and one for the loss, plus one more pair per extra power iteration. The perturbation is recomputed every
+step and never stored.
+
+## Trade-offs
+
+- **The radius $\epsilon$.** It is the one hyperparameter that matters, and it is a distance in input space. Too small
+  and the regulariser tests nothing; too large and the ball around a point reaches the other class. The paper tunes
+  it per dataset <Cite id="miyato2019vat" />.
+- **No augmentation knowledge.** VAT uses no domain-specific transformations, which makes it applicable to any
+  continuous input. On images, methods that combine strong augmentations with label guessing outperform it: on
+  <Gloss name="cifar-10" /> with 250 labels <NoteLink to="mixmatch">MixMatch</NoteLink>'s error was 11.08% against VAT's
+  36.03% in the same comparison <Cite id="berthelot2019mixmatch" />. Augmentations encode invariances that a small
+  $\ell_2$ ball cannot.
+- **Smooth in input space, not along the data.** The ball is isotropic in the input coordinates. For images, pixel
+  distance does not track semantic distance, so the regulariser smooths the model in directions that rarely occur in
+  real data.
+
+## Pitfalls
+
+- **Scale of the inputs.** $\epsilon$ is measured in the input's own units. Standardise inputs, or perturb a learned
+  embedding, before choosing it.
+- **Collapse.** A large weight or radius can make a constant prediction the easiest way to be smooth, with accuracy
+  falling towards the class prior. The supervised loss must keep the classes apart.
+- **Finite difference in low precision.** With $\xi = 10^{-6}$ the gradient at $\xi\dvec$ is of order $\xi$ and can
+  underflow in half precision. Larger $\xi$ in low-precision training trades exactness for a usable signal.
+- **One radius per dataset.** In Oliver et al.'s common re-implementation of the methods of its time, VAT with entropy
+  minimisation was the best method on CIFAR-10, but CIFAR-10 and SVHN needed different values of $\epsilon$ <Cite
+  id="oliver2018realistic" />. A radius tuned on one dataset does not transfer.

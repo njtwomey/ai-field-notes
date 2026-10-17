@@ -1,0 +1,165 @@
+---
+title: 'Feature pyramid network'
+kind: concept
+summary: 'A feature pyramid network adds a top-down path to a backbone: each coarse map is upsampled and added to the finer backbone map through a lateral $1\times1$ convolution, so every scale carries strong semantics. Small objects are detected on fine levels, large ones on coarse levels.'
+tags: [convolutional-networks, computer-vision, deep-learning, worked-example]
+aliases: ['FPN', 'top-down pathway', 'lateral connections', 'multi-scale features', 'PANet', 'BiFPN']
+requires: [residual-network, one-by-one-convolution]
+related: [object-detection, detection-heads-and-anchors, fully-convolutional-network-and-u-net, image-pyramids-and-scale-space, segmentation-decoders]
+references: [lin2017fpn, ren2015, lin2017, liu2016ssd, liu2018panet, tan2020efficientdet, li2022vitdet, kirillov2019fpn, tian2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { FpnDiagram } from './FpnDiagram'
+import { LevelAssignment } from './LevelAssignment'
+
+<Definition>
+A feature pyramid network (FPN) takes the stage outputs $C_2, \dots, C_5$ of a convolutional backbone, at strides 4,
+8, 16 and 32, and builds pyramid levels $P_2, \dots, P_5$ of the same sizes with a fixed number $d$ of channels (256).
+It projects each $C_\ell$ by a lateral $1 \times 1$ convolution, adds the merged map of the level above upsampled by a
+factor 2, and smooths the sum with a $3 \times 3$ convolution. A detector or segmenter then predicts at every level
+with one shared head, assigning each object to a level by its size.
+</Definition>
+
+## Intuition
+
+Objects in one image differ in size by a factor of 20 or more: a distant pedestrian may be 20 pixels tall and a nearby
+bus 600. A detector needs features in which an object of any size covers a handful of cells, enough to recognise it and
+few enough for one head to handle.
+
+The classical answer is an image pyramid: resize the image to several scales and run the detector on each (see
+<NoteLink to="image-pyramids-and-scale-space" />). A deep network multiplies its cost by the number of scales, so this
+is slow. A convolutional backbone already computes a pyramid of its own, one map per stage at strides 4 to 32. Its fine
+maps are good at placing small things but weak in meaning, because few layers have processed them; its coarse maps are
+strong in meaning but too coarse for small things. SSD predicted from several backbone maps directly and was much weaker
+on small objects than on large ones <Cite id="liu2016ssd" />.
+
+FPN fixes the fine maps by sending semantics down. A top-down path starts from the coarsest map, upsamples it by 2 and
+adds it to the next finer backbone map, and repeats. Every level then holds features as meaningful as the top's, at its
+own resolution. This is the skip structure of <NoteLink to="fully-convolutional-network-and-u-net">U-Net</NoteLink>,
+with a prediction at every level instead of only at the finest.
+
+## Details
+
+### Construction
+
+Write $C_\ell$ for the output of the last residual block of stage $\ell$ of a <NoteLink to="residual-network" />, with
+stride $2^\ell$ relative to the input. FPN uses $\ell = 2, \dots, 5$ and leaves out the stride-2 stage $C_1$, whose
+map is large and shallow. With $L_\ell$ a lateral $1 \times 1$ convolution from the channels of $C_\ell$ to $d$,
+$S_\ell$ a $3 \times 3$ convolution from $d$ to $d$, and $\mathrm{up}_2$ nearest-neighbour upsampling by 2, the
+merged maps $M_\ell$ and pyramid levels $P_\ell$ are
+
+$$
+M_5 = L_5(C_5), \qquad M_\ell = L_\ell(C_\ell) + \mathrm{up}_2(M_{\ell + 1}) \quad (\ell = 4, 3, 2), \qquad
+P_\ell = S_\ell(M_\ell).
+$$
+
+Addition needs matching shapes. The lateral <NoteLink to="one-by-one-convolution" /> brings every level to $d$
+channels, and upsampling by exactly 2 matches the spatial size when each stage halves it. The $3 \times 3$ convolution
+reduces the aliasing of nearest-neighbour upsampling. The paper uses $d = 256$ and no nonlinearities in these extra
+layers <Cite id="lin2017fpn" />. A coarser level $P_6$ is a stride-2 subsampling of $P_5$, used only to hold the
+largest anchors.
+
+The fixed width $d$ makes the levels interchangeable: one head with the same weights runs on every level, as a
+classifier slides over an image pyramid. Sharing the head across levels gave about the same accuracy as separate heads
+<Cite id="lin2017fpn" />.
+
+<FpnDiagram />
+
+### Assigning objects to levels
+
+Each object is handled on one level, chosen by its size. Proposals in a region proposal network are matched to anchors,
+and FPN gives each level one anchor size: $32^2$, $64^2$, $128^2$, $256^2$ and $512^2$ pixels on $P_2$ to $P_6$, in the
+three aspect ratios 1:2, 1:1 and 2:1, 15 anchors over the pyramid <Cite id="lin2017fpn" />. An anchor's side is 8 cells
+of its level, whatever the level. The labelling rules are those of Faster R-CNN, an <Gloss name="iou" /> above 0.7 for a
+positive and below 0.3 for a negative <Cite id="ren2015" />; see <NoteLink to="detection-heads-and-anchors" />.
+
+A second-stage head pools features for a region of width $w$ and height $h$ from level
+
+$$
+k = \left\lfloor k_0 + \log_2\paren{\sqrt{wh} / 224} \right\rfloor, \qquad k_0 = 4,
+$$
+
+clamped to the levels that exist <Cite id="lin2017fpn" />. The number 224 is the <Gloss name="imagenet" /> training
+size, and $k_0 = 4$ because the single-scale Faster R-CNN that FPN replaced pooled every region from $C_4$. Halving the
+region's side lowers $k$ by 1, which halves the stride, so the region covers the same number of cells: between 14 and 28
+per side. Dense one-stage detectors use the same idea with levels $P_3$ to $P_7$, where $P_6$ and $P_7$ come from
+stride-2 convolutions <Cite id="lin2017" />. FCOS assigns objects to levels by the distance from a cell to the box edges
+instead <Cite id="tian2019" />.
+
+<LevelAssignment />
+
+### Variants
+
+- **Extra bottom-up path.** PANet adds a second, bottom-up path after the top-down one, so that location information
+  from $P_2$ reaches the coarse levels in a few layers rather than through the whole backbone
+  <Cite id="liu2018panet" />. The necks of most current YOLO detectors are built this way.
+- **Weighted, repeated fusion.** EfficientDet's BiFPN removes nodes with a single input, adds edges from each backbone
+  map to its output node, repeats the top-down and bottom-up block several times, and weights each input of an addition
+  by a learned non-negative scalar <Cite id="tan2020efficientdet" />.
+- **Pyramid from one map.** A plain <Gloss name="vit">vision transformer</Gloss> has one stride-16 map. ViTDet builds
+  the pyramid from that map alone with deconvolutions and pooling, and competes with hierarchical backbones that use FPN
+  <Cite id="li2022vitdet" />.
+- **Segmentation.** Panoptic FPN adds a semantic branch that upsamples every level to stride 4 and sums them, beside
+  an instance branch on the same pyramid <Cite id="kirillov2019fpn" />; see <NoteLink to="segmentation-decoders" />.
+
+FPN or one of these variants is the default neck of detectors and instance segmenters with a convolutional or
+hierarchical transformer backbone. The task view is in <NoteLink to="object-detection" />.
+
+## Worked example
+
+**Shapes for an $800 \times 1024$ image.** A
+<NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink> gives
+
+| Level | Stride | $C_\ell$ size and channels | $P_\ell$ size and channels |
+| --- | --- | --- | --- |
+| 2 | 4 | $200 \times 256$, 256 | $200 \times 256$, 256 |
+| 3 | 8 | $100 \times 128$, 512 | $100 \times 128$, 256 |
+| 4 | 16 | $50 \times 64$, 1024 | $50 \times 64$, 256 |
+| 5 | 32 | $25 \times 32$, 2048 | $25 \times 32$, 256 |
+| 6 | 64 | | $13 \times 16$, 256 |
+
+$P_6$ subsamples $P_5$ with stride 2: $\lfloor (25 - 1)/2 \rfloor + 1 = 13$ rows and $\lfloor (32 - 1)/2 \rfloor + 1 =
+16$ columns.
+
+**Top-down step at level 4.** $M_5$ has $25 \times 32$ cells. Upsampling by 2 gives $50 \times 64$, the size of
+$L_4(C_4)$, so the two add cell by cell. Each cell $(i, j)$ of $\mathrm{up}_2(M_5)$ copies cell
+$(\lfloor i/2 \rfloor, \lfloor j/2 \rfloor)$ of $M_5$: four fine cells share one coarse value, and the lateral term
+supplies what varies between them. A stage whose input side is odd breaks this: a side of 25 halves to 13, which doubles
+to 26, not 25, and real implementations then resize to the lateral map's shape instead of doubling.
+
+**Cost.** The lateral layers have $(256 + 512 + 1024 + 2048) \cdot 256 = 983{,}040$ weights and the four $3 \times 3$
+layers $4 \cdot 9 \cdot 256 \cdot 256 = 2{,}359{,}296$. With biases, FPN adds 3.34 million parameters to the 25 million
+of a ResNet-50. At $800 \times 1024$ it costs 46.4 billion multiply-accumulates, most of them in the $3 \times 3$ layer
+on $P_2$. The pyramid holds $51{,}200 + 12{,}800 + 3{,}200 + 800 + 208 = 68{,}208$ positions, 1.33 times the positions
+of $P_2$ alone, because each level has a quarter of the cells of the one below.
+
+**Level assignment.** For region features, a $224 \times 224$ box goes to $k = \lfloor 4 + \log_2 1 \rfloor = 4$. A
+$112 \times 112$ box gives $\lfloor 4 - 1 \rfloor = 3$. A $120 \times 300$ box has $\sqrt{wh} = 189.7$, so
+$k = \lfloor 4 + \log_2 0.847 \rfloor = \lfloor 3.76 \rfloor = 3$, and it covers $15 \times 37.5$ cells of $P_3$. A
+$50 \times 50$ box gives $\lfloor 1.84 \rfloor = 1$, clamped to 2. For proposals, the same $120 \times 300$ box at
+the centre of a cell has its best anchor on $P_5$, the $1{:}2$ anchor of area $256^2$ ($181 \times 362$) with IoU
+0.55, against 0.46 for the $1{:}2$ anchor of $P_4$.
+
+## Assumptions
+
+- Backbone stages halve the resolution exactly, so upsampling by 2 matches the lateral map. Inputs padded to a multiple
+  of 32 satisfy it.
+- Features at different levels are comparable after the lateral projection, so one head serves every level and an
+  object's level depends only on its size.
+- Object size is a good proxy for the scale at which its features are best. Elongated objects, with a short side and a
+  long side, fit any single level less well.
+
+## Pitfalls
+
+- **Odd sizes.** An input side that is not a multiple of 32 gives odd stage sizes, and the upsampled map is one cell
+  larger than the lateral one. Pad the input, or resize to the lateral shape.
+- **Dropping the finest level.** $P_2$ holds most positions and most cost. Detectors that start at $P_3$ for speed,
+  as RetinaNet does, have no anchor smaller than 32 pixels, and much smaller objects match no anchor well.
+- **Boundary cases of the equation.** A box of side 223 goes to $P_3$ and one of side 224 to $P_4$. Hard rules at
+  level boundaries make similar boxes use different features; pooling from several levels, or anchor-free assignment
+  by regression range, softens this.
+- **Mixing the two assignments.** The equation for region features and the anchor sizes for proposals send the same box
+  to levels one or two apart. Changing anchor sizes without changing the equation, or the reverse, shifts which level
+  learns which objects.

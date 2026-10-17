@@ -1,0 +1,257 @@
+---
+title: Convolutional layer
+kind: concept
+summary: A convolutional layer computes each output value from a small window of the input with one set of weights shared across all positions. For stride $s$, padding $p$ and kernel size $k$, an input of width $n$ gives an output of width $\lfloor (n + 2p - k)/s \rfloor + 1$.
+tags: [convolutional-networks, deep-learning, computer-vision, worked-example]
+aliases: [convolution layer, conv layer, 2D convolution, weight sharing, feature map]
+requires: [convolution]
+related: [pooling-and-strides, one-by-one-convolution, receptive-field-and-dilated-convolution, depthwise-and-grouped-convolution, transposed-convolution, fast-convolution-algorithms, classic-convolutional-network-architectures, multilayer-perceptron]
+references: [lecun1998b, dumoulin2016, goodfellow2016, luo2016, chetlur2014]
+status: draft
+updated: 2026-10-17
+---
+
+import { ConvolutionExplorer } from './ConvolutionExplorer'
+
+<Definition>
+A convolutional layer maps an input with $C$ channels on an $H \times W$ grid to an output with $C'$ channels. Output
+channel $c'$ at position $(i, j)$ is a bias $b_{c'}$ plus the sum of the $k \times k \times C$ input values in a window
+at $(si - p, sj - p)$, each multiplied by a weight $w_{c', c, u, v}$. The same weights are used at every position. The
+output grid is called a feature map.
+</Definition>
+
+## Intuition
+
+A fully connected layer gives every output its own weight for every input. An image of $224 \times 224$ pixels has
+50,176 inputs per channel, so a dense layer is expensive and ignores the grid. A convolutional layer makes two
+assumptions about images and other grid-shaped signals <Cite id="lecun1998b" />:
+
+- **Locality.** A useful feature, such as an edge, depends on a small neighbourhood of pixels. Each output reads only a
+  $k \times k$ window.
+- **Stationarity.** A feature that is useful in one place is useful everywhere. Each output channel uses one kernel
+  at every position. This is weight sharing.
+
+The kernel acts as a feature detector. The output is large where the window looks like the kernel and small where it
+does not. The layer is a bank of $C'$ detectors, each swept over the whole input.
+
+## Definition in full
+
+Write the input as $x_{c, r, q}$ for channel $c \in \set{1, \dots, C}$, row $r$ and column $q$. Pad the input with $p$
+rows and columns of zeros on every side. With stride $s$, output channel $c'$ at row $i$ and column $j$ is
+
+$$
+y_{c', i, j} = b_{c'} + \sum_{c=1}^{C} \sum_{u=0}^{k-1} \sum_{v=0}^{k-1} w_{c', c, u, v} \; x_{c,\, si - p + u,\, sj - p + v}.
+$$
+
+Libraries store a mini-batch of $N$ inputs as a tensor of shape $[N, C, H, W]$. The weights form a tensor of shape
+$[C', C, k, k]$, one $k \times k \times C$ kernel per output channel, and the biases a vector of length $C'$. The output
+has shape $[N, C', H', W']$, with $H'$ and $W'$ given by the output-size formula below. Every output channel reads every
+input channel; <NoteLink to="depthwise-and-grouped-convolution">grouped convolution</NoteLink> drops that rule. The
+output is usually passed through a nonlinearity such as $\max(0, z)$.
+
+<ConvolutionExplorer />
+
+## Cross-correlation and convolution
+
+The sum above slides the kernel over the input without flipping it, so it is a cross-correlation. In one dimension, with
+kernel taps $w_0, \dots, w_{k-1}$, the layer computes $y_i = \sum_u w_u\, x_{i + u}$. The signal-processing
+<NoteLink to="convolution">convolution</NoteLink> reverses the kernel first: $(w * x)_i = \sum_u w_u\, x_{i - u}$. The
+two are related by the flipped kernel $\tilde w_u = w_{k - 1 - u}$: cross-correlation with $w$ equals convolution with
+$\tilde w$, shifted by $k - 1$ positions. Every deep-learning library computes the cross-correlation and calls it
+convolution.
+
+The difference does not matter for a learned layer. Any function the layer computes with kernel $w$ under one
+convention, it computes with kernel $\tilde w$ under the other, and training finds whichever kernel fits. The difference
+matters when a kernel moves between conventions by hand. A Sobel edge kernel copied from an image-processing text, which
+uses true convolution, detects edges of the opposite sign when loaded into a convolutional layer. The convention also
+fixes which flip appears in the backward pass below.
+
+## Output size
+
+Consider one spatial dimension with input width $n$. After padding, the input has width $n + 2p$, indexed
+$0, \dots, n + 2p - 1$. Output position $i$ reads the padded positions $si, \dots, si + k - 1$. The window fits when its
+last position is inside the padded input:
+
+$$
+si + k - 1 \le n + 2p - 1 \iff i \le \frac{n + 2p - k}{s}.
+$$
+
+The valid positions are the integers $i = 0, 1, \dots, \lfloor (n + 2p - k)/s \rfloor$, so the output width is
+
+$$
+m = \left\lfloor \frac{n + 2p - k}{s} \right\rfloor + 1.
+$$
+
+Three cases recur <Cite id="dumoulin2016" />:
+
+- **Valid.** $p = 0$, $s = 1$: $m = n - k + 1$. Each layer trims $k - 1$ positions.
+- **Same.** $p = (k - 1)/2$ for odd $k$, $s = 1$: $m = n$. A $3 \times 3$ kernel with $p = 1$ keeps the size.
+- **Downsampling.** $s = 2$ roughly halves the width. A $7 \times 7$ kernel with $s = 2$ and $p = 3$ on a
+  $224$-pixel input gives $\lfloor (224 + 6 - 7)/2 \rfloor + 1 = 112$.
+
+A dilated kernel spreads its taps apart and covers more positions; the formula then holds with $k$ replaced by the
+dilated extent. <NoteLink to="receptive-field-and-dilated-convolution">Receptive field and dilated
+convolution</NoteLink> defines dilation.
+
+## Parameters and cost
+
+The layer has $k^2 C C'$ weights and $C'$ biases. The count does not depend on the image size. A $3 \times 3$ layer
+from $C = 64$ to $C' = 128$ channels has $3 \cdot 3 \cdot 64 \cdot 128 + 128 = 73{,}856$ parameters. A dense layer
+between the same feature maps at $56 \times 56$ would have $(56^2 \cdot 64)(56^2 \cdot 128) \approx 8.1 \times 10^{10}$
+weights.
+
+Each output value costs $k^2 C$ multiply-accumulates, one multiplication and one addition each. An output of shape
+$[C', H', W']$ therefore costs
+
+$$
+k^2\, C\, C'\, H' W'
+$$
+
+multiply-accumulates per example, or about twice that many floating-point operations (<Gloss name="flop" />s). The same
+$3 \times 3$ layer from 64 to 128 channels on a $56 \times 56$ map costs
+$9 \cdot 64 \cdot 128 \cdot 3136 = 2.31 \times 10^8$ multiply-accumulates, about $0.46$ GFLOPs per image. Parameters do
+not grow with the image and compute does.
+
+Three factors set the cost: the kernel area $k^2$, the channel product $CC'$ and the number of output positions $H'W'$.
+Efficient designs cut one factor each. A <NoteLink to="one-by-one-convolution">$1 \times 1$ convolution</NoteLink> sets
+$k = 1$ and changes channel counts cheaply. <NoteLink to="depthwise-and-grouped-convolution">Depthwise and grouped
+convolution</NoteLink> divide the channel product by the number of groups. A stride divides $H'W'$ by $s^2$; see
+<NoteLink to="pooling-and-strides">pooling and strides</NoteLink>.
+
+## Convolution as a matrix product
+
+A convolutional layer is a matrix product in disguise. Copy each $k \times k \times C$ input window into one column of
+length $k^2 C$. The $H'W'$ windows give a matrix $\Xmat_{\text{col}}$ of shape $[k^2 C,\ H'W']$; this unfolding is
+called im2col. Reshape the weights into a matrix $\Wmat$ of shape $[C',\ k^2 C]$, one row per output channel. Then
+
+$$
+\Ymat = \Wmat\, \Xmat_{\text{col}},
+$$
+
+of shape $[C',\ H'W']$, is the output with its spatial axes flattened. For a $4 \times 4$ single-channel input and a
+$3 \times 3$ kernel, $\Xmat_{\text{col}}$ is $9 \times 4$: four windows of nine pixels. The product runs at the speed of
+a tuned <NoteLink to="matrix-multiplication">matrix multiplication</NoteLink>, which is why early <Gloss name="gpu" />
+libraries lowered convolution this way. The cost is memory: with stride 1, each input value is copied into up to $k^2$
+columns. cuDNN avoids the copy by building the columns in on-chip memory as the product needs them
+<Cite id="chetlur2014" />. <NoteLink to="fast-convolution-algorithms">Fast convolution algorithms</NoteLink> compares
+im2col with <Gloss name="fft" /> and Winograd convolution.
+
+## Backward pass
+
+Training needs the gradient of the loss $\ell$ with respect to the input, to pass back to earlier layers, and with
+respect to the weights, to update them. Both are convolutions. Take one channel, stride 1 and no padding, so
+$y_{i, j} = \sum_{u, v} w_{u, v}\, x_{i + u,\, j + v}$, and write $\delta_{i, j} = \partial \ell / \partial y_{i, j}$
+for the gradient arriving from the layer above. $\delta$ has the shape of the output.
+
+**Weights.** Weight $w_{u, v}$ appears in every output, multiplied by $x_{i + u,\, j + v}$. The
+<NoteLink to="derivative">chain rule</NoteLink> sums its contributions:
+
+$$
+\frac{\partial \ell}{\partial w_{u, v}} = \sum_{i, j} \delta_{i, j}\, x_{i + u,\, j + v}.
+$$
+
+This is the cross-correlation of the input with $\delta$, a valid correlation whose result has the shape of the kernel.
+It is the same weight-sharing sum as the <NoteLink to="multilayer-perceptron">forward pass</NoteLink>, with $\delta$ in
+the role of the kernel.
+
+**Input.** Input $x_{r, q}$ appears in output $(i, j)$ when $r = i + u$ and $q = j + v$ for some tap $(u, v)$, with
+weight $w_{r - i,\, q - j}$. Summing over the outputs that read it,
+
+$$
+\frac{\partial \ell}{\partial x_{r, q}} = \sum_{u, v} \delta_{r - u,\, q - v}\, w_{u, v},
+$$
+
+with $\delta$ taken as zero outside its grid. The index $r - u$ runs backwards through the kernel, so this is a true
+convolution of $\delta$ with $w$, in full mode: $\delta$ padded with $k - 1$ zeros on every side. Equivalently, it is a
+cross-correlation of the padded $\delta$ with the flipped kernel $\tilde w$. The map from $\delta$ to
+$\partial \ell / \partial \xvec$ is the transpose of the forward map, a
+<NoteLink to="transposed-convolution">transposed convolution</NoteLink>.
+
+With channels, the input gradient of channel $c$ sums the full convolutions of every $\delta_{c'}$ with
+$w_{c', c}$: the weight tensor is used with its input and output channel axes swapped. With stride $s$, $\delta$ first
+gets $s - 1$ zeros between its entries, one for every skipped position. The backward pass costs about twice the forward
+pass, one convolution of the same size for each of the two gradients.
+
+## Translation equivariance
+
+Let $T_a$ shift an image by $a$ positions: $(T_a x)_{c, r, q} = x_{c, r, q - a}$. With stride 1 and no boundary
+effects, shifting the input shifts the output by the same amount. Substitute $T_a x$ into the definition:
+
+$$
+y'_{c', i, j} = b_{c'} + \sum_{c, u, v} w_{c', c, u, v}\, x_{c,\, i - p + u,\, j - p + v - a} = y_{c', i, j - a}.
+$$
+
+The last step is the definition of $y$ at column $j - a$. So a convolutional layer is equivariant to translation:
+$\text{conv}(T_a x) = T_a\, \text{conv}(x)$. An edge detector finds an edge wherever the edge is, and reports it at
+the matching place in the output. Equivariance holds exactly only for stride 1 and away from the borders. A stride
+$s > 1$ gives equivariance only to shifts that are multiples of $s$. Pooling and a final global average turn
+equivariance into approximate invariance; see <NoteLink to="pooling-and-strides">pooling and strides</NoteLink>.
+
+## Receptive field
+
+The <Gloss name="receptive-field" /> of an output value is the set of input pixels that can affect it. One
+$k \times k$ layer has a receptive field of $k \times k$. A stack of $L$ such layers with stride 1 has a receptive field
+of $L(k - 1) + 1$ per side: each layer adds $k - 1$ positions. Two $3 \times 3$ layers see $5 \times 5$ pixels, and
+three see $7 \times 7$. Strides, pooling and dilation make it grow faster;
+<NoteLink to="receptive-field-and-dilated-convolution">receptive field and dilated convolution</NoteLink> derives the
+general recursion.
+
+## Worked example
+
+Take a $4 \times 4$ single-channel input, a $3 \times 3$ vertical-edge kernel, no padding, stride 1 and zero bias:
+
+$$
+x = \begin{bmatrix} 1 & 2 & 0 & 1 \\ 0 & 1 & 3 & 1 \\ 2 & 1 & 0 & 0 \\ 1 & 0 & 1 & 2 \end{bmatrix}, \qquad
+w = \begin{bmatrix} 1 & 0 & -1 \\ 1 & 0 & -1 \\ 1 & 0 & -1 \end{bmatrix}.
+$$
+
+The output width is $\lfloor (4 - 3)/1 \rfloor + 1 = 2$. The kernel subtracts the right column of the window from the
+left column. For $y_{0,0}$ the window is the top-left $3 \times 3$ block. Its left column sums to $1 + 0 + 2 = 3$ and
+its right column to $0 + 3 + 0 = 3$, so $y_{0,0} = 0$. The other three windows give
+
+$$
+y = \begin{bmatrix} 0 & 2 \\ -1 & -1 \end{bmatrix}.
+$$
+
+For $y_{0,1}$ the window covers columns 1 to 3 of rows 0 to 2. The left column sums to $2 + 1 + 1 = 4$ and the right
+column to $1 + 1 + 0 = 2$, giving $2$. All four outputs use the same nine weights.
+
+**Backward pass.** Let the loss be the sum of the outputs, $\ell = \sum_{i, j} y_{i, j}$, so $\delta_{i, j} = 1$ for
+all four outputs. The weight gradient $\partial \ell / \partial w_{u, v}$ is then the sum of the $2 \times 2$ block of
+$x$ that tap $(u, v)$ meets. Tap $(0, 0)$ meets $x_{0,0}, x_{0,1}, x_{1,0}, x_{1,1}$, which sum to $1 + 2 + 0 + 1 = 4$.
+Tap $(0, 1)$ meets the block one column to the right, $2 + 0 + 1 + 3 = 6$. All nine taps give
+
+$$
+\frac{\partial \ell}{\partial w} = \begin{bmatrix} 4 & 6 & 5 \\ 4 & 5 & 4 \\ 4 & 2 & 3 \end{bmatrix}.
+$$
+
+The input gradient places a copy of $w$ at each of the four window positions and adds the copies. The corner pixel
+$x_{0,0}$ is read only by window $(0, 0)$ through tap $(0, 0)$, so its gradient is $w_{0,0} = 1$. Pixel $x_{1,0}$ is
+read by windows $(0, 0)$ and $(1, 0)$, both through a left-column tap of weight $1$, so its gradient is $2$. The full
+result is
+
+$$
+\frac{\partial \ell}{\partial x} = \begin{bmatrix} 1 & 1 & -1 & -1 \\ 2 & 2 & -2 & -2 \\ 2 & 2 & -2 & -2 \\ 1 & 1 & -1 & -1 \end{bmatrix},
+$$
+
+the full convolution of the $2 \times 2$ array of ones with $w$. Raising a pixel in the left two columns raises the
+sum of the outputs; raising one in the right two columns lowers it.
+
+## Assumptions
+
+- The input lives on a regular grid, and nearby grid points are related. Images, spectrograms, audio and video satisfy
+  this. Tabular data with arbitrarily ordered columns does not.
+- The statistics of the signal are roughly the same at every position. Where they are not, such as faces aligned in a
+  fixed frame, weight sharing wastes capacity.
+
+## Pitfalls
+
+- **Off-by-one sizes.** The floor in the output-size formula silently drops input columns that a strided window does
+  not reach. Check sizes layer by layer.
+- **Border effects.** Zero padding makes the border look like a dark frame. Outputs near the edge are not equivariant.
+- **Channels count.** A "$3 \times 3$ convolution" on 256 channels has $9 \cdot 256$ weights per output channel, not 9.
+  Most of the cost of a deep network is in the channel dimension.
+- **Flipped kernels.** Hand-designed kernels written for true convolution give the opposite sign or the mirror image
+  when loaded into a layer that cross-correlates.
+- **Receptive field is not effective receptive field.** Pixels near the centre of the receptive field influence an
+  output far more than pixels near its edge <Cite id="luo2016" />.

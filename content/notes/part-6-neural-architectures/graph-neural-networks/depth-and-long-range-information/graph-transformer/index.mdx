@@ -1,0 +1,200 @@
+---
+title: 'Graph transformer'
+kind: concept
+summary: 'A graph transformer lets every node attend to every other node and injects the graph as positional encodings or attention biases: Graphormer adds a learned bias per shortest-path distance; GPS sums a local message-passing layer and global attention at each layer.'
+tags: [graph-neural-networks, attention, transformer, worked-example]
+aliases: ['Graphormer', 'GraphGPS', 'GPS graph transformer', 'shortest-path attention bias', 'spatial encoding']
+requires: [positional-and-structural-encodings, multi-head-attention]
+related:
+  [
+    oversquashing-and-graph-rewiring,
+    graph-attention-network,
+    transformer,
+    message-passing-neural-network,
+    depth-and-long-range-information-in-graph-networks,
+    molecular-property-prediction-with-graph-networks,
+    efficient-attention,
+  ]
+references:
+  [
+    ying2021graphormer,
+    rampasek2022gps,
+    dwivedi2021graphtransformer,
+    kreuzer2021san,
+    shirzad2023exphormer,
+    muller2024attending,
+    dwivedi2022lrgb,
+    tonshoff2023lrgb,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { SpatialBias } from './SpatialBias'
+
+<Definition>
+A graph transformer is a <NoteLink to="transformer" /> whose tokens are the nodes of a graph. Each layer applies
+<NoteLink to="multi-head-attention" /> over all pairs of nodes and a feed-forward network to each node. Attention over
+all pairs ignores the edges, so the graph is supplied in one or more of three ways: as
+<NoteLink to="positional-and-structural-encodings">positional and structural encodings</NoteLink> added to the node
+features, as a bias added to the attention score of each pair of nodes, or as a local <Gloss name="gnn">message
+passing</Gloss> layer run beside the attention. Graphormer adds a learned bias per shortest-path distance
+<Cite id="ying2021graphormer" />; GPS sums a message passing layer and global attention in every layer
+<Cite id="rampasek2022gps" />.
+</Definition>
+
+## Intuition
+
+A <NoteLink to="message-passing-neural-network">message passing</NoteLink> layer lets each node read its neighbours
+only. Information between two nodes $r$ hops apart needs $r$ layers and passes through every bottleneck between them,
+which causes <NoteLink to="oversquashing-and-graph-rewiring">oversquashing</NoteLink>. Self-attention lets every node
+read every other node in one layer, with weights computed from the features. It is the extreme form of rewiring: the
+graph used for computation is complete.
+
+Attention alone is blind to the graph. Self-attention over a set of nodes is equivariant to any permutation, so a
+plain transformer treats the nodes as a set and cannot tell a path from a star with the same node features. The graph
+must re-enter as information about each node (where it sits, what its neighbourhood looks like) or about each pair
+(how far apart they are, which edges join them). The design of a graph transformer is mostly the choice of this
+information.
+
+Message passing is a special case. Attention whose weights are zero outside each node's neighbourhood is a
+<NoteLink to="graph-attention-network">graph attention</NoteLink> layer. A graph transformer with a distance bias can
+therefore learn anything between local message passing and global attention.
+
+## Details
+
+### Attention over nodes
+
+Let $\Hmat \in \reals^{N \times d}$ hold the features of the $N$ nodes. One head computes queries
+$\Qmat = \Hmat\Wmat_Q$, keys $\Kmat = \Hmat\Wmat_K$ and values $\Vmat = \Hmat\Wmat_V$ with
+$\Wmat_Q, \Wmat_K \in \reals^{d \times d_k}$ and $\Wmat_V \in \reals^{d \times d_v}$, and a score for every ordered pair
+of nodes,
+
+$$
+s_{ij} = \frac{\qvec_i^\tr\kvec_j}{\sqrt{d_k}} + b_{ij}, \qquad
+\alpha_{ij} = \frac{\exp(s_{ij})}{\sum_{l=1}^{N}\exp(s_{il})}, \qquad
+\hvec_i' = \sum_{j=1}^{N}\alpha_{ij}\vvec_j ,
+$$
+
+where $b_{ij}$ is a bias that depends on the pair and not on the features. Several heads run in parallel and a
+feed-forward network, <NoteLink to="residual-connections">residual connections</NoteLink> and normalisation follow, as
+in any transformer. Without the bias, the scores depend only on the features, and relabelling the nodes permutes the
+outputs in the same way.
+
+### Encodings on nodes
+
+The simplest injection adds a vector computed from the graph to each node's input features. Laplacian eigenvectors give
+<NoteLink to="positional-encoding">positional encodings</NoteLink> and random-walk return probabilities give structural
+ones; the <NoteLink to="positional-and-structural-encodings" /> note derives both and the sign ambiguity of
+eigenvectors. Dwivedi and Bresson's graph transformer used Laplacian positional encodings and restricted attention to
+each node's neighbours <Cite id="dwivedi2021graphtransformer" />. The spectral attention network attends over the
+eigenvectors to learn which frequencies matter <Cite id="kreuzer2021san" />. Graphormer's **centrality encoding** adds a
+learned vector for each node's degree, so that a hub and a leaf start from different inputs
+<Cite id="ying2021graphormer" />.
+
+### Biases on pairs: Graphormer
+
+Graphormer's **spatial encoding** sets $b_{ij} = b_{\phi(i,j)}$, a learned scalar per value of the shortest-path
+distance $\phi(i, j)$ between the two nodes, shared across the graph and across layers
+<Cite id="ying2021graphormer" />. A table of a few dozen numbers then decides how attention depends on distance. A
+large negative $b_\phi$ for $\phi \ge 2$ restricts a head to the 1-hop neighbourhood; a flat table gives global
+attention; a table that peaks at $\phi = 3$ makes a head that looks at a ring of nodes three hops away. Graphormer's
+**edge encoding** adds a second bias, the average over the edges of a shortest path of dot products between each
+edge's features and a learned vector for its position along the path, so that bond types in a molecule shape
+attention. A virtual node joined to every
+node, with its own learned distance, gives a graph-level readout.
+
+Graphormer performed well across graph-level prediction tasks, notably the OGB Large-Scale Challenge on molecular
+properties <Cite id="ying2021graphormer" />.
+
+### Local and global together: GPS
+
+GPS, for general, powerful and scalable, builds each layer from two branches that read the same input
+<Cite id="rampasek2022gps" />:
+
+$$
+\Hmat_M = \operatorname{MPNN}(\Hmat, \Amat) + \Hmat, \qquad
+\Hmat_T = \operatorname{Attention}(\Hmat) + \Hmat, \qquad
+\Hmat' = \operatorname{MLP}(\Hmat_M + \Hmat_T),
+$$
+
+with normalisation after each branch. The message passing branch, any layer such as GINE or a gated graph
+convolution, sees the edges and edge features. The attention branch has no bias and sees the graph only through
+positional and structural encodings added to the input. The two branches split the work: local structure from
+message passing, long-range interaction from attention. Because the attention branch needs no pairwise bias, it can
+be replaced by a linear-time approximation of attention, which makes the layer scale linearly in the numbers of nodes
+and edges.
+
+### Cost
+
+Full attention computes $N^2$ scores per head and layer, so time is $O(N^2 d)$ and memory $O(N^2)$ per head. A
+molecule of 30 atoms costs 900 pairs, less than a message passing layer on a dense graph. A citation graph of
+$10^5$ nodes would need $10^{10}$ pairs per head and layer, which is out of reach. Large graphs use sparse or linear
+<NoteLink to="efficient-attention">attention</NoteLink>. Exphormer replaces the complete graph by the input edges, a
+random expander graph and a few virtual nodes, so the number of attended pairs grows linearly with the graph while any
+two nodes stay a few hops apart <Cite id="shirzad2023exphormer" />. Computing all shortest-path distances costs
+$O(N\abs{\Ecal})$ by breadth-first search from every node, once per graph.
+
+## Worked example
+
+Take the triangle with a tail from the <NoteLink to="message-passing-neural-network" /> note: edges $1{-}2$, $1{-}3$,
+$2{-}3$ and $3{-}4$, scalar features $h = (1, 2, 3, 4)$, and one head with $W_Q = W_K = W_V = 0.5$ and $d_k = 1$. The
+shortest-path distances from node 1 to nodes 1 to 4 are $\phi = (0, 1, 1, 2)$.
+
+**Content scores.** $q_1 = 0.5$ and $k_j = 0.5\,h_j$, so $q_1 k_j = 0.25\,h_j = (0.25, 0.5, 0.75, 1)$.
+
+**Without a bias.** The exponentials are $(1.284, 1.649, 2.117, 2.718)$ with sum $7.768$, so
+
+$$
+\alpha_{1\cdot} = (0.165,\ 0.212,\ 0.273,\ 0.350).
+$$
+
+Node 4, two hops away, gets the largest weight because its feature is largest. The output is
+$\sum_j \alpha_{1j} v_j = 0.5\,(0.165 + 2 \times 0.212 + 3 \times 0.273 + 4 \times 0.350) = 1.404$.
+
+**With a spatial bias.** Take the bias table $b_0 = 0$, $b_1 = 0.5$, $b_2 = -1$, as training might produce for a task
+that rewards neighbours. The scores become $(0.25 + 0,\ 0.5 + 0.5,\ 0.75 + 0.5,\ 1 - 1) = (0.25, 1, 1.25, 0)$, the
+exponentials $(1.284, 2.718, 3.490, 1)$ with sum $8.492$, and
+
+$$
+\alpha_{1\cdot} = (0.151,\ 0.320,\ 0.411,\ 0.118).
+$$
+
+The two neighbours now hold 73% of the weight, against 49% before, and node 4 falls from 0.350 to 0.118. The output
+is $0.5\,(0.151 + 2 \times 0.320 + 3 \times 0.411 + 4 \times 0.118) = 1.248$.
+
+**The local limit.** Let $b_2 \to -\infty$. Node 4 drops out and the remaining exponentials $(1.284, 2.718, 3.490)$
+sum to $7.492$, giving $(0.171, 0.363, 0.466, 0)$: attention over node 1 and its neighbours, a graph attention layer.
+
+<SpatialBias />
+
+## Assumptions
+
+- **The structure is supplied.** A graph transformer is only as aware of the graph as its encodings and biases.
+  Without them it is a set model: it gives the 6-cycle and two disjoint triangles with equal features identical outputs,
+  as message passing does, and also cannot tell a path from a star.
+- **The graph is small enough.** Full attention is practical for graphs of up to a few thousand nodes on one
+  accelerator. Larger graphs need <NoteLink to="sliding-window-and-sparse-attention">sparse attention</NoteLink>,
+  <NoteLink to="linear-attention">linear attention</NoteLink> or sampling.
+- **Data is plentiful.** Global attention has fewer built-in assumptions than message passing and needs more data or
+  stronger encodings to learn the same locality. Graph transformers have their strongest results on molecular
+  property prediction <Cite id="muller2024attending" />.
+
+## Pitfalls
+
+- **The gain over message passing is often small.** On the <NoteLink to="graph-learning-benchmarks">Long Range Graph
+  Benchmark</NoteLink>, designed to need long-range interactions, graph transformers first outperformed message passing
+  networks <Cite id="dwivedi2022lrgb" />. After basic hyperparameter tuning of the message passing baselines the gap
+  vanished on several of its datasets <Cite id="tonshoff2023lrgb" />. Compare against a well-tuned message passing
+  network with the same encodings.
+- **Eigenvector encodings need invariance.** <NoteLink to="positional-and-coordinate-encoding">Laplacian positional
+  encodings</NoteLink> change sign and basis between runs of the eigensolver; a transformer fed them needs sign flipping
+  during training or a sign-invariant encoder.
+- **Distances beyond the table.** A spatial-encoding table stops at some maximum distance; longer distances share the
+  last entry, and pairs in different connected components need a separate value.
+- **Quadratic memory.** Attention weights for every pair must be stored for backpropagation. Memory, not time, usually
+  limits the graph size.
+- **Attention also smooths.** Attention weights are positive and sum to one, so every attention layer averages. Deep
+  stacks of attention layers can still make node features alike, and residual connections and normalisation remain
+  necessary. A survey of graph transformers reviews which designs mitigate
+  <NoteLink to="oversmoothing">oversmoothing</NoteLink> and oversquashing in practice <Cite id="muller2024attending" />.

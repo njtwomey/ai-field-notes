@@ -326,8 +326,9 @@ export function buildIndex(
     if (readLength > 280) errors.push(`content/${file}: summary is ${readLength} characters as read; the limit is 280`)
     const text = plainText(body, glossWords)
     const glossNames = attributeValues(body, 'Gloss', 'name')
-    for (const name of glossNames.filter((n) => !glossary.names.has(n)))
-      errors.push(`content/${file}: unknown glossary name "${name}" in <Gloss> (see glossary.yaml)`)
+    if (inScope({ slug: noteSlug, category: resolvedCategory }))
+      for (const name of glossNames.filter((n) => !glossary.names.has(n)))
+        errors.push(`content/${file}: unknown glossary name "${name}" in <Gloss> (see glossary.yaml)`)
     notes.push({
       ...parsed.data,
       category: resolvedCategory,
@@ -354,7 +355,8 @@ export function buildIndex(
   }
 
   const slugs = new Set(notes.map((n) => n.slug))
-  for (const n of notes) {
+  // Per-note link and citation checks follow the scope, so a scoped doctor run is not failed by another note's draft.
+  for (const n of notes.filter(inScope)) {
     const where = `content/${n.file}`
     if (!categoryPaths.has(n.category)) errors.push(`${where}: unknown category "${n.category}" (see taxonomy.yaml)`)
     for (const field of ['requires', 'partOf', 'related', 'linked'] as const) {

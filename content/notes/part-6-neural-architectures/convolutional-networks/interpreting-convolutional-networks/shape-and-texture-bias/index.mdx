@@ -1,0 +1,143 @@
+---
+title: 'Shape and texture bias'
+kind: concept
+summary: 'On cue-conflict images, with the shape of one class and the texture of another, ImageNet-trained convolutional networks mostly choose the texture class, while people choose the shape. Training on stylised images or with shape-preserving augmentation raises shape bias.'
+tags: [convolutional-networks, computer-vision, robustness, interpretability, worked-example]
+aliases: ['texture bias', 'shape bias', 'cue-conflict images', 'Stylized-ImageNet']
+requires: [convolutional-layer]
+related: [data-augmentation, image-augmentation, convolution-versus-attention-in-vision, vision-transformer, subpopulation-shift-and-shortcuts, image-dataset-bias, class-activation-mapping, feature-visualisation, logistic-regression, implicit-regularisation]
+references: [geirhos2019, hermann2020, brendel2019, dehghani2023, geirhos2020shortcut, huang2017adain]
+status: draft
+updated: 2026-10-17
+---
+
+import { CueConflict } from './CueConflict'
+
+<Definition>
+The shape bias of an image classifier is the share of its decisions that follow an object's shape when shape and
+texture point to different classes. It is measured on cue-conflict images, which carry the outline of one class and
+the surface texture of another, as the number of shape-class answers divided by the number of shape-class plus
+texture-class answers. A shape bias near 1 means the classifier recognises objects by their outline; near 0 means it
+recognises them by their texture.
+</Definition>
+
+## Intuition
+
+A cat is recognisable from its silhouette and from a patch of its fur. In natural photographs the two cues agree, so
+accuracy on ordinary test images cannot reveal which one a network uses. A cue-conflict image separates them: the shape
+of a cat filled with the skin texture of an elephant. People shown such images answer "cat". ImageNet-trained
+<NoteLink to="convolutional-networks">convolutional networks</NoteLink> answer "elephant" <Cite id="geirhos2019" />.
+
+Texture is the easier cue for a convolutional network. A texture is a local statistic: it is present in every small
+patch of the object, so a few layers, each with a small <Gloss name="receptive-field" />, detect it anywhere, and
+<NoteLink to="pooling-and-strides">global average pooling</NoteLink> collects the votes. A shape is a long-range
+arrangement of edges that only a deep unit with a <NoteLink to="receptive-field-and-dilated-convolution">receptive
+field</NoteLink> the size of the object can see. When both cues predict the label equally well,
+<NoteLink to="gradient-descent">gradient descent</NoteLink> finds the easy one first and has no reason to learn the
+other. Texture bias is a case of <NoteLink to="subpopulation-shift-and-shortcuts">shortcut learning</NoteLink>: a
+solution that is right on the training distribution for a reason that fails outside it
+<Cite id="geirhos2020shortcut" />.
+
+## Details
+
+**The cue-conflict test.** Geirhos and colleagues made 1,280 cue-conflict images, 80 for each of 16 classes, by
+transferring the texture of one image onto the shape of another with neural style transfer. They mapped the 1,000
+<Gloss name="imagenet" /> classes onto the 16 categories and counted, among answers that named either the shape class or
+the texture class, the share that named the shape <Cite id="geirhos2019" />. Human observers chose the shape in 95.9% of
+these decisions. <NoteLink to="classic-convolutional-network-architectures">ResNet-50</NoteLink> chose it in 22.1%,
+VGG-16 in 17.2%, <NoteLink to="inception-networks">GoogLeNet</NoteLink> in 31.2% and AlexNet in 42.9%
+<Cite id="geirhos2019" />.
+
+**Local features suffice on ImageNet.** BagNets classify each $33 \times 33$ patch of an image independently and
+average the patch scores, ignoring all spatial arrangement beyond the patch. They reach 87.6% top-5 accuracy on
+ImageNet, and $17 \times 17$ patches already match AlexNet <Cite id="brendel2019" />. So high ImageNet accuracy does not
+require shape.
+
+**Stylized-ImageNet.** Restyling every ImageNet training image with the texture of a randomly chosen painting, by
+adaptive instance normalisation <Cite id="huang2017adain" />, removes texture as a reliable cue while keeping shape.
+ResNet-50 trained on this set reached a shape bias of 81%, against 22% for the same architecture trained on ImageNet
+<Cite id="geirhos2019" />. Training on both sets and fine-tuning on ImageNet gave higher ImageNet accuracy than ImageNet
+alone and better transfer to <NoteLink to="object-detection">object detection</NoteLink>, which depends on outlines.
+
+**Where the bias comes from.** Hermann, Chen and Kornblith varied the training of ImageNet networks one factor at a time
+<Cite id="hermann2020" />. Data augmentation had the largest effect: less aggressive random cropping and natural
+augmentations such as colour distortion, noise and blur raised the shape bias so far that most cue-conflict decisions
+followed shape. Architecture and training objective had small effects. Shape information could be decoded from the
+<NoteLink to="multilayer-perceptron">hidden layers</NoteLink> of texture-biased networks, so the bias lies in what the
+classifier relies on, not in what the network represents. Their conclusion is that the difference between people and
+networks comes mainly from the data the networks see.
+
+**Scale and architecture.** ViT-22B, a
+<NoteLink to="vision-transformer">vision transformer</NoteLink> of 22 billion parameters, reached 87% shape bias,
+against about 20 to 30% for most earlier models and 96% for people <Cite id="dehghani2023" />. The comparison of
+<NoteLink to="convolution-versus-attention-in-vision">convolution and attention in vision</NoteLink> is confounded by
+training data and augmentation, which, by the result above, matter more than the architecture.
+
+<CueConflict />
+
+The figure runs the experiment at small scale. A network of two $3 \times 3$ convolutions, global average pooling and
+a linear layer is trained on $16 \times 16$ images: discs filled with horizontal stripes, squares with vertical stripes
+and crosses with checks. A share $\rho$ of the training images is restyled with a texture drawn at random. With the
+default 120 <NoteLink to="adam">Adam</NoteLink> steps the results are:
+
+| restyled share $\rho$ | shape bias | accuracy, matched textures | accuracy, plain silhouettes |
+| --- | --- | --- | --- |
+| 0 | 0.00 | 1.00 | 0.33 |
+| 0.25 | 0.28 | 0.99 | 0.41 |
+| 0.5 | 0.64 | 0.93 | 0.39 |
+| 1 | 0.90 | 0.83 | 0.70 |
+
+At $\rho = 0$ the network answers every one of 150 cue-conflict images by texture and classifies solid silhouettes, a
+texture it never saw, at chance. Restyling moves the decisions to the shape. It lowers the accuracy on images whose
+texture matches, because those images now reward a cue that the network has learned to ignore.
+
+## Worked example
+
+A two-feature model shows why gradient descent picks the easier cue. A <NoteLink to="logistic-regression">logistic
+regression</NoteLink> with labels $y \in \set{-1, +1}$ sees two features: a shape feature $s = 0.5\,y$ and a texture
+feature $t = y$. Both predict the label perfectly. The texture feature has twice the magnitude, which stands for being
+easier to extract. The model is $\hat y = \operatorname{sign}(w_s s + w_t t)$, trained from $w = (0, 0)$ by gradient
+descent on the mean logistic loss $\log(1 + e^{-y(w_s s + w_t t)})$ with step size 1.
+
+**Step 1: the gradient's direction.** The gradient of one example's loss is $-\sigma(-m)\, y\,(s, t)$, with margin
+$m = y(w_s s + w_t t)$ and $\sigma$ the logistic function. Every training example has $y(s, t) = (0.5, 1)$, so every
+gradient points along $-(0.5, 1)$. The weights stay on the ray $w = a\,(0.5, 1)$ with $a > 0$ growing: after one step
+$w = (0.25, 0.5)$, after ten $(1.00, 2.00)$, after a hundred $(1.93, 3.86)$.
+
+**Step 2: a cue-conflict input.** Give the model the shape of class $+1$ and the texture of class $-1$: $s = 0.5$,
+$t = -1$. Its score is $a\,(0.5 \cdot 0.5 - 1) = -0.75\,a < 0$ for every $a > 0$. The model answers with the texture's
+class at every step of training, so its shape bias is 0.
+
+**Step 3: restyle a quarter of the data.** With $\rho = 0.25$, a quarter of the examples get a texture of random sign,
+so one example in eight has $t = -y$. Now the texture feature is wrong on one example in eight and the shape feature
+is never wrong. The first step is $w = (0.25, 0.375)$, still texture-led: the conflict score is
+$0.5 \cdot 0.25 - 0.375 = -0.25$. After ten steps $w = (1.43, 1.31)$ and the score is $-0.59$. After a hundred steps
+$w = (5.25, 1.09)$ and the score is $+1.54$: the model now answers by shape. Gradient descent on separable data turns
+towards the direction of largest margin (see <NoteLink to="implicit-regularisation">implicit regularisation</NoteLink>),
+and only the shape feature separates every restyled example.
+
+The two cases match the figure. With perfectly correlated cues, the solution keeps the proportions in which the cues
+are easy to use, and texture wins. Restyling makes texture unreliable, and the network moves to shape, after a phase
+in which it still relies on texture.
+
+## Assumptions
+
+- **A meaningful split into shape and texture.** The test assumes the two cues can be separated, as style transfer
+  does approximately. Stylised images also carry artefacts, and a network trained on one style-transfer method can
+  learn to read them; Geirhos and colleagues trained with adaptive instance normalisation and tested with iterative
+  style transfer to avoid this <Cite id="geirhos2019" />.
+- **Decisions that name one of the two classes.** Shape bias ignores answers that name neither class, so a model can
+  have a high shape bias and a low accuracy on cue-conflict images.
+- **A fixed class mapping.** The 16-category test maps ImageNet's fine classes to coarse categories. The bias of a
+  model with another label set depends on that mapping.
+
+## Pitfalls
+
+- **Accuracy does not reveal the cue.** Two networks with the same test accuracy can have shape biases of 0.2 and 0.8.
+  Test with cue-conflict, silhouette or edge images before relying on a network under texture change, such as
+  sketches, paintings or new imaging devices.
+- **Shape bias is not robustness.** It correlates with robustness to some distortions, but it is one number on one
+  stimulus set. Report it beside <Gloss name="ood">out-of-distribution</Gloss> accuracy, not instead of it.
+- **Maps show where, not what.** A <NoteLink to="class-activation-mapping">class activation map</NoteLink> on the
+  object looks correct for a texture-biased network too, since the texture is on the object.
+- **More shape is not always better.** Texture is the right cue for materials, fabrics and many medical images.

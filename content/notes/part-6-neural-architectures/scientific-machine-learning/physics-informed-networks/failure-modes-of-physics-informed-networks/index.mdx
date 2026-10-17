@@ -1,0 +1,170 @@
+---
+title: 'Failure modes of physics-informed networks'
+kind: concept
+summary: 'Physics-informed networks fail on high-frequency or stiff solutions (spectral bias), on convection with large speed, and through an ill-conditioned loss landscape. Curriculum training, causal weighting in time and Fourier-feature inputs reduce each failure.'
+tags: [scientific-machine-learning, differential-equations, training, worked-example]
+aliases: ['PINN failure modes', 'spectral bias in PINNs', 'causal training', 'convection failure', 'causality violation in PINNs', 'curriculum regularisation']
+requires: [physics-informed-neural-networks]
+related: [loss-balancing-for-physics-informed-networks, hard-constraints-for-physics-informed-networks, implicit-neural-representation, random-fourier-features, neural-tangent-kernel, condition-number, quasi-newton-methods]
+references: [krishnapriyan2021, wang2024causality, wang2023expert, rahaman2019, tancik2020, wang2021fourier, wang2022ntk, rathore2024, raissi2019]
+status: draft
+updated: 2026-10-17
+---
+
+import { ConvectionFailure } from './ConvectionFailure'
+
+<Definition>
+A **failure mode** of a <NoteLink to="physics-informed-neural-networks">physics-informed network</NoteLink> is a
+mechanism by which training stops at a network that is far from the solution although a network close to it exists.
+Three are well documented: **spectral bias**, the tendency of <NoteLink to="gradient-descent">gradient
+descent</NoteLink> to fit low frequencies first, which stalls on oscillatory, sharp or multiscale solutions
+<Cite id="rahaman2019" />; an **ill-conditioned loss**, because the differential operator in the residual amplifies high
+frequencies <Cite id="krishnapriyan2021" /> <Cite id="rathore2024" />; and **causality violation**, the fitting of the
+residual at late times before the solution at early times is right <Cite id="wang2024causality" />. Fourier-feature
+inputs, curriculum training and causal weights in time are the matching remedies.
+</Definition>
+
+## Intuition
+
+A classical time-stepping solver cannot get the late solution right before the early one: it computes $u(t + \Delta t)$
+from $u(t)$. A physics-informed network has no such order. It fits a function on the whole space-time domain at once,
+and the loss is an average over collocation points that is indifferent to where the error sits. Nothing in the loss
+stops the network from satisfying the equation at late times by a smooth function unrelated to the initial profile,
+and a smooth function is exactly what gradient descent finds first.
+
+The convection equation $u_t + \beta u_x = 0$ shows all three mechanisms at once. Its solution is the initial wave
+moved at speed $\beta$, so with $u(x, 0) = \sin x$ on $[0, 2\pi] \times [0, 1]$ it is $\sin(x - \beta t)$, which
+oscillates $\beta / 2\pi$ times in time across the domain. The function $u \equiv 0$, or any function constant along
+the characteristics of a slower wave, makes the residual small in large parts of the domain. As $\beta$ grows the
+target becomes higher in frequency, the residual's derivatives grow in proportion to $\beta$, and training fails:
+Krishnapriyan et al. report a relative error of almost 100% for $\beta > 10$ with a standard setup
+<Cite id="krishnapriyan2021" />. A network that can represent the solution exists; the optimiser does not reach it.
+
+## Details
+
+**Spectral bias.** Gradient descent on a network learns a target's Fourier components at rates that fall with frequency
+<Cite id="rahaman2019" />. In the <NoteLink to="neural-tangent-kernel">neural tangent kernel</NoteLink> picture, the
+kernel's eigenvalues set the rate of each eigendirection, and the eigenfunctions with large eigenvalues are smooth
+<Cite id="wang2022ntk" />. For a physics-informed network the bias acts twice: once on the solution, and once on the
+residual, whose operator multiplies high-frequency components by large factors.
+<NoteLink to="random-fourier-features">Random Fourier features</NoteLink> feed the network
+$\gamma(\xvec) = \paren{\cos \Bmat\xvec, \sin \Bmat\xvec}$ with entries of $\Bmat$ drawn from
+$\mathcal{N}(0, \sigma^2)$, which shifts the kernel's spectrum towards the frequency $\sigma$ <Cite id="tancik2020" />
+<Cite id="wang2021fourier" />. The scale $\sigma$ must roughly match the solution: too small gives blurred fits, too
+large gives noisy ones, and $\sigma$ between 1 and 10 is the current recommendation for inputs scaled to unit range
+<Cite id="wang2023expert" />. The note on <NoteLink to="implicit-neural-representation">implicit neural
+representations</NoteLink> treats the same bias in signal fitting.
+
+**Ill-conditioning.** The residual applies a differential operator to the network. An operator such as
+$-\mathrm{d}^2/\mathrm{d}x^2$ multiplies the mode $\sin k\pi x$ by $(k\pi)^2$, so its
+<NoteLink to="condition-number">condition number</NoteLink> over the first $K$ modes is $K^2$, and a least-squares loss
+squares it. Gradient descent needs a number of steps that grows with the condition number of the loss's Hessian, so the
+residual term converges slowly along its smallest-curvature directions while it races along the largest. Loss landscapes
+of the convection problem are smooth at $\beta = 1$ and rugged at large $\beta$, with the optimiser stuck at a high loss
+<Cite id="krishnapriyan2021" />. A 2024 analysis traced the difficulty to the operator's conditioning and found that
+<NoteLink to="adam">Adam</NoteLink> followed by <Gloss name="l-bfgs" /> outperforms either alone, the practice of the
+original paper <Cite id="rathore2024" /> <Cite id="raissi2019" />.
+
+**Causality violation.** Write the residual loss as an average over $M$ consecutive time bins,
+$L_r = \frac{1}{M}\sum_{i=1}^M L_r^i$. Standard training lowers every $L_r^i$ at once, and often the late ones first,
+because a smooth function of $(x, t)$ satisfies the equation easily where it has not yet been forced to match the
+initial profile <Cite id="wang2024causality" />. Causal training weights the bins by how well the earlier ones are
+already fitted,
+
+$$
+L_r = \frac{1}{M}\sum_{i=1}^{M} w_i L_r^i, \qquad w_i = \exp\paren{-\epsilon \sum_{k=1}^{i-1} L_r^k},
+$$
+
+with the weights held constant in the gradient and $\epsilon > 0$ a slope parameter. The bin $i$ is trained only once
+the earlier bins' residuals are small, which restores the order in which a time-stepping solver works. A too small
+$\epsilon$ leaves training unchanged; a too large one stalls it at the first bins, and $\epsilon$ is chosen so that all
+weights reach 1 by the end of training <Cite id="wang2023expert" />.
+
+**Curriculum and time-marching.** Curriculum regularisation trains first on an easy version of the equation, such as
+$\beta = 1$, and warm-starts each harder version from the previous network. On the convection equation it lowered the
+error from 96% to 5.3% at $\beta = 30$ and from 75% to 1.0% at $\beta = 20$ <Cite id="krishnapriyan2021" />.
+Sequence-to-sequence training, or time-marching, splits $[0, T]$ into windows and trains one window at a time, each
+starting from the previous window's final profile <Cite id="krishnapriyan2021" />. Both reduce the problem the optimiser
+faces at any moment. The two last remedies are about the optimisation, not the model: the same network represents the
+solution in all cases.
+
+## Worked example
+
+**Causal weights.** Take $M = 4$ bins and $\epsilon = 10$. Early in training the bins' residual losses are
+$L_r = (0.3, 0.2, 0.01, 0.01)$: the late bins already have small residuals, the typical sign of causality violation.
+The cumulative sums before each bin are $0, 0.3, 0.5, 0.51$, so
+
+$$
+w = \paren{e^{0}, e^{-3}, e^{-5}, e^{-5.1}} = (1, 0.050, 0.0067, 0.0061).
+$$
+
+The weighted residual is almost entirely the first bin's, so the gradient works on the early times and ignores the
+late ones however small their residual. Later, with $L_r = (0.01, 0.01, 0.01, 0.01)$, the cumulative sums are
+$0, 0.01, 0.02, 0.03$ and the weights are $(1, 0.905, 0.819, 0.741)$: every bin trains.
+
+**Conditioning.** Restrict $-u''$ on $[0, 1]$ to the modes $\sin k\pi x$ for $k = 1, \dots, 10$. The operator's
+eigenvalues run from $\pi^2 \approx 9.9$ to $(10\pi)^2 \approx 987$, a condition number of 100. The squared residual
+has Hessian proportional to the operator's square, with condition number $10^4$. Gradient descent with a step size
+safe for the stiffest mode shrinks the error in the smoothest mode by a factor of only about $1 - 10^{-4}$ per step,
+so that mode needs on the order of $10^4$ steps to converge.
+
+## Simulation
+
+The figure trains a network on the convection equation with the exact end values, $\sin(-\beta t)$ at both ends, in
+place of the periodic condition of the original study. Its defaults are cheap: two
+<NoteLink to="multilayer-perceptron">hidden layers</NoteLink> of 16 hyperbolic tangent units, 128 collocation points,
+300 Adam steps at learning rate 0.005 and 100 L-BFGS steps, about two seconds of training.
+
+<ConvectionFailure />
+
+With one seed and the defaults, the plain network ends as follows.
+
+| $\beta$ | 1 | 3 | 5 | 10 | 20 |
+| --- | --- | --- | --- | --- | --- |
+| Relative error | 3.3% | 0.8% | 3.5% | 19% | 81% |
+
+The failure is not a gradual loss of accuracy: between $\beta = 5$ and $\beta = 20$ the error goes from a few percent to
+nearly the whole solution. In this short budget the remedies help only partly. At $\beta = 10$, Fourier features with
+$\sigma = 2$ bring the error to 10% and causal weights with $\epsilon = 10$ to 12%, while a curriculum from $\beta = 1$
+over 70% of the Adam steps leaves it at 31%.
+
+A larger budget moves the threshold and lets the remedies work. With the wide network (32 units), 256 points, 1000 Adam
+and 300 L-BFGS steps, about twenty seconds per run, the plain network ends as follows.
+
+| $\beta$ | 1 | 5 | 10 | 15 | 20 | 30 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Relative error | 0.89% | 0.39% | 1.5% | 5.9% | 47% | 84% |
+
+At $\beta = 20$ the three remedies, each alone, end at 3.7% (Fourier features), 3.4% (causal weights) and 5.0% (a
+curriculum). At $\beta = 30$ none of them succeeds within this budget: 95%, 57% and 77%. The published fixes train for
+tens of thousands of steps and combine the remedies <Cite id="wang2023expert" />.
+
+The longer plain run at $\beta = 20$ shows causality violation directly. After 200 steps its mean squared residual is
+$7.6 \times 10^{-2}$ at $t = 0$ and $1.7 \times 10^{-4}$ at $t = 0.75$, while its error is about 100% at every time.
+At the end its error grows along time, from 4% at $t = 0$ to 57% at $t = 0.75$ and 104% at $t = 1$, while its residual
+at $t = 1$ is $1.8 \times 10^{-5}$, the smallest anywhere: the network obeys the equation at late times for the wrong
+wave. With causal weights the late bins' weights are near zero after 200 steps (0.24, 0.05, then 0.00 from the fourth
+bin) and all reach about 1 by step 1000; the final error is at most 6% at every time.
+
+## Assumptions
+
+- The failures are failures of optimisation. They are diagnosed against a reference solution, since the loss can be
+  small while the error is large.
+- The remedies assume structure in the problem: Fourier features assume a known range of frequencies, causal weights a
+  time direction, a curriculum a family of easier problems connected to the target one.
+- The numbers above come from short runs on one seed. The threshold $\beta$ at which training fails moves with the
+  network, the number of points and the training budget.
+
+## Pitfalls
+
+- **Taking a small loss as success.** A network that has fitted the residual at late times for the wrong wave has a
+  small loss and a large error. The residual by time, and a reference solution where one exists, show it.
+- **A Fourier scale that does not match.** Features with $\sigma$ far above the solution's frequencies add noise and can
+  make training worse; in the longer runs, $\sigma = 2$ fixes $\beta = 20$ and $\sigma = 5$ does not fix $\beta = 30$.
+- **Causal weights that never open.** With a large $\epsilon$ and a network that cannot drive the early residual low,
+  the late bins keep weight near zero for the whole run. The weights should all be near 1 at the end.
+- **Blaming the architecture.** Krishnapriyan et al. showed that the same network solves the convection problem at
+  large $\beta$ when trained by a curriculum <Cite id="krishnapriyan2021" />. Widening or deepening the network does not
+  address an optimisation failure.
+- **Optimising with Adam alone.** On an ill-conditioned residual, <NoteLink to="first-order-methods">first-order
+  methods</NoteLink> stall long before a quasi-Newton phase would converge <Cite id="rathore2024" />.

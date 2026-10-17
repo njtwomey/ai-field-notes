@@ -1,0 +1,202 @@
+---
+title: 'Unification and resolution'
+kind: technique
+summary: 'Unification finds the most general substitution that makes two terms identical. SLD resolution answers a query against a logic program by repeatedly unifying the first goal with a clause head and replacing it by the clause body, until no goals remain or every branch fails.'
+tags: [logic, worked-example]
+aliases: ['most general unifier', 'SLD resolution', 'unification', 'MGU', 'resolution principle', 'occurs check', 'SLD tree']
+requires: [horn-clauses-and-logic-programs]
+related: [theta-subsumption, least-general-generalisation, neural-theorem-provers, inductive-logic-programming, foil, probabilistic-logic-programming]
+references: [robinson1965, martelli1982, paterson1978, lloyd1987, nienhuyscheng1997]
+status: draft
+updated: 2026-10-17
+---
+
+import { UnificationStepper } from './UnificationStepper'
+import { SldTreeStepper } from './SldTreeStepper'
+
+<Definition>
+A **substitution** $\theta = \set{X_1 \mapsto t_1, \dots, X_n \mapsto t_n}$ replaces variables by terms; $s\theta$ is
+the term $s$ with each $X_i$ replaced by $t_i$. A **unifier** of two terms $s$ and $t$ is a substitution with
+$s\theta = t\theta$. A **most general unifier** (mgu) is a unifier $\theta$ of which every other unifier is an instance:
+for every unifier $\sigma$ there is a $\lambda$ with $\sigma = \theta\lambda$. **SLD resolution** answers a query
+$\leftarrow a_1 \land \dots \land a_n$ against a definite program: it selects $a_1$, picks a clause
+$h \leftarrow b_1 \land \dots \land b_m$ with its variables renamed apart, computes $\theta = \text{mgu}(a_1, h)$, and
+continues with the query $\leftarrow (b_1 \land \dots \land b_m \land a_2 \land \dots \land a_n)\theta$. A branch that
+reaches the empty query is a proof, and the composition of its unifiers gives the answer <Cite id="robinson1965" />.
+</Definition>
+
+## Problem
+
+A logic program defines its facts implicitly. The program of <NoteLink to="horn-clauses-and-logic-programs">Horn
+clauses and logic programs</NoteLink> never lists $\text{grandparent}(\text{ann}, \text{cid})$; it follows from two
+parent facts and a rule. Forward chaining finds it by computing the whole least model, which wastes work when the
+question concerns one person. It also needs a finite Herbrand base, which programs with function symbols lack.
+
+Answering a question directly needs two pieces. The first is pattern matching between non-ground terms: the query
+$\text{grandparent}(\text{ann}, W)$ must meet the rule head $\text{grandparent}(X, Z)$, binding $X$ to ann and leaving
+$W$ and $Z$ equal and open. Unification does this, and it binds no more than it must, so no answer is lost. The second
+is a search strategy that chains rules backwards from the question to known facts. SLD resolution does this. Together
+they are the execution model of Prolog and the coverage test of most rule learners: a clause covers an example when the
+example, run as a query, succeeds.
+
+## Mechanism
+
+### Unification by transformation rules
+
+Treat unification as solving a set of equations $\set{s_1 = t_1, \dots}$, starting from the single equation $s = t$.
+Martelli and Montanari's algorithm applies one of six rules to an equation until none applies
+<Cite id="martelli1982" />:
+
+1. **Delete.** Remove $t = t$.
+2. **Decompose.** Replace $f(s_1, \dots, s_k) = f(t_1, \dots, t_k)$ by $s_1 = t_1, \dots, s_k = t_k$.
+3. **Conflict.** Fail on $f(\dots) = g(\dots)$ when the function symbols or arities differ. Constants are function
+   symbols with no arguments, so $\text{a} = \text{b}$ fails.
+4. **Swap.** Replace $t = X$ by $X = t$ when $t$ is not a variable.
+5. **Eliminate.** For $X = t$ with $X$ not occurring in $t$, record $X \mapsto t$ and replace $X$ by $t$ in every other
+   equation and recorded binding.
+6. **Occurs check.** Fail on $X = t$ when $X$ occurs in $t$ and $t \neq X$. No finite term satisfies $X = f(X)$.
+
+When no equation is left, the recorded bindings form an mgu in **solved form**: each bound variable occurs nowhere else.
+When the rules stop with a failure, the terms do not unify.
+
+<Derivation title="Why the rules terminate and return a most general unifier">
+**Termination.** Order the states by three measures, compared lexicographically: the number of variables not yet in
+solved form, the total size of the equations, and the number of equations of the form $t = X$ with $t$ not a
+variable. Eliminate removes a variable from the unsolved part, so the first measure falls. Delete and decompose keep
+the first measure and reduce the size, since a function symbol disappears. Swap keeps the first two and reduces the
+third. Each measure is a natural number, so no infinite sequence of rules exists.
+
+**Correctness.** Each rule preserves the set of unifiers. Delete removes an equation every substitution satisfies.
+Decompose is valid because $f(s_1, \dots, s_k)\sigma = f(t_1, \dots, t_k)\sigma$ holds exactly when
+$s_i\sigma = t_i\sigma$ for every $i$. Eliminate is valid because any $\sigma$ with $X\sigma = t\sigma$ treats $X$ and
+$t$ alike, so replacing $X$ by $t$ elsewhere does not change which equations $\sigma$ satisfies. Conflict and the occurs
+check fail only on equations no substitution satisfies: different symbols never become equal, and $X\sigma$ is a proper
+subterm of $t\sigma$, so the two cannot be equal. At the end the equations are $X_1 = t_1, \dots, X_n = t_n$ with no
+$X_i$ in any $t_j$. $\theta = \set{X_i \mapsto t_i}$ satisfies them. Any unifier $\sigma$ satisfies them too, so
+$X_i\sigma = t_i\sigma$, which gives $\sigma = \theta\sigma$, an instance of $\theta$. So $\theta$ is most general
+<Cite id="nienhuyscheng1997" />.
+</Derivation>
+
+The mgu is unique up to renaming variables. $\text{k}(X, Y) = \text{k}(Y, X)$ has the mgus $\set{X \mapsto Y}$ and
+$\set{Y \mapsto X}$, which differ only in which name survives.
+
+<UnificationStepper />
+
+### Resolution and SLD resolution
+
+Robinson's **resolution rule** combines two clauses that contain complementary literals. From $C_1 \lor l$ and
+$C_2 \lor \neg l'$, where $l$ and $l'$ unify with mgu $\theta$, it derives the **resolvent** $(C_1 \lor C_2)\theta$.
+Resolution is refutation-complete: a set of clauses is unsatisfiable exactly when repeated resolution derives the empty
+clause <Cite id="robinson1965" />. Entailment reduces to unsatisfiability, so $P \models \exists X_1 \dots \exists X_m\,
+(a_1 \land \dots \land a_n)$, with $X_1, \dots, X_m$ the query's variables, is proved by deriving the empty clause from
+$P$ and the negated query $\leftarrow a_1 \land \dots \land a_n$.
+
+For definite programs a restricted strategy is enough. **SLD resolution** (selective linear resolution for definite
+clauses) always resolves the current query with one program clause.
+
+1. **Select** a goal $a_i$ of the current query $\leftarrow a_1 \land \dots \land a_n$ by a fixed **selection rule**.
+   Prolog selects the leftmost goal.
+2. **Rename** a clause $h \leftarrow b_1 \land \dots \land b_m$ of $P$ apart, giving its variables fresh names, so that
+   it shares none with the query.
+3. **Unify** $a_i$ with $h$. If they do not unify, try the next clause.
+4. **Replace** $a_i$ by the body and apply $\theta$ to the whole query:
+   $\leftarrow (a_1 \land \dots \land a_{i-1} \land b_1 \land \dots \land b_m \land a_{i+1} \land \dots \land a_n)\theta$.
+5. A query with no goals left, written $\square$, ends a successful branch. The **computed answer** is the composition
+   $\theta_1\theta_2\cdots\theta_k$ of the branch's unifiers, restricted to the query's variables.
+
+The choices of clause form the **SLD tree**: one node per query, one child per clause whose head unifies with the
+selected goal. A leaf is either a success ($\square$) or a failure, a query whose selected goal unifies with no head.
+
+**Soundness and completeness.** Every computed answer is correct: $P$ entails the query instantiated by it. Every
+correct answer is an instance of some computed answer, whatever the selection rule <Cite id="lloyd1987" />. The
+completeness concerns the tree, not a particular search of it. Prolog searches the SLD tree depth first, trying clauses
+in program order and backtracking at failures. Depth-first search uses memory proportional to the depth, but it never
+returns from an infinite branch, so it can miss answers that lie to the right of one.
+
+## Worked example
+
+**Unification.** Unify $s = \text{p}(f(X), Y, \text{b})$ with $t = \text{p}(Z, g(Z), W)$. This is the first equation
+in the first figure.
+
+1. Both sides start with $\text{p}/3$. Decompose into $f(X) = Z$, $Y = g(Z)$ and $\text{b} = W$.
+2. $f(X) = Z$ has the variable on the right. Swap it to $Z = f(X)$.
+3. $Z$ does not occur in $f(X)$. Eliminate: record $Z \mapsto f(X)$ and substitute into the rest, which turns
+   $Y = g(Z)$ into $Y = g(f(X))$.
+4. Eliminate $Y$: record $Y \mapsto g(f(X))$.
+5. Swap $\text{b} = W$ to $W = \text{b}$ and eliminate $W$: record $W \mapsto \text{b}$.
+6. No equations remain. The mgu is $\theta = \set{Z \mapsto f(X),\; Y \mapsto g(f(X)),\; W \mapsto \text{b}}$, and both
+   terms become $\text{p}(f(X), g(f(X)), \text{b})$. $X$ stays a variable: any value for it gives another unifier, an
+   instance of $\theta$.
+
+Two failures show the other rules. $f(X, X) = f(\text{a}, \text{b})$ decomposes into $X = \text{a}$ and $X = \text{b}$;
+eliminating $X$ turns the second into $\text{a} = \text{b}$, a conflict. $f(X, g(X)) = f(Y, Y)$ gives $X = Y$, then
+$g(Y) = Y$, which swaps to $Y = g(Y)$ and fails the occurs check.
+
+**SLD resolution.** Run the query $\leftarrow \text{grandparent}(\text{ann}, W)$ against the family program of the
+second figure, whose clauses 1 to 4 are parent facts and clause 5 is the grandparent rule.
+
+1. **Step 1.** Only clause 5 has a grandparent head. Rename it to
+   $\text{grandparent}(X_1, Z_1) \leftarrow \text{parent}(X_1, Y_1) \land \text{parent}(Y_1, Z_1)$. The mgu of the
+   goal and the head is $\set{X_1 \mapsto \text{ann},\; W \mapsto Z_1}$. The new query is
+   $\leftarrow \text{parent}(\text{ann}, Y_1) \land \text{parent}(Y_1, Z_1)$.
+2. **Step 2.** Select $\text{parent}(\text{ann}, Y_1)$. Of the four parent facts only clause 1,
+   $\text{parent}(\text{ann}, \text{bob})$, unifies, with $\set{Y_1 \mapsto \text{bob}}$. The query becomes
+   $\leftarrow \text{parent}(\text{bob}, Z_1)$.
+3. **Step 3.** Clauses 2 and 3 both unify with $\text{parent}(\text{bob}, Z_1)$, so this node is a choice point. Clause
+   2 gives $\set{Z_1 \mapsto \text{cid}}$ and the empty query.
+4. **Step 4.** Success. Composing the unifiers and following $W \mapsto Z_1 \mapsto \text{cid}$ gives the answer
+   $W = \text{cid}$.
+5. **Steps 5 and 6.** Backtrack to the choice point and try clause 3: $\set{Z_1 \mapsto \text{dee}}$, a second proof,
+   $W = \text{dee}$.
+6. **Step 7.** No choice point is left. The tree has 5 nodes and 2 successes, and the answers are the two grandchildren
+   of Ann.
+
+The query $\leftarrow \text{ancestor}(\text{ann}, \text{eve})$ shows failure and backtracking. It takes 23 steps and
+builds 16 nodes: the non-recursive ancestor clause fails at every generation until it reaches
+$\text{parent}(\text{cid}, \text{eve})$, and the branches through Dee and Eve end in failed parent goals.
+
+<SldTreeStepper />
+
+## Cost
+
+- **Unification.** With terms stored as graphs that share subterms, unification runs in time linear in the size of
+  the two terms <Cite id="paterson1978" />. Martelli and Montanari's rule-based algorithm is the version usually
+  implemented <Cite id="martelli1982" />. Written
+  out as text, the mgu can be exponentially large: unifying $f(X_1, \dots, X_n)$ with
+  $f(g(X_0, X_0), g(X_1, X_1), \dots, g(X_{n-1}, X_{n-1}))$ binds $X_n$ to a term with $2^n$ occurrences of $X_0$. The
+  algorithms stay fast by sharing subterms rather than copying them.
+- **The occurs check** costs time proportional to the size of the term being bound. Prolog omits it by default, which
+  makes binding a variable constant-time.
+- **SLD search.** The SLD tree can be exponentially large in the depth of the proofs, and infinite with recursion.
+  Depth-first search stores only the current branch and its choice points, so its memory is linear in the depth.
+
+## Trade-offs
+
+- **Top-down against bottom-up.** SLD resolution explores only clauses relevant to the query and handles function
+  symbols. Forward chaining (<NoteLink to="horn-clauses-and-logic-programs">least Herbrand model</NoteLink>) computes
+  every consequence once and always terminates on Datalog. Tabled resolution, as in XSB and SWI-Prolog's tabling,
+  memoises subgoals and terminates on Datalog programs like bottom-up evaluation while staying query-directed.
+- **Depth first against breadth first.** Depth-first search is cheap in memory and incomplete. Breadth-first search
+  finds every answer at finite depth and needs memory exponential in the depth. Iterative deepening, depth-first search
+  with a rising depth bound, finds every answer at finite depth with the memory of depth-first search, and many
+  inductive learners use a depth bound for their coverage tests.
+- **Unification against matching.** <NoteLink to="theta-subsumption">Theta-subsumption</NoteLink> uses one-way
+  matching, which binds only the variables of one side. <NoteLink to="least-general-generalisation">Least general
+  generalisation</NoteLink> is the dual of unification: it finds the most specific term of which both inputs are
+  instances. <NoteLink to="neural-theorem-provers">Neural theorem provers</NoteLink> replace exact symbol equality by
+  similarity of learned embeddings.
+
+## Pitfalls
+
+- **Forgetting to rename apart.** Using a clause without fresh variables makes its variables collide with the query's.
+  Unifying $\text{p}(X, \text{b})$ with a clause head $\text{p}(\text{a}, X)$ fails if both $X$ are the same variable,
+  and succeeds with $\set{X \mapsto \text{a}, X' \mapsto \text{b}}$ after renaming.
+- **Unsound answers without the occurs check.** With the program $\text{p}(X, f(X))$ and
+  $\text{q} \leftarrow \text{p}(Y, Y)$, the query $\leftarrow \text{q}$ succeeds in standard Prolog by binding
+  $Y \mapsto f(Y)$, although $\text{q}$ is not entailed. Learners that generate clauses automatically should unify with
+  the occurs check (`unify_with_occurs_check/2`) or check that hypotheses cannot create such cycles.
+- **Left recursion and cycles.** A clause such as $\text{path}(X, Y) \leftarrow \text{path}(X, Z) \land
+  \text{edge}(Z, Y)$ makes depth-first search re-enter the same goal forever. Cyclic data make even right recursion
+  loop on a query with no answer. A depth bound, tabling or bottom-up evaluation avoids it.
+- **Negation as failure on unbound variables.** `\+ p(X)` with $X$ unbound asks whether no $X$ satisfies $\text{p}$,
+  not whether some $X$ fails it. Select negated goals only once their variables are bound.

@@ -1,0 +1,190 @@
+---
+title: 'Weisfeiler-Leman test'
+kind: concept
+summary: 'Colour refinement recolours every node by its own colour and the multiset of its neighbours'' colours until the colouring stops changing. Graphs with different colour histograms are not isomorphic; equal histograms prove nothing, and regular graphs of one degree always tie.'
+tags: [graph-neural-networks, graphs, expressivity, worked-example]
+aliases: ['Weisfeiler-Lehman test', 'WL test', '1-WL', 'colour refinement', 'color refinement', 'Weisfeiler-Lehman kernel']
+requires: [graphs-as-neural-network-inputs]
+related: [graph-isomorphism-network, expressive-power-of-message-passing, higher-order-and-subgraph-graph-neural-networks, graph-features]
+references: [weisfeiler1968, shervashidze2011, babai1980random, cai1992, arvind2020wl, morris2023wl, xu2019, morris2019weisfeiler]
+status: draft
+updated: 2026-10-17
+---
+
+import { ColourRefinement } from './ColourRefinement'
+
+<Definition>
+Colour refinement, the 1-dimensional Weisfeiler-Leman test (1-WL), gives every node $v$ of a graph a colour
+$c^{(0)}(v)$, all equal or taken from node labels, and then repeats one rule. In round $t + 1$, node $v$ receives a new
+colour that is a one-to-one function of the pair formed by its old colour and the multiset of its neighbours' old
+colours:
+
+$$
+c^{(t+1)}(v) = \operatorname{relabel}\paren{c^{(t)}(v),\ \mset{c^{(t)}(u) : u \in \Ncal(v)}}.
+$$
+
+The rounds stop when no colour class splits. Two graphs refined with one shared relabelling are distinguished when
+their colour histograms differ in some round, and then they are certainly not isomorphic
+<Cite id="weisfeiler1968" />.
+</Definition>
+
+## Intuition
+
+Two graphs are **isomorphic** when some relabelling of the nodes of one turns it into the other. Checking all $n!$
+relabellings of $n$ nodes is hopeless beyond a dozen nodes. A cheaper approach computes an **invariant**, a summary that
+does not depend on the labelling, and compares the summaries. Unequal summaries prove the graphs differ. Equal summaries
+leave the question open.
+
+The degree sequence is the simplest invariant. Colour refinement extends it. After one round, a node's colour records
+its degree. After two rounds, it records its degree and the degrees of its neighbours. After $t$ rounds, it records the
+whole tree of walks of length $t$ that start at the node, with repeated visits drawn as separate branches. This tree is
+the node's **unfolding tree** of depth $t$. Two nodes have the same colour after $t$ rounds exactly when their unfolding
+trees of depth $t$ are isomorphic <Cite id="shervashidze2011" /> <Cite id="xu2019" />.
+
+The test therefore sees a graph the way a walker sees it from inside: how many neighbours each node has, how many
+neighbours they have, and so on. It never sees which branches of the unfolding tree are the same node, so it cannot tell
+whether a walk has closed into a cycle. A hexagon and two separate triangles look the same from inside every node: two
+neighbours, each with two neighbours, forever.
+
+The same local view is what a <NoteLink to="message-passing-neural-network">message passing network</NoteLink> has. This
+is why colour refinement became the yardstick for <Gloss name="gnn">graph neural networks</Gloss> <Cite id="xu2019" />
+<Cite id="morris2019weisfeiler" />.
+
+## Details
+
+### The algorithm
+
+Take an undirected graph $G = (\Vcal, \Ecal)$ with $n = \abs{\Vcal}$ nodes, $m = \abs{\Ecal}$ edges and neighbourhoods
+$\Ncal(v) = \set{u : (u, v) \in \Ecal}$. A colour is a non-negative integer.
+
+1. **Initialise.** Set $c^{(0)}(v) = 0$ for every node, or set it to the node's discrete label (an atom type, a node
+   category).
+2. **Collect signatures.** For every node, form the signature
+   $\sigma^{(t+1)}(v) = \paren{c^{(t)}(v), \mset{c^{(t)}(u) : u \in \Ncal(v)}}$. The double braces $\mset{\cdot}$ denote
+   a **multiset**: a collection in which order does not matter and repeats count. Writing the multiset as a sorted list
+   makes it a concrete key.
+3. **Relabel.** Give each distinct signature a fresh colour, the same colour for equal signatures and different colours
+   for different ones. Sorting the distinct signatures and numbering them $0, 1, 2, \dots$ is one injective choice.
+4. **Stop** when the number of colour classes did not grow. Otherwise go to step 2.
+
+The signature contains the node's own old colour. Two nodes that differed in round $t$ therefore still differ in round
+$t + 1$, so each round only splits classes. The number of classes grows by at least one in every round except the last,
+and it cannot exceed $n$. Refinement therefore stabilises within $n$ rounds. Each round reads every edge twice and sorts
+the signatures, so it costs $O((n + m)\log n)$ operations.
+
+The colouring that comes out is the coarsest **equitable partition** compatible with the initial colours: every node of
+class $i$ has the same number of neighbours in class $j$, for every pair of classes $i$ and $j$. A partition that fails
+this condition contains a node whose neighbour counts differ from those of another node in its class, and the next
+round splits them.
+
+### Comparing two graphs
+
+To compare graphs $G$ and $H$, refine both with **one** relabelling table, so that equal colours in the two graphs mean
+equal signatures. Running refinement on the disjoint union $G \cup H$ does this automatically. In each round, compare
+the **colour histograms**, the number of nodes of each colour in each graph.
+
+- Histograms that differ in any round prove $G$ and $H$ are not isomorphic. An isomorphism maps each node to a node with
+  the same signature in every round, so it preserves every histogram.
+- Histograms that agree at the stable round prove nothing. The test is **sound** but not **complete**.
+
+### What colour refinement detects
+
+- **Degrees and their nesting.** Round 1 compares degree sequences. Round 2 compares, for each node, the multiset of its
+  neighbours' degrees.
+- **Almost every graph.** For a graph drawn uniformly at random from all graphs on $n$ nodes, colour refinement gives
+  every node its own colour with probability tending to 1 as $n \to \infty$. A graph in which every node has its own
+  colour is identified up to isomorphism by its colouring <Cite id="babai1980random" />.
+- **Trees.** Colour refinement distinguishes any two non-isomorphic trees <Cite id="morris2023wl" />.
+
+### What it misses
+
+- **Regular graphs of one degree.** In a $d$-regular graph every node has $d$ neighbours. Round 1 gives every node the
+  same colour, round 2 changes nothing, and the test stops. Any two $d$-regular graphs on $n$ nodes tie. The 6-cycle
+  and two disjoint triangles are the smallest pair.
+- **Cycles and connectivity.** Ties occur also in graphs that are not regular, such as decalin and bicyclopentyl in the
+  figure, with six-membered rings in one and five-membered rings in the other. The 6-cycle against two triangles shows
+  that colour refinement cannot decide whether a graph is connected or count its triangles. Which subgraph counts it
+  does determine is worked out by Arvind et al. <Cite id="arvind2020wl" />.
+- **Hard families for every fixed dimension.** The $k$-dimensional test colours $k$-tuples of nodes instead of single
+  nodes and is strictly stronger for larger $k$. For every $k$ there are pairs of non-isomorphic graphs with $O(k)$
+  nodes that the $k$-dimensional test cannot separate <Cite id="cai1992" />. The hierarchy is the subject of
+  <NoteLink to="higher-order-and-subgraph-graph-neural-networks" />.
+
+### The Weisfeiler-Lehman kernel
+
+The colour histograms are also features. The Weisfeiler-Lehman subtree kernel stacks the histograms of rounds
+$0, \dots, T$ of a graph into one count vector and takes the inner product of two graphs' vectors as their similarity
+<Cite id="shervashidze2011" />. The kernel costs $O(Tm)$ per graph. A <Gloss name="svm">support vector machine</Gloss>
+on it was a strong baseline for <NoteLink to="graphs-as-neural-network-inputs">graph classification</NoteLink> before
+graph neural networks, and it remains one. Other hand-built structural features of graphs are in
+<NoteLink to="graph-features" />.
+
+### Variants
+
+- **Edge labels.** The signature uses the multiset of pairs $\paren{c^{(t)}(u), \ell(u, v)}$ with edge label
+  $\ell(u, v)$, such as a bond type.
+- **Directed graphs.** The signature holds the multisets of in-neighbour and out-neighbour colours separately.
+- **Hashing.** Implementations often replace the injective relabelling by a hash of the signature. A hash collision
+  merges two classes, and the test can then report a tie between graphs it should separate.
+
+## Worked example
+
+**A path and a star.** Both graphs have four nodes and three edges. The path has edges $1{-}2$, $2{-}3$, $3{-}4$. The
+star has a centre joined to three leaves.
+
+- **Round 0.** Every node has colour 1. Both histograms are $\set{4 \times 1}$.
+- **Round 1.** The signatures are: a node of degree 1 has $(1, \mset{1})$; a node of degree 2 has $(1, \mset{1, 1})$;
+  a node of degree 3 has $(1, \mset{1, 1, 1})$. Sorting the three distinct signatures numbers them 1, 2 and 3.
+  - Path: nodes 1 and 4 have degree 1, nodes 2 and 3 have degree 2. Histogram $\set{2 \times 1, 2 \times 2}$.
+  - Star: three leaves of degree 1, a centre of degree 3. Histogram $\set{3 \times 1, 1 \times 3}$.
+
+The histograms differ, so the graphs are not isomorphic. The test stops here because one difference is enough.
+
+**A 6-cycle and two triangles.** Every node in both graphs has two neighbours.
+
+- **Round 0.** All six nodes in each graph have colour 1.
+- **Round 1.** Every node has signature $(1, \mset{1, 1})$, which becomes colour 1 again. No class split, so the
+  colouring is stable. Both histograms are $\set{6 \times 1}$.
+
+The test ties, although one graph is connected and the other is not, and one has two triangles and the other none.
+
+**Decalin and bicyclopentyl** (choose the pair in the figure). Both skeletons have ten nodes and eleven edges, with two
+adjacent nodes of degree 3 and eight of degree 2.
+
+- **Round 1** splits the two degree-3 nodes (colour 2) from the eight degree-2 nodes (colour 1) in both graphs.
+- **Round 2** splits the degree-2 nodes by whether they touch a degree-3 node. In both graphs four of them do and four
+  do not. The histogram is $\set{4, 4, 2}$ in both.
+- **Round 3** splits nothing. Each degree-3 node sees one degree-3 node and two nodes next to the junction; each node
+  next to the junction sees one junction node and one other node; each remaining node sees one node next to the
+  junction and one other node. These counts are the same in both graphs.
+
+The stable histograms agree, so colour refinement cannot tell a pair of six-membered rings from a pair of five-membered
+rings. Both colourings are equitable partitions with the same class sizes and the same neighbour counts between
+classes, which is exactly what makes them indistinguishable.
+
+<ColourRefinement />
+
+## Assumptions
+
+- **Discrete initial colours.** The test compares colours for equality. Real-valued node features must be discretised,
+  or each distinct value treated as its own colour.
+- **One relabelling for both graphs.** Colours computed in separate runs, each numbered from scratch, cannot be
+  compared.
+- **Isomorphism as the question.** The test answers "certainly different" or "maybe the same". It gives no measure of
+  how different two graphs are; the kernel adds that.
+
+## Pitfalls
+
+- **Reading a tie as isomorphism.** Equal stable histograms are common for regular graphs, strongly regular graphs and
+  molecules with similar ring systems. Only a complete algorithm, such as canonical labelling with search, confirms
+  isomorphism.
+- **Stopping before the stable round.** A tie at round $t$ can turn into a difference at round $t + 1$. The test
+  reports a tie only at the stable round of the union of both graphs.
+- **Comparing graphs of different sizes.** Different node counts give different histograms at round 0, which is a
+  trivial difference. A statement such as "1-WL cannot distinguish these graphs" is interesting only for graphs that
+  agree on simple statistics.
+- **Ignoring features.** In machine-learning data, nodes usually carry features. Distinct features break symmetry from
+  round 0, and the regular-graph failures above disappear. The failures matter when features repeat, as in molecules
+  with many identical carbon atoms; see <NoteLink to="expressive-power-of-message-passing" />.
+- **Spelling.** The second author is A. A. Leman. The spelling "Lehman" is common in the machine-learning literature
+  and refers to the same test.

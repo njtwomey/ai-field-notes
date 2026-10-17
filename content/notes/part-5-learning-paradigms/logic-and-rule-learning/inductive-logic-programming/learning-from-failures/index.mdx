@@ -1,0 +1,207 @@
+---
+title: 'Learning from failures'
+kind: technique
+summary: 'Popper generates a program, tests it and turns each failure into constraints: covering a negative example rules out the program''s generalisations, missing a positive rules out its specialisations. An answer-set solver proposes the next candidate (Cropper and Morel).'
+tags: [logic, inductive-logic-programming, worked-example]
+aliases: ['Popper', 'ILASP', 'answer set programming for inductive logic programming', 'generate, test and constrain']
+requires: [inductive-logic-programming, generality-ordering-and-refinement]
+related: [predicate-invention, meta-interpretive-learning, theta-subsumption, foil, program-synthesis-from-examples, minimum-description-length]
+references: [cropper2021popper, gebser2019clingo, law2014ilasp, cropper2021poppi, cropper2022combo, hocquette2023maxsynth, cropper2022ilp30, muggleton2015mil]
+status: draft
+updated: 2026-10-17
+---
+
+import { FailurePruning } from './FailurePruning'
+
+<Definition>
+**Learning from failures** is an <Gloss name="ilp" /> method that searches a space of
+<NoteLink to="horn-clauses-and-logic-programs">logic programs</NoteLink> by repeating three stages. **Generate**
+proposes the smallest program, counted in literals, that satisfies the constraints learnt so far. **Test** runs it on
+the examples. **Constrain** turns a failure into constraints on the space: a program that proves a negative example is
+too general, so its generalisations are pruned; a program that misses a positive example is too specific, so its
+specialisations are pruned. The first program that proves every positive and no negative is returned, and it is a
+smallest solution in the space. **Popper** implements the method with an answer-set solver in the generate stage and
+Prolog in the test stage <Cite id="cropper2021popper" />.
+</Definition>
+
+## Problem
+
+The hypothesis space of an ILP problem is the set of programs a language bias allows. For a declaration of the
+predicates, with at most $v$ variables and $m$ body literals per clause and at most $n$ clauses per program, the space
+is finite but grows exponentially in $m$ and $n$ <Cite id="cropper2021popper" />. Plain generate-and-test lists it in
+order of size and tests every program before the first solution, so its cost is the number of programs smaller than
+the answer.
+
+The classical methods cut the space in other ways, each with a cost.
+<NoteLink to="foil">FOIL</NoteLink> and <NoteLink to="inverse-entailment-and-progol">Progol</NoteLink> build one clause
+at a time by a scored, greedy search, which misses recursive programs whose clauses only work together.
+<NoteLink to="meta-interpretive-learning">Meta-interpretive learning</NoteLink> searches whole programs but needs the
+user to supply metarules, the shapes every clause must take <Cite id="muggleton2015mil" />.
+
+Learning from failures keeps the whole-program search and replaces metarules with information from the tests. A
+failed test says more than "this program is wrong". Generality is monotone in what a program proves, so one test also
+decides every program above or below the tested one in the generality order, without running them. Each test removes a
+region of the space.
+
+## Mechanism
+
+### Generality of programs
+
+The constraints use the generality order on hypotheses (<NoteLink to="generality-ordering-and-refinement">generality
+ordering and refinement</NoteLink>), lifted from clauses to programs. Clauses are ordered by
+<NoteLink to="theta-subsumption">θ-subsumption</NoteLink>: $C$ subsumes $D$ when a substitution
+$\theta$ makes $C\theta \subseteq D$, and then $C \models D$. Programs, sets of clauses, are ordered by **theory
+subsumption** <Cite id="cropper2021popper" />:
+
+$$
+T_1 \succeq T_2 \iff \forall\, C_2 \in T_2 \;\; \exists\, C_1 \in T_1 : C_1 \text{ subsumes } C_2 .
+$$
+
+$T_1$ is a **generalisation** of $T_2$, and $T_2$ a **specialisation** of $T_1$. Every clause of $T_2$ follows from a
+clause of $T_1$, so $T_1 \models T_2$, and with background knowledge $B$, every atom that $B \cup T_2$ proves is
+proved by $B \cup T_1$. Adding a clause to a program, or deleting a body literal, gives a generalisation; deleting a
+clause, or adding a body literal, gives a specialisation.
+
+### Outcomes and constraints
+
+Testing a program $H$ on positives $E^+$ and negatives $E^-$ has a positive outcome (all, some or none of $E^+$
+proved) and a negative outcome (none or some of $E^-$ proved). Each failing combination yields constraints
+<Cite id="cropper2021popper" />.
+
+| | no negative proved | some negative proved |
+| --- | --- | --- |
+| all positives proved | solution | generalisation |
+| some positives proved | specialisation | specialisation, generalisation |
+| no positive proved | specialisation, elimination | specialisation, elimination, generalisation |
+
+- **Generalisation constraint.** If $H$ proves a negative $e$, every generalisation $H' \succeq H$ proves $e$ too,
+  because $B \cup H'$ proves everything $B \cup H$ proves. All of them are inconsistent and are pruned.
+- **Specialisation constraint.** If $H$ misses a positive $e$, every specialisation $H' \preceq H$ misses it too,
+  because $B \cup H'$ proves nothing that $B \cup H$ does not. All of them are incomplete and are pruned.
+- **Elimination constraint.** If $H$ proves no positive at all, no clause that specialises a clause of $H$ helps a
+  **separable** program prove a positive. A separable program is one in which no head predicate occurs in a body, so
+  its clauses do not call one another. Every separable program that contains such a clause is pruned.
+
+The first two constraints never prune a solution. The elimination constraint can prune a solution, but never a
+smallest one, because deleting the useless clauses from a separable solution leaves a smaller solution.
+
+<Derivation title="The elimination constraint keeps the smallest solutions">
+Let $H_1$ prove no positive, and let $H_2$ be a separable solution that contains a clause $C$ specialising a clause of
+$H_1$. The clause $C$ proves no positive either: $\set{C}$ is a specialisation of $H_1$, so $B \cup \set{C}$ proves no
+more than $B \cup H_1$. In a separable program no clause calls another, so every positive that $B \cup H_2$ proves is
+proved by a single clause of $H_2$ together with $B$. None is proved through $C$, so $H_2 \setminus \set{C}$ still
+proves every positive. It proves no negative, because it is a subset of $H_2$. It is therefore a solution with fewer
+literals than $H_2$, and $H_2$ was not a smallest solution. A recursive program is not separable, and there a clause
+that proves nothing alone can be needed by another clause, so the constraint does not apply.
+</Derivation>
+
+### The loop
+
+1. Set the size bound $s$ to 1 literal, and the constraint set to the declarations and bounds alone.
+2. **Generate** a program of $s$ literals that violates no constraint. If none is left, increase $s$ and repeat.
+3. **Test** it: prove each example with <NoteLink to="unification-and-resolution">SLD resolution</NoteLink> under a
+   depth bound.
+4. If it proves every positive and no negative, return it.
+5. **Constrain**: add the constraints of its outcome, and return to step 2.
+
+Programs are generated in order of size and the constraints never prune a smallest solution, so the program returned
+has the fewest literals of any solution in the space <Cite id="cropper2021popper" />.
+
+### Generating with an answer-set solver
+
+Popper does not list the space. It encodes a program as a set of atoms, such as one atom per head literal and one per
+body literal with its clause, predicate and variables, and writes the declarations, the bounds and every learnt
+constraint as rules and denials of an <Gloss name="asp" /> problem. A **generalisation constraint** for $H$ is a denial
+saying "a program that contains a clause subsuming each clause of $H$ is forbidden". Each answer set of the problem is
+a program that satisfies every constraint. The solver Clingo keeps its state between calls, so each new constraint is
+added to the running problem instead of restarting it <Cite id="gebser2019clingo" />.
+
+### Extensions
+
+- **Answer set programs as hypotheses.** ILASP learns answer set programs, including choice rules and constraints,
+  from examples that are partial interpretations, by encoding the search as answer-set solving
+  <Cite id="law2014ilasp" />.
+- **Predicate invention.** Poppi allows invented symbols in generated programs and adds a redundancy constraint in
+  place of elimination, which does not apply once programs call invented predicates
+  (<NoteLink to="predicate-invention">predicate invention</NoteLink>) <Cite id="cropper2021poppi" />.
+- **Combining programs.** Combo keeps every generated program that proves at least one positive and no negative, and
+  uses an answer-set solver to find the smallest union of them that proves every positive. Large programs are then
+  assembled from small ones instead of being generated whole <Cite id="cropper2022combo" />.
+- **Noise.** MaxSynth replaces "complete and consistent" with a <NoteLink to="minimum-description-length">minimum
+  description length</NoteLink> score, the program's size plus the examples it gets wrong, and finds the best
+  combination of programs with a MaxSAT solver, so it learns from mislabelled examples
+  <Cite id="hocquette2023maxsynth" />.
+
+## Worked example
+
+The target is $\text{last}(L, X)$, "$X$ is the last element of the list $L$". The background defines
+$\text{head}(L, X)$, $\text{tail}(L, T)$ and $\text{empty}(L)$. The positives are last([a, b, c], c), last([b, a], a),
+last([c], c) and last([a, c, b, a], a); the negatives are last([a, b, c], a), last([a, b, c], b), last([b, a], b) and
+last([a, c, b, a], c). Clauses have at most 3 variables and 3 body literals, arguments respect the types list and
+element, and programs have at most 2 clauses. The space then has 57 clauses and 1220 programs.
+
+1. **Test 1: $\text{last}(A, B) \leftarrow \text{head}(A, B)$.** It proves last([c], c) and last([a, c, b, a], a), and
+   the negatives last([a, b, c], a) and last([b, a], b). It is too general and too specific. The generalisation
+   constraint prunes 34 programs, such as this clause with any second clause added. The specialisation constraint
+   prunes 193, every program each of whose clauses this clause subsumes, which here means every clause contains
+   $\text{head}(A, B)$. 992 programs are left.
+2. **Test 2: $\text{last}(A, B) \leftarrow \text{tail}(A, C) \land \text{head}(C, B)$**, the second element. It proves
+   one positive, last([b, a], a), and two negatives. It prunes 45 generalisations and 33 specialisations; 913 are left.
+3. **Test 3: $\text{last}(A, B) \leftarrow \text{tail}(C, A) \land \text{head}(C, B)$.** Here $C$ is any list whose
+   tail is $A$, and its head can be anything, so the clause proves every example. It is complete and too general: 44
+   generalisations go, and 868 programs are left.
+4. **Tests 4 to 11.** Clauses such as $\text{last}(A, B) \leftarrow \text{empty}(A) \land \text{empty}(C) \land
+   \text{head}(C, B)$ prove nothing. Each triggers the elimination constraint, which removes between 16 and 49
+   non-recursive programs that contain one of their specialisations.
+5. **The solution, test 55.**
+
+```prolog
+last(A, B) :- head(A, B), tail(A, C), empty(C).
+last(A, B) :- tail(A, C), last(C, B).
+```
+
+The base clause says that the head of a one-element list is its last element, and the recursive clause passes to the
+tail. The program has 7 literals, the smallest size of any solution in the space. Over the 55 tests the constraints
+pruned 743 programs: 123 as generalisations, 421 as specialisations and 199 by elimination. Plain generate-and-test, in
+the same order, tests 255 programs before reaching it. On Cropper and Morel's list tasks the gap is larger: one task
+took their enumerate baseline 159 seconds and Popper four <Cite id="cropper2021popper" />.
+
+<FailurePruning />
+
+## Cost
+
+- **Tests.** Each test proves every example with SLD resolution, under a depth bound for recursive programs. The number
+  of tests is the number of programs neither pruned nor larger than the solution, usually a small fraction of the space.
+- **Constraints.** Each failure adds a constant number of constraints, and each constraint is checked against every
+  candidate the solver considers. Over a long run the solver's problem grows with the number of failures.
+- **Space size.** The space grows exponentially in the number of body literals and clauses. A larger bound is cheap
+  when constraints prune it early and expensive when the target is large: the search must exhaust every smaller size
+  first.
+
+## Trade-offs
+
+- **Against Metagol.** No metarules are needed, only predicate declarations and bounds, and the program returned is the
+  smallest in literals. The bounds play the role of the metarules: too small excludes the target, too large slows the
+  search.
+- **Against FOIL and Progol.** Whole-program search learns recursive and mutually dependent clauses, which greedy
+  clause-by-clause search misses. Clause learners scale to many examples and tolerate noise by scoring, which basic
+  Popper does not.
+- **Exactness.** The base method demands a program that is complete and consistent. One mislabelled example makes
+  every correct program fail, and the learner returns a larger program that fits the error, or none. MaxSynth trades
+  errors against size instead <Cite id="hocquette2023maxsynth" />.
+- **Practice.** Popper, with Combo and MaxSynth, is among the main ILP systems in current use, and Cropper and Dumančić
+  survey it beside its predecessors <Cite id="cropper2022ilp30" />.
+
+## Pitfalls
+
+- **Bounds that exclude the target.** With at most 2 body literals per clause, the base clause of last cannot be
+  written, and the search exhausts the space and returns nothing. Raising bounds one at a time is the usual remedy.
+- **Non-terminating recursion.** A generated clause such as $\text{last}(A, B) \leftarrow \text{last}(C, B) \land
+  \text{tail}(A, C)$ calls itself with an unbound list first. Tests need a depth or step bound, and a proof cut off by
+  the bound counts as a failure.
+- **Elimination on recursive programs.** Applying the elimination constraint to programs that call themselves can prune
+  the only solution: a recursive clause that proves nothing alone can be the one the base clause needs.
+- **Ties.** Several programs can share the smallest size. The solver returns whichever it finds first, as the ancestor
+  task in the figure shows: the transitive clause $\text{ancestor}(A, B) \leftarrow \text{ancestor}(A, C) \land
+  \text{ancestor}(C, B)$ has as many literals as the usual $\text{parent}(A, C) \land \text{ancestor}(C, B)$, and either
+  can be returned.

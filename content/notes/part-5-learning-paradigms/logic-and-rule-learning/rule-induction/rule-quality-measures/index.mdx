@@ -1,0 +1,201 @@
+---
+title: 'Rule quality measures'
+kind: concept
+summary: 'Rule learners rank candidate rules by a function of the positives $p$ and negatives $n$ a rule covers: precision $p/(p+n)$, Laplace and m-estimates that shrink it at low coverage, FOIL gain, weighted relative accuracy and description length.'
+tags: [logic, rule-learning, worked-example]
+aliases: [rule evaluation heuristics, rule evaluation measures, Laplace estimate, m-estimate, weighted relative accuracy, FOIL gain, coverage space]
+requires: [decision-lists-and-rule-sets]
+related:
+  [
+    sequential-covering,
+    ripper,
+    foil,
+    subgroup-discovery,
+    minimum-description-length,
+    receiver-operating-characteristic-and-precision-recall-curves,
+  ]
+references: [furnkranz2005, lavrac1999, clark1989, clark1991, quinlan1990, cohen1995, furnkranz2012]
+status: draft
+updated: 2026-10-17
+---
+
+import { CoverageSpace } from './CoverageSpace'
+
+<Definition>
+A **rule quality measure** scores a candidate rule $a \to c$ by the training rows it covers. With $P$ positive rows
+(class $c$) and $N$ negative rows (every other class) in the data, a rule that covers $p$ positives and $n$ negatives
+gets a score $h(p, n)$. Rule learners use the score to choose which condition to add to a rule, which rule to keep and
+when to stop. Every common measure depends on $(p, n)$ and the totals alone, so each is a field over the rectangle
+$[0, N] \times [0, P]$, called **coverage space** <Cite id="furnkranz2005" />.
+</Definition>
+
+## Intuition
+
+A rule should be **consistent**, covering few negatives, and **complete**, covering many positives. The two goals pull
+apart. Adding a condition to a rule removes rows from its coverage, which can only lower $p$ and $n$. A rule refined
+until it covers a single positive row is perfectly consistent and almost useless. A rule that covers everything is
+complete and says nothing.
+
+Each measure fixes an exchange rate between the two goals. Its **isometrics**, the curves in coverage space along which
+it is constant, show the rate directly. A learner that climbs the measure moves a rule across these curves, so the
+shape of the isometrics decides which rules a learner prefers before any data are seen <Cite id="furnkranz2005" />.
+
+## Details
+
+### Coverage space
+
+A rule is a point $(n, p)$ with $0 \le n \le N$ and $0 \le p \le P$. The empty rule, which covers nothing, sits at the
+origin. The rule that covers every row sits at $(N, P)$. The perfect rule sits at $(0, P)$. The diagonal from $(0, 0)$
+to $(N, P)$ holds the rules whose precision equals the prior $\pi = P/(P + N)$: such a rule has the class mix of a
+random sample and has learned nothing. Dividing the axes by $N$ and $P$ turns coverage space into <Gloss name="roc" />
+space, with the <Gloss name="fpr">false positive rate</Gloss> $n/N$ and the <Gloss name="tpr">true positive rate</Gloss>
+$p/P$ as coordinates (see <NoteLink to="receiver-operating-characteristic-and-precision-recall-curves">ROC and
+precision-recall curves</NoteLink>). Adding a condition to a rule moves its point towards the origin, never away.
+
+### Precision and its smoothed forms
+
+**Precision** $h_{\text{prec}} = p/(p + n)$ is the share of covered rows that are positive. Its isometrics are lines
+through the origin, since $p/(p + n) = \theta$ is the line $p = \frac{\theta}{1 - \theta}\, n$. Every rule on one line
+scores the same however many rows it covers, so a rule covering one positive and no negative scores 1, the maximum.
+Greedy learners that maximise precision grow rules until they are pure and end with many tiny rules.
+
+The **Laplace estimate** adds one pseudo-count per class, $h_{\text{Lap}} = (p + 1)/(p + n + 2)$ for two classes and
+$(p + 1)/(p + n + K)$ for $K$ classes. It is the posterior mean of the rule's precision under a uniform prior, and CN2
+uses it to rank rules <Cite id="clark1991" />. Setting $(p + 1)/(p + n + 2) = \theta$ gives
+$p + 1 = \frac{\theta}{1 - \theta}(n + 1)$: the isometrics are lines through $(-1, -1)$, rotated just below the
+origin. A rule covering one positive scores $2/3$; one covering 100 positives and no negatives scores $101/102$.
+
+The **m-estimate** shrinks precision towards the prior $\pi$ with weight $m \ge 0$:
+
+$$
+h_m = \frac{p + m\pi}{p + n + m}.
+$$
+
+Its isometrics are lines through the point $(-m(1 - \pi), -m\pi)$ on the extension of the diagonal below the origin.
+At $m = 0$ it is precision. As $m$ grows the pivot moves away and the lines become parallel to the diagonal, so the
+measure orders rules as weighted relative accuracy does (below) <Cite id="furnkranz2005" />. The single parameter $m$
+therefore slides between the most specific and the most general preference.
+
+<Derivation title="The m-estimate tends to weighted relative accuracy">
+Write $h_m = \pi + \frac{p - \pi(p + n)}{p + n + m}$, which is $h_m$ after adding and subtracting $\pi$. For
+$m \gg p + n$ the denominator is close to $m$, so $h_m \approx \pi + \frac{1}{m}\big(p(1 - \pi) - n\pi\big)$. The
+term in brackets equals $\frac{pN - nP}{P + N}$, which is $(P + N)$ times weighted relative accuracy. Up to a constant
+offset and a positive factor, which do not change the ranking of rules, $h_m$ is weighted relative accuracy in the
+limit.
+</Derivation>
+
+### Accuracy and weighted relative accuracy
+
+**Rule accuracy** is the accuracy of the classifier that predicts positive inside the rule and negative outside:
+$(p + N - n)/(P + N)$. For fixed $P$ and $N$ it orders rules as $p - n$, and its isometrics are the 45° lines
+$p - n = \text{const}$. A cost-weighted variant $p - \gamma n$ tilts them.
+
+**<Gloss name="wracc">Weighted relative accuracy</Gloss>** multiplies the coverage of a rule by the gain of its
+precision over the prior <Cite id="lavrac1999" />:
+
+$$
+h_{\text{WRAcc}} = \frac{p + n}{P + N}\left(\frac{p}{p + n} - \frac{P}{P + N}\right) = \frac{pN - nP}{(P + N)^2}
+= \frac{PN}{(P + N)^2}\left(\frac{p}{P} - \frac{n}{N}\right).
+$$
+
+The last form shows that weighted relative accuracy ranks rules by the true positive rate minus the false positive
+rate. Its isometrics are parallel to the diagonal, it is zero on the diagonal and negative below it. It rewards large
+rules that are better than chance, and it is the default quality of
+<NoteLink to="subgroup-discovery">subgroup discovery</NoteLink>, where the aim is to describe unusual parts of the
+data rather than to classify.
+
+### Information gain and significance
+
+**FOIL gain** measures a refinement against its parent rule. If the parent covers $(p_0, n_0)$ and the refined rule
+covers $(p, n)$, then
+
+$$
+h_{\text{FOIL}} = p\left(\log_2\frac{p}{p + n} - \log_2\frac{p_0}{p_0 + n_0}\right).
+$$
+
+The bracket is the reduction in the bits needed to signal that a covered row is positive, and the factor $p$ counts
+the positives that keep the rule <Cite id="quinlan1990" />. A refinement must keep many positives and raise precision
+to score well. <NoteLink to="foil">FOIL</NoteLink> and the growing phase of <NoteLink to="ripper">RIPPER</NoteLink> use
+it <Cite id="cohen1995" />.
+
+The **likelihood ratio statistic** of CN2 tests whether the covered rows' class mix differs from the prior:
+
+$$
+\Lambda = 2\left(p \ln \frac{p}{e_p} + n \ln \frac{n}{e_n}\right), \qquad e_p = (p + n)\pi,\ e_n = (p + n)(1 - \pi).
+$$
+
+Under the hypothesis that the rule is unrelated to the class, $\Lambda$ is approximately
+<NoteLink to="chi-squared-distribution">$\chi^2$</NoteLink> with $K - 1$ degrees of freedom. CN2 keeps a rule only if
+$\Lambda$ exceeds the 95% or 99% quantile, which stops it from learning rules that fit noise <Cite id="clark1989" />.
+
+**Description length** scores a whole <NoteLink to="decision-lists-and-rule-sets">rule set</NoteLink>: the bits to write
+down the rules plus the bits to list the training rows they misclassify (see
+<NoteLink to="minimum-description-length">minimum description length</NoteLink>). A rule is worth adding when it saves
+more exception bits than it costs. RIPPER stops adding rules by this criterion <Cite id="cohen1995" />.
+
+### Search heuristics and stopping criteria
+
+Measures play two roles in a learner <Cite id="furnkranz2012" />. A **search heuristic** chooses among refinements of
+one rule, and it only has to order candidates correctly. A **stopping criterion** decides whether a rule, or one more
+condition, is worth having at all, and it needs an absolute threshold: a <NoteLink to="significance-level">significance
+level</NoteLink>, a minimum precision or a description length budget. Precision makes a poor search heuristic, because
+it prefers tiny pure rules, and a usable stopping criterion as a minimum precision. The likelihood ratio makes a sound
+stopping criterion and a poor search heuristic, because it rewards any deviation from the prior, including rules that
+cover mostly negatives. CN2 therefore searches by entropy or the Laplace estimate and filters by the likelihood ratio
+<Cite id="clark1991" />.
+
+## Worked example
+
+Take the Titanic data with "survived" as the positive class: $P = 711$ survivors and $N = 1490$ deaths among
+$P + N = 2201$ people, so $\pi = 0.323$. Four candidate rules cover:
+
+| rule | $p$ | $n$ |
+| --- | --- | --- |
+| A: class = 1st ∧ age = child | 6 | 0 |
+| B: class = 2nd ∧ age = child | 24 | 0 |
+| C: class = 1st ∧ sex = female | 141 | 4 |
+| D: sex = female | 344 | 126 |
+
+**Precision.** A and B score $1$, C scores $141/145 = 0.972$, D scores $344/470 = 0.732$. The ranking is A = B, C, D.
+
+**Laplace.** A scores $7/8 = 0.875$, B $25/26 = 0.962$, C $142/147 = 0.966$, D $345/472 = 0.731$. One pseudo-count per
+class costs A more than C, and C overtakes both pure rules: C, B, A, D.
+
+**m-estimate with $m = 10$.** The pseudo-counts are $m\pi = 3.23$ positive and $6.77$ negative. A scores
+$(6 + 3.23)/16 = 0.577$, B $(24 + 3.23)/34 = 0.801$, C $(141 + 3.23)/155 = 0.931$, D $(344 + 3.23)/480 = 0.723$. The
+ranking is C, B, D, A: the smallest rule drops to last.
+
+**Weighted relative accuracy.** The denominator is $2201^2 = 4\,844\,401$. A scores
+$6 \cdot 1490/4\,844\,401 = 0.0018$, B $0.0074$, C $(141 \cdot 1490 - 4 \cdot 711)/4\,844\,401 = 0.0428$ and D
+$(344 \cdot 1490 - 126 \cdot 711)/4\,844\,401 = 0.0873$. The ranking is D, C, B, A, the reverse of precision.
+
+**FOIL gain against the empty rule.** The empty rule's precision is $\pi$, and $\log_2 \pi = -1.630$. A gains
+$6 \cdot 1.630 = 9.8$ bits, B $39.1$, C $141\,(\log_2 0.972 + 1.630) = 224.2$ and D
+$344\,(\log_2 0.732 + 1.630) = 405.9$. The ranking is D, C, B, A.
+
+The same four rules come out in three different orders. Precision picks the 6 first-class children, the m-estimate
+and Laplace pick the 145 first-class women, and weighted relative accuracy and FOIL gain pick all 470 women. The
+choice of measure is the main design decision of a <NoteLink to="sequential-covering">sequential covering</NoteLink>
+learner, and that note runs CN2 on these data with several of them.
+
+<CoverageSpace />
+
+## Assumptions
+
+- **Counts from the training data.** Every measure treats $p$ and $n$ as fixed, though they are random. A rule chosen
+  as the maximum of many candidates has an optimistic $p/(p + n)$, the more so the more candidates were compared.
+- **One rule at a time.** The measures score a rule without regard to the other rules of the model. A covering
+  algorithm handles the interaction by removing covered rows before scoring the next rule.
+- **The prior as reference.** The m-estimate, weighted relative accuracy and the likelihood ratio measure a rule
+  against $\pi$. In a covering loop the prior changes after every rule, because rows are removed.
+
+## Pitfalls
+
+- **Precision as a search heuristic.** It prefers the smallest pure rule, and on noisy data it learns one rule per
+  row.
+- **Weighted relative accuracy for classification.** It prefers general rules with modest precision, good for
+  describing subgroups and often too coarse for a classifier.
+- **Absolute values of FOIL gain.** The gain depends on the parent rule, so gains of refinements of different rules
+  are not comparable.
+- **Significance after search.** The $\chi^2$ threshold of the likelihood ratio assumes one test, while the learner
+  compares thousands of candidates. The test is a heuristic filter, not a calibrated p-value.

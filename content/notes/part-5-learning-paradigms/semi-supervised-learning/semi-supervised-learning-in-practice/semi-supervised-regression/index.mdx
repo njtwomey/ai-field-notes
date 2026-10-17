@@ -1,0 +1,174 @@
+---
+title: 'Semi-supervised regression'
+kind: concept
+summary: 'Regression with few labelled targets uses unlabelled inputs through smoothness. Laplacian regularised least squares penalises variation along a data graph, and co-regularisation fits two regressors, on different views or with different kernels, to agree on the unlabelled points.'
+tags: [semi-supervised, regression, worked-example]
+aliases: ['co-regularised regression', 'COREG', 'co-regularised least squares']
+requires: [manifold-regularisation]
+related: [co-training, kernel-ridge-regression, label-propagation, mean-teacher, graph-construction-for-semi-supervised-learning]
+references: [belkin2006manifold, zhu2003, nadler2009infinite, brefeld2006coreg, zhou2005coreg, tarvainen2017meanteacher]
+status: draft
+updated: 2026-10-17
+---
+
+import { SpiralRegression } from './SpiralRegression'
+
+<Definition>
+**Semi-supervised regression** learns a real-valued function $f$ from $l$ labelled pairs $(\xvec_i, y_i)$, with
+$y_i \in \reals$, and $u$ unlabelled inputs, usually with $u \gg l$. The unlabelled inputs enter through one of two
+assumptions: that $f$ changes slowly where the inputs are dense or along the low-dimensional set they lie on
+(smoothness, used by graph methods such as Laplacian regularised least squares), or that two different predictors of $y$
+should agree on every input (used by co-regularisation and <NoteLink to="co-training">co-training</NoteLink>
+regressors).
+</Definition>
+
+## Intuition
+
+Most semi-supervised methods were built for classification, and their assumptions talk about class boundaries. The
+<NoteLink to="semi-supervised-assumptions">cluster assumption</NoteLink> says points of one cluster share a class; the
+low-density assumption says the boundary avoids dense regions. A regression function has no boundary to place.
+<NoteLink to="pseudo-labelling">Pseudo-labelling</NoteLink> relies on a classifier's confidence, and a regressor's
+prediction carries no confidence by itself.
+
+What survives is smoothness. If the inputs lie along a curve, a surface or in clusters, a regression target that
+depends on position along that structure changes little between nearby points of the structure, even when points that
+are close in the plane belong to different parts of it. Unlabelled inputs reveal the structure, so they say which
+points count as nearby. The second idea that survives is agreement. Two regressors that see the data differently, two
+feature sets or two kernels, should give the same value at every input; their disagreement on unlabelled inputs is a
+penalty that needs no target.
+
+## Details
+
+### Graph smoothness
+
+Build a <NoteLink to="spectral-clustering">similarity graph</NoteLink> with weights $W_{ij} \ge 0$ over all $n = l + u$
+inputs and let $\Lmat = \Dmat - \Wmat$ be its Laplacian, so that
+$\fvec^\top\Lmat\fvec = \tfrac12\sum_{i, j} W_{ij}(f_i - f_j)^2$ measures how much the values
+$\fvec = (f(\xvec_1), \dots, f(\xvec_n))$ change across edges.
+
+The simplest graph regressor fixes $f$ at the labelled points and minimises $\fvec^\top\Lmat\fvec$ over the unlabelled
+values. The minimiser is the **harmonic function** of Zhu, Ghahramani and Lafferty: every unlabelled value is the
+weighted average of its neighbours' values <Cite id="zhu2003" />. Setting the derivative of
+$\fvec^\top\Lmat\fvec$ with respect to an unlabelled $f_j$ to zero gives $2\sum_i W_{ji}(f_j - f_i) = 0$, which is
+
+$$
+f_j = \frac{\sum_i W_{ji} f_i}{\sum_i W_{ji}}.
+$$
+
+On a path graph with unit weights this is linear interpolation between the labels, measured in steps along the path.
+<NoteLink to="label-propagation">Label propagation</NoteLink> computes the same function for classification, with
+class indicators in place of real targets. It is transductive: it gives values at the graph's nodes only.
+
+**Laplacian regularised least squares** (<Gloss name="laprls" />) gives a function of any input. It fits
+$f = \sum_{i=1}^{n}\alpha_i k(\xvec_i, \cdot)$ in a <Gloss name="rkhs">reproducing kernel Hilbert space</Gloss> with
+kernel $k$ by minimising
+
+$$
+\frac{1}{l}\sum_{i=1}^{l}(y_i - f(\xvec_i))^2 + \gamma_A\norm{f}_{\Hcal}^2 + \frac{\gamma_I}{n^2}\fvec^\top\Lmat\fvec,
+$$
+
+whose coefficients solve one linear system, $(\Jmat\Kmat + \gamma_A l\,\Imat + \tfrac{\gamma_I l}{n^2}\Lmat\Kmat)
+\alphavec = \Jmat\yvec$ <Cite id="belkin2006manifold" />. <NoteLink to="manifold-regularisation">Manifold
+regularisation</NoteLink> derives it. For regression the targets $y_i$ are the real values themselves. With
+$\gamma_I = 0$ it is <NoteLink to="kernel-ridge-regression">kernel ridge regression</NoteLink> on the labelled points.
+As $\gamma_A \to 0$ with $\gamma_I$ small next to the fit, it approaches the harmonic interpolation. As $\gamma_I$ grows
+large, it flattens $f$ towards a single constant on each connected component of the graph, because a constant has zero
+graph penalty and the labelled squared error is then the only cost.
+
+### Too many unlabelled points
+
+Graph smoothness has a failure that classification hides. Nadler, Srebro and Zhou studied the limit of infinitely many
+unlabelled points for the harmonic method in $d \ge 2$ dimensions <Cite id="nadler2009infinite" />. In that limit the
+graph penalty becomes the integral of $\norm{\nabla f}^2$, and in two or more dimensions a function can match the
+labels at isolated points while being almost constant everywhere else, with narrow spikes at the labels, at
+arbitrarily small cost. The estimate converges to such a function, which predicts the same value away from the labels.
+For classification, thresholding a nearly constant function can still give sensible classes; for regression the
+predictions are useless. A positive ambient weight $\gamma_A$, enough labels, or a penalty with higher derivatives
+(an iterated Laplacian) prevents the collapse.
+
+### Agreement between two regressors
+
+**Co-regularised least squares** of Brefeld, Gärtner, Scheffer and Wrobel fits two kernel regressors $f_1$ and $f_2$,
+one per view of the inputs or one per kernel <Cite id="brefeld2006coreg" />. Each fits the labels with a ridge penalty,
+and a third term makes them agree on the unlabelled inputs $\zvec_1, \dots, \zvec_u$:
+
+$$
+\sum_{v = 1}^{2}\brack{\sum_{i=1}^{l}(y_i - f_v(\xvec_i))^2 + \nu\norm{f_v}_{\Hcal_v}^2}
++ \lambda\sum_{j=1}^{u}\paren{f_1(\zvec_j) - f_2(\zvec_j)}^2.
+$$
+
+With $f_v$ expanded over all $n$ inputs, the minimiser solves a linear system of size $2n$, cubic in the number of
+unlabelled points; Brefeld and colleagues also give a semi-parametric approximation that is linear in it. The prediction
+is the average $\tfrac12(f_1 + f_2)$. With $\lambda = 0$ the two regressors are independent kernel ridge regressions.
+The agreement term helps when each view's errors are different: where one regressor extrapolates badly, the other
+pulls it back.
+
+**COREG** of Zhou and Li is the co-training form <Cite id="zhou2005coreg" />. Two $k$-nearest-neighbour regressors use
+different distance metrics. In each round, each regressor picks the unlabelled point whose pseudo-labelled addition
+most reduces its squared error on that point's labelled neighbours, and passes the point, with its prediction as the
+target, to the other regressor's training set. The error reduction plays the part of a classifier's confidence. The
+final prediction averages the two regressors.
+
+### Consistency for deep regressors
+
+<NoteLink to="consistency-regularisation">Consistency regularisation</NoteLink> carries over to regression without
+change, because its target is the teacher's prediction, not a class. <NoteLink to="mean-teacher">Mean teacher</NoteLink>
+penalises the squared difference between the student's output and an <Gloss name="ema">exponential moving
+average</Gloss> of its own weights' output on perturbed inputs <Cite id="tarvainen2017meanteacher" />; for a regressor
+the outputs are real values. Pseudo-labelling a regressor needs a substitute for confidence, such as the spread of an
+ensemble's predictions or a predictive variance.
+
+## Worked example
+
+Six points lie on an arc of the unit circle at angles $0°, 50°, \dots, 250°$. Their target is their position along the
+arc, $y = 0, 1, 2, 3, 4, 5$. The two ends are labelled, $y_0 = 0$ and $y_5 = 5$, and the four middle points are
+unlabelled.
+
+1. **The geometry.** Neighbouring points are a chord of $2\sin 25° = 0.845$ apart. The two labelled ends are 110° apart
+   on the circle, a chord of $2\sin 55° = 1.638$: in the plane, point 5 is about as close to point 0 as point 2 is
+   (1.532), although it is five steps away along the arc.
+2. **The graph.** Joining each point to its nearest neighbour gives the path $0 - 1 - 2 - 3 - 4 - 5$ with unit
+   weights: the 1.638 between the ends is longer than every neighbour's chord, so the ends are not joined.
+3. **The harmonic solution.** On the path, each unlabelled value is the mean of its two neighbours,
+   $f_j = \tfrac12(f_{j-1} + f_{j+1})$, so the values lie on a line from $f_0 = 0$ to $f_5 = 5$:
+   $\fvec = (0, 1, 2, 3, 4, 5)$. The graph has recovered the position along the arc exactly.
+4. **Kernel ridge regression.** With a <Gloss name="rbf-kernel">Gaussian kernel</Gloss> of lengthscale 1, $k(\xvec, \xvec') = \exp(-\norm{\xvec -
+   \xvec'}^2/2)$, and $\gamma_A = 10^{-5}$, the fit through the two labels gives
+   $(0.00, -0.21, 0.40, 1.44, 3.55, 5.00)$. The kernel value between the two labelled points is
+   $e^{-1.638^2/2} = 0.261$, so to keep $f(\text{point } 0)$ at 0 the fit gives point 0 the coefficient $-1.40$,
+   cancelling point 5's coefficient 5.37 there. That negative coefficient drags point 1 below zero. The middle values
+   are far from 1, 2, 3, 4.
+5. **LapRLS.** With $\gamma_A = 10^{-5}$ and $\gamma_I/n^2 = 0.001$, the fitted values are
+   $(0.00, 0.98, 1.98, 2.97, 4.00, 5.00)$, close to the harmonic solution. Raising the graph weight to
+   $\gamma_I/n^2 = 0.1$ gives $(0.19, 1.11, 2.04, 2.96, 3.89, 4.81)$: the values stay evenly spaced but the ends are
+   pulled towards their mean, 2.5. In the limit of a very large $\gamma_I$ all six values tend to 2.5.
+
+The figure runs the same comparison on 150 points along a spiral, where the neighbouring arms are close in the plane and
+far apart along the curve. With five labels spread along the curve, data seed 1, lengthscale 0.6, $\gamma_A = 10^{-3}$
+and $\gamma_I = 10^4$, kernel ridge regression has an error of 0.35 on the unlabelled points and LapRLS 0.11.
+
+<SpiralRegression />
+
+## Assumptions
+
+- **The target is smooth along the structure the inputs lie on.** A target that jumps between neighbouring points of
+  the graph is fitted badly by any graph penalty.
+- **The graph follows the structure.** An edge that short-cuts between two arms of the spiral lets values leak between
+  them, which is the error of kernel ridge regression that the graph was meant to avoid.
+  <NoteLink to="graph-construction">Graph construction</NoteLink> decides which points count as neighbours (see
+  <NoteLink to="graph-construction-for-semi-supervised-learning">graph construction for semi-supervised
+  learning</NoteLink>).
+- **The views are each predictive, with different errors.** Co-regularisation helps only if each regressor can predict
+  the target on its own and the two make different mistakes.
+
+## Pitfalls
+
+- **Extrapolation.** Beyond the outermost labels along the graph, the harmonic solution is flat: it repeats the
+  nearest label's value. LapRLS inherits this. Labels at the ends of the range matter more than labels in the middle.
+- **Spikes in high dimensions.** With many unlabelled points and few labels in two or more dimensions, the pure graph
+  penalty lets the fit collapse to a constant with spikes at the labels <Cite id="nadler2009infinite" />. Keep the
+  ambient penalty and check predictions at points far from every label.
+- **An intrinsic weight that is too large.** It flattens the fit towards the mean of the labels, as Step 5 shows. Choose
+  $\gamma_I$ by cross-validation on the labelled points; the figure's error curve has a clear minimum.
+- **Pseudo-labels without uncertainty.** <NoteLink to="self-training">Self-training</NoteLink> a regressor on its own
+  predictions with no measure of their reliability reinforces its errors, as confirmation bias does in classification.

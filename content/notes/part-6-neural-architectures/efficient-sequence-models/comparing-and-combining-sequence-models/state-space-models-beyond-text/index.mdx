@@ -1,0 +1,191 @@
+---
+title: 'State-space models beyond text'
+kind: concept
+summary: 'State-space layers are applied to images by scanning patches in several orders (Vision Mamba, VMamba), to audio and genomes with bidirectional scans (Caduceus), and to time series. The scan order sets which pixels interact early.'
+tags: [state-space-models, computer-vision, sequence-models, worked-example]
+aliases: ['Vision Mamba', 'Vim', 'VMamba', 'Caduceus', 'bidirectional scan', 'scan order', 'SS2D', 'cross-scan', 'SaShiMi']
+requires: [mamba]
+related:
+  [
+    vision-transformer,
+    biological-sequence-data,
+    deep-state-space-models,
+    long-convolution-models,
+    convolution-versus-attention-in-vision,
+    audio-and-speech-representations,
+    protein-and-genomics-datasets,
+    hybrid-sequence-models,
+  ]
+references:
+  [
+    zhu2024vim,
+    liu2024vmamba,
+    yu2024mambaout,
+    goel2022sashimi,
+    nguyen2023hyenadna,
+    schiff2024caduceus,
+    nguyen2024evo,
+    wang2024smamba,
+    gu2023mamba,
+  ]
+status: draft
+updated: 2026-10-17
+---
+
+import { ScanOrders } from './ScanOrders'
+
+<Definition>
+**State-space models beyond text** are networks of state-space layers, such as <NoteLink to="mamba">Mamba</NoteLink> or
+<Gloss name="s4" />, applied to images, video, audio waveforms, DNA and
+<NoteLink to="multivariate-time-series">multivariate time series</NoteLink>. Each input is written as a sequence, of
+image patches, samples or nucleotides, and the layers mix it in time linear in its length. Two changes recur: a **scan
+order** that turns a two-dimensional grid into one or more sequences, and a **bidirectional scan** that runs the causal
+layer forwards and backwards so every position sees the whole input <Cite id="zhu2024vim" /> <Cite id="liu2024vmamba" />
+<Cite id="schiff2024caduceus" />.
+</Definition>
+
+## Intuition
+
+Outside text, sequences are long. A $1{,}248 \times 1{,}248$ image cut into $16 \times 16$ patches is 6,084 tokens;
+one second of audio at 16 kHz is 16,000 samples; a human chromosome has tens of millions of nucleotides. Attention
+costs grow with the square of the length, and a state-space layer's cost grows linearly, so long non-text inputs are
+where the layer's efficiency counts most.
+
+Two properties of a <Gloss name="language-model">language-model</Gloss> layer do not fit these data. A selective scan is
+causal: the output at position $t$ depends only on positions up to $t$. Classifying an image or a DNA fragment has no
+direction, and every position should see every other. And a scan is one-dimensional: an image is a grid, and any order
+that lists its patches puts some neighbours far apart in the sequence. A recurrent layer forgets with distance, so the
+order decides which patches interact strongly. The fixes are to scan in both directions, and to scan along several
+orders and merge the results.
+
+## Details
+
+### Images: Vision Mamba and VMamba
+
+**Vision Mamba (Vim)** keeps the layout of a <NoteLink to="vision-transformer">vision transformer</NoteLink>: the image
+is cut into $16 \times 16$ patches, embedded with <NoteLink to="learned-absolute-position-embeddings">learned position
+embeddings</NoteLink> and flattened in raster order <Cite id="zhu2024vim" />. Each block projects its input into two
+branches. One branch runs a forward and a backward pass, each with its own short convolution and selective SSM; the
+other is a gate. The two directions are gated and added. A class token placed in the middle of the sequence gave 76.1%
+top-1 accuracy, against 75.2% with the token at the head and 73.9% with mean pooling. Vim-Ti reached 76.1% on
+<Gloss name="imagenet" /> against 72.2% for DeiT-Ti of similar size, and at a resolution of $1{,}248 \times 1{,}248$ it
+ran 2.8 times faster than DeiT and used 86.8% less <Gloss name="gpu" /> memory.
+
+**VMamba** scans in two dimensions <Cite id="liu2024vmamba" />. Its 2-D selective scan (SS2D) unfolds the patch grid
+along four routes, by rows and by columns, each forwards and backwards. Each route goes through its own selective scan,
+and the four outputs are folded back onto the grid and merged. Every patch is then next to its left and right
+neighbours on the row routes and next to its upper and lower neighbours on the column routes. VMamba is a hierarchical
+backbone like Swin: VMamba-T reached 82.6% on ImageNet at 4.9 GFLOPs against 81.3% for Swin-T at 4.5 GFLOPs.
+
+**Is the SSM needed?** Yu and Wang removed the state-space mixer from visual Mamba blocks, leaving gated convolutional
+blocks they call MambaOut <Cite id="yu2024mambaout" />. MambaOut outperformed the visual Mamba models on ImageNet
+classification. Their reading: Mamba suits long sequences and causal processing, and $224 \times 224$ classification
+has neither. On detection and segmentation, with higher resolutions and longer sequences, MambaOut fell short of the
+best visual Mamba models. The comparison with convolution and attention in vision is in
+<NoteLink to="convolution-versus-attention-in-vision" />.
+
+### Scan orders
+
+A scan order is a permutation of the grid's cells. Two numbers summarise it: how far apart neighbouring cells land in
+the sequence, and which cells each output can see.
+
+- **Raster** (row by row) keeps horizontal neighbours adjacent and puts vertical ones a whole row apart. The last cell
+  of a row is followed by the first of the next, a jump across the image.
+- **Snake** (boustrophedon) reverses every second row, so consecutive cells are always neighbours. Vertical neighbours
+  are still far apart, except near the turns.
+- **Several routes** (VMamba's row and column scans, both ways) make every neighbour adjacent on some route, at four
+  times the scan cost.
+- **Space-filling curves** such as the Hilbert curve keep every aligned $2^k \times 2^k$ block contiguous. They make
+  most neighbours adjacent but separate a few pairs that straddle block boundaries by large distances.
+
+A single forward scan lets the output at a cell see only the cells before it; running each route in both directions,
+or adding a reversed route, makes the whole grid visible.
+
+<ScanOrders />
+
+### Audio
+
+SaShiMi stacks S4 layers in a multi-scale architecture for raw waveforms, pooling the sequence down and up between
+stages as a U-Net does <Cite id="goel2022sashimi" />. S4 can become unstable when run as a recurrence for
+autoregressive generation, and SaShiMi parameterises the state matrix so that it stays stable (a Hurwitz matrix, all
+eigenvalues with negative real part). On unconditional speech generation its mean opinion score was about twice
+WaveNet's, and on music it beat WaveNet in likelihood and speed with 3 times fewer parameters. The causal convolutions
+it replaced are in <NoteLink to="wavenet-and-causal-convolution" />.
+
+### Genomes
+
+DNA is long, has four letters, and has no preferred direction: the two strands are reverse complements of each other,
+and a gene can sit on either. <NoteLink to="long-convolution-models">HyenaDNA</NoteLink> models single nucleotides with
+contexts up to a million tokens using Hyena operators <Cite id="nguyen2023hyenadna" />.
+
+**Caduceus** builds two symmetries into Mamba <Cite id="schiff2024caduceus" />:
+
+- **BiMamba** runs one Mamba module on the sequence and on its reversed copy, flips the second output back, and adds
+  the two. The input and output projections, which hold most of the parameters, are shared between the directions.
+- **Reverse-complement equivariance.** The MambaDNA block splits the channels in two. One half goes through Mamba
+  directly; the other is reverse-complemented, passed through the same Mamba, and reverse-complemented back. A sequence
+  and its reverse complement then give mirrored outputs.
+
+Pretrained on the human genome with sequences of up to 131,072 base pairs, Caduceus outperformed models ten times its
+size that lack either symmetry on long-range variant effect prediction.
+
+**Evo** is a 7B model trained on 2.7 million prokaryotic and phage genomes at single-nucleotide resolution, with a
+131K-token context <Cite id="nguyen2024evo" />. Its architecture, StripedHyena, is a hybrid of Hyena long-convolution
+layers and rotary attention layers, the pattern of <NoteLink to="hybrid-sequence-models" /> applied to DNA. It
+generated functional CRISPR-Cas systems and sequences of over 650,000 nucleotides.
+
+### Time series
+
+A multivariate time series has two axes, time and variables, and neither is text-like. S-Mamba embeds each variable's
+whole history as one token with a linear layer, runs a bidirectional Mamba layer across the variables to mix them, and a
+feed-forward layer for the temporal pattern <Cite id="wang2024smamba" />. On 13
+<NoteLink to="forecasting-datasets">forecasting datasets</NoteLink> it matched or beat transformer forecasters at lower
+cost. "State-space model" has an older meaning in forecasting, a probabilistic model with a latent state filtered by the
+<NoteLink to="kalman-filter">Kalman filter</NoteLink>, covered in <NoteLink to="deep-state-space-models" />; the layers
+here are deterministic sequence-mixing layers that share its linear recurrence.
+
+## Worked example
+
+Take an $8 \times 8$ grid of patches, numbered row by row, $r \times 8 + c$ for row $r$ and column $c$ from 0. There
+are 112 pairs of horizontal or vertical neighbours: 56 of each.
+
+1. **Raster.** The position of cell $(r, c)$ is $8r + c$. Horizontal neighbours differ by 1 and vertical neighbours by
+   8. The mean distance is $(56 \times 1 + 56 \times 8)/112 = 4.5$.
+2. **Snake.** Row $r$ runs left to right if $r$ is even and right to left if odd, so cell $(r, c)$ is at $8r + c$ or
+   $8r + 7 - c$. Horizontal neighbours still differ by 1. Between rows $r$ (even) and $r + 1$ at column $c$, the
+   distance is $(8r + 15 - c) - (8r + c) = 15 - 2c$, which runs 15, 13, …, 1 across the columns; from an odd row it is
+   $1 + 2c$. Both average 8, so the mean is still 4.5, but 63 of the 112 pairs are at distance 1, against 56 for raster,
+   and the largest distance grows from 8 to 15.
+3. **Rows and columns, both ways.** The column route puts vertical neighbours at distance 1. Taking the smaller
+   distance over the routes, all 112 pairs are at distance 1.
+4. **Hilbert curve.** Also 63 pairs at distance 1, and a mean of 5.07. All 96 pairs inside one of the four
+   $4 \times 4$ quadrants are at most 13 steps apart. The 16 pairs that straddle a quadrant boundary range from 1 to 53
+   steps; the four worst are horizontal neighbours across the boundary between the top two quadrants, 43 to 53 steps
+   apart, because the curve fills the top-left quadrant first and the top-right quadrant last.
+5. **What one output sees.** Take the patch at row 4, column 3, cell 35. A single forward raster scan reaches it at
+   position 35, so its output depends on cells 0 to 35: 36 of the 64 patches, the four rows above and the first four
+   cells of its own row. Adding the backward scan makes all 64 visible.
+
+A selective scan can hold a state for a long time when its step is small, so distance in the sequence does not cut a
+pair off; it makes their interaction depend on what the layer chose to keep in between.
+
+## Assumptions
+
+- **Long inputs.** The efficiency case assumes sequences long enough that attention's quadratic cost dominates; at
+  $224 \times 224$ with 196 patches it does not.
+- **A useful order.** A 1-D scan assumes the order carries locality. Patches have it in 2-D; sets, such as point clouds
+  or the variables of a <NoteLink to="time-series">time series</NoteLink>, have no natural order, and the result can
+  depend on the one chosen.
+- **Shared parameters across routes and strands.** Bidirectional and reverse-complement designs assume the same
+  dynamics apply in both directions.
+
+## Pitfalls
+
+- **Causal layers on non-causal data.** A forward-only scan gives the first patch or nucleotide no context; use both
+  directions or a reverse-complement design.
+- **Scan order as a hidden hyperparameter.** Comparisons between visual SSMs often change the order, the number of
+  routes and the backbone at once. The four-route scan also costs four scans.
+- **Benchmarks that do not need long range.** ImageNet classification at $224 \times 224$ is short; MambaOut matched it
+  without any state-space layer <Cite id="yu2024mambaout" />.
+- **Two meanings of "state-space model".** The forecasting literature uses the term for probabilistic latent-state
+  models; check which is meant.

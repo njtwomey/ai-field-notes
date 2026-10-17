@@ -1,0 +1,160 @@
+---
+title: 'Point cloud networks'
+kind: concept
+summary: 'PointNet applies one shared MLP to each 3-D point and max-pools over points, so the output ignores point order; the points that win the max form a critical set. PointNet++ and DGCNN add local neighbourhoods by grouping or by $k$-nearest-neighbour graphs.'
+tags: [geometric-deep-learning, deep-learning, computer-vision, worked-example]
+aliases: ['PointNet', 'PointNet++', 'DGCNN', 'dynamic graph CNN', 'critical point set']
+requires: [deep-sets]
+related:
+  [
+    message-passing-neural-network,
+    euclidean-equivariant-graph-network,
+    canonicalisation-and-frame-averaging,
+    three-dimensional-data,
+    k-nearest-neighbours,
+  ]
+references: [qi2017pointnet, qi2017pointnetplusplus, wang2019dgcnn, wu2024ptv3, zaheer2017]
+status: draft
+updated: 2026-10-17
+---
+
+import { PointNetCriticalPoints } from './PointNetCriticalPoints'
+
+<Definition>
+A point cloud is a set of $n$ points $\xvec_i \in \reals^3$, often with extra features per point such as colour or a
+surface normal. PointNet maps it to a global feature
+
+$$
+\gvec = \max_{i = 1, \dots, n} h(\xvec_i) \in \reals^K,
+$$
+
+where $h$ is one <Gloss name="mlp" /> shared by every point and the maximum is taken separately in each of the $K$
+channels; a second network $\gamma$ maps $\gvec$ to class scores <Cite id="qi2017pointnet" />. The output does not
+depend on the order of the points. PointNet++ and the dynamic graph <Gloss name="cnn" /> (DGCNN) apply the same
+construction to local neighbourhoods.
+</Definition>
+
+## Intuition
+
+A LiDAR scan, a depth camera or a photogrammetry pipeline returns a list of 3-D points. The list has no grid and no
+order, the number of points varies from scan to scan, and the density varies across one scan. Voxelising the points
+into a 3-D grid makes a <NoteLink to="convolutional-layer">convolution</NoteLink> possible, but the grid is mostly empty
+and its memory grows with the cube of the resolution. Rendering the cloud to images from several viewpoints works for
+classification but loses the 3-D geometry.
+
+PointNet treats the cloud as what it is, a set, and uses the recipe of <NoteLink to="deep-sets" />: process each point
+alone with a shared network, then pool. It pools with a maximum. Each of the $K$ channels of $h$ learns to respond to
+some region or direction of space, and the maximum keeps, for each channel, the strongest response anywhere in the
+cloud. The global feature summarises the shape by its extreme responses, and a small number of points carry them.
+
+## PointNet
+
+The per-point network $h$ lifts each point from 3 to $K$ dimensions; PointNet uses layers of widths 64, 64, 64, 128 and
+1024, so $K = 1024$. The max pool gives $\gvec \in \reals^{1024}$, and a classifier with layers of 512 and 256 units
+maps it to class scores. For segmentation, the network concatenates $\gvec$ to every point's own feature and applies a
+second shared MLP, so each point's label depends on both its local feature and the whole shape.
+
+Two results explain why the maximum works <Cite id="qi2017pointnet" />:
+
+- **Universal approximation.** Any continuous function of point sets, continuous in the Hausdorff distance, can be
+  approximated to any accuracy by $\gamma(\max_i h(\xvec_i))$ with $K$ large enough. The construction partitions space
+  into small cells and lets each channel of $h$ detect whether some point falls in its cell.
+- **Critical point set.** For every cloud $S$ there is a subset $\Ccal_S \subseteq S$ with $\abs{\Ccal_S} \le K$ such
+  that the output is the same for every cloud $T$ with $\Ccal_S \subseteq T \subseteq \Ncal_S$, where $\Ncal_S$ is the
+  largest set with the same channel maxima. The critical points are the winners of the $K$ maxima. Removing any other
+  point, or adding points whose responses stay below the maxima, changes nothing.
+
+The second result is a direct reading of the maximum. Channel $c$ of $\gvec$ is $\max_i h_c(\xvec_i)$, attained at some
+point $i_c$. Removing a point that is not one of $i_1, \dots, i_K$ leaves every maximum, and so $\gvec$ and the output,
+unchanged. There are at most $K$ distinct winners. The critical points of trained networks sit on the outline of the
+object, a skeleton of its shape.
+
+PointNet also predicts a $3 \times 3$ matrix from the cloud with a small PointNet of its own (the T-net) and multiplies
+the points by it, to bring them to a canonical pose; a second T-net aligns the 64-dimensional features. On ModelNet40,
+classification of 40 object categories from 1,024 points per object, max pooling alone gave 87.1% accuracy and the full
+model with both transforms 89.2% <Cite id="qi2017pointnet" />. With half the points removed at random, accuracy fell by
+3.8 points.
+
+<PointNetCriticalPoints />
+
+## Local structure: PointNet++ and DGCNN
+
+PointNet sees each point alone until the global maximum. It has no notion of a neighbourhood, so it cannot build up
+local features such as corners or edges the way stacked convolutions do. Two families add locality.
+
+**PointNet++** builds a hierarchy <Cite id="qi2017pointnetplusplus" />. A set abstraction layer picks $n'$ centres by
+farthest point sampling, which spreads them evenly over the cloud; gathers the points within a radius $r$ of each centre
+(a ball query); and runs a small PointNet on each group, with coordinates taken relative to the centre. The output is a
+smaller cloud of $n'$ points, each with a feature describing its neighbourhood. Repeating with larger radii gives
+features of growing scale, as pooling layers do in a CNN. Grouping at several radii per layer handles varying density.
+
+**DGCNN** builds a graph <Cite id="wang2019dgcnn" />. Each point is joined to its $k$ nearest neighbours, and an
+EdgeConv layer updates it by
+
+$$
+\hvec_i' = \max_{j \in \Ncal_k(i)} \text{MLP}\paren{\hvec_i, \hvec_j - \hvec_i},
+$$
+
+a <NoteLink to="message-passing-neural-network">message passing</NoteLink> step whose message sees the point and its
+offset to a neighbour. The graph is rebuilt after every layer from the current features, not the coordinates, so points
+far apart in space but similar in feature space become neighbours.
+
+Large outdoor and indoor scenes, with $10^5$ to $10^6$ points, are handled today by sparse voxel convolutions and by
+point transformers that attend within local windows. Point Transformer V3 orders the points along space-filling curves
+and attends within fixed-size windows of that order, which avoids neighbour search and scales to large scenes
+<Cite id="wu2024ptv3" />.
+
+## Worked example
+
+Take four points in the plane, $A = (1, 0)$, $B = (0, 2)$, $C = (-1, -1)$ and $D = (0.2, 0.3)$, and a per-point network
+with $K = 4$ channels,
+
+$$
+h(x, y) = \paren{\max(0, x),\ \max(0, y),\ \max(0, -x),\ \max(0, -y)}.
+$$
+
+**Per-point features.** $h(A) = (1, 0, 0, 0)$, $h(B) = (0, 2, 0, 0)$, $h(C) = (0, 0, 1, 1)$ and
+$h(D) = (0.2, 0.3, 0, 0)$.
+
+**Max pool.** Channel by channel,
+
+$$
+\gvec = \paren{\max(1, 0, 0, 0.2),\ \max(0, 2, 0, 0.3),\ \max(0, 0, 1, 0),\ \max(0, 0, 1, 0)} = (1, 2, 1, 1).
+$$
+
+The four channels are the rightmost, topmost, leftmost and bottommost extents of the cloud, measured
+from the origin. A classifier $\gamma$ can read the width $g_1 + g_3 = 2$ and the height $g_2 + g_4 = 3$ of the bounding
+box from them.
+
+**Critical set.** Channel 1 is won by $A$, channel 2 by $B$, and channels 3 and 4 by $C$. The critical set is
+$\set{A, B, C}$, three points, within the bound $\abs{\Ccal_S} \le K = 4$.
+
+**Remove a non-critical point.** Without $D$, the maxima are still $(1, 2, 1, 1)$. So is the output. Moving $D$ anywhere
+inside the box $[-1, 1] \times [-1, 2]$, or adding any number of points inside it, changes nothing either.
+
+**Remove a critical point.** Without $B$, channel 2 falls to $\max(0, 0, 0.3) = 0.3$, the next-highest response, which
+is $D$'s. $D$ becomes critical, and the global feature is $(1, 0.3, 1, 1)$.
+
+**Order.** Listing the points as $D, C, B, A$ gives the same four maxima.
+
+## Assumptions
+
+- **The cloud samples a surface well enough.** The critical points must survive in the input. Very sparse or partial
+  scans can miss the extremes the network relies on.
+- **Coordinates are in a consistent frame and scale.** PointNet is not invariant to rotation, translation or scale.
+  Inputs are centred and scaled to the unit sphere, and rotations are handled by augmentation, by the T-net, or by an
+  <NoteLink to="euclidean-equivariant-graph-network">equivariant network</NoteLink>.
+- **Local geometry matters less than global shape** for plain PointNet. Tasks that depend on fine local structure need
+  PointNet++, DGCNN or a point transformer.
+
+## Pitfalls
+
+- **Rotation sensitivity.** A PointNet trained on upright objects fails on rotated ones; the figure shows the drop when
+  the training shapes are rotated and few. Augmenting with rotations teaches approximate invariance at the cost of
+  capacity; <NoteLink to="canonicalisation-and-frame-averaging" /> gives exact alternatives.
+- **Outliers can become critical.** A stray point far from the object wins the channels that respond in its direction,
+  and the global feature then describes the outlier.
+- **Non-uniform density.** Ball queries with one radius find too few neighbours in sparse regions and too many in dense
+  ones; PointNet++ uses several radii for this reason.
+- **Neighbour search cost.** $k$-nearest-neighbour graphs over $n$ points cost $O(n^2)$ by brute force, which dominates
+  DGCNN on large clouds; spatial trees, voxel hashing or serialisation reduce it.

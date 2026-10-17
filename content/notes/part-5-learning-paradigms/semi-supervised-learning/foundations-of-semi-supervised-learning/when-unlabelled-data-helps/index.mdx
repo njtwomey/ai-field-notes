@@ -1,0 +1,217 @@
+---
+title: 'When unlabelled data helps'
+kind: concept
+summary: 'Sample-complexity results for semi-supervised learning: if the target is compatible with the input distribution, unlabelled data shrink the effective hypothesis class and cut the labels needed; with no such assumption the saving is small, at most a factor of 2 for thresholds.'
+tags: [semi-supervised, learning-theory, sample-complexity, worked-example]
+aliases: ['value of unlabelled data', 'compatibility function', 'value of unlabeled data']
+requires: [semi-supervised-assumptions, probably-approximately-correct-learning]
+related:
+  [
+    generative-semi-supervised-learning,
+    when-semi-supervised-learning-fails,
+    occam-bound,
+    realisable-and-agnostic-learning,
+    transductive-and-inductive-learning,
+    low-density-separation,
+  ]
+references: [balcan2010discriminative, castelli1995exponential, castelli1996relative, bendavid2008unlabeled, darnstadt2013unlabeled, singh2008unlabeled, mey2019improvability]
+status: draft
+updated: 2026-10-17
+---
+
+import { ThresholdCurves } from './ThresholdCurves'
+
+<Definition>
+The **value of unlabelled data** for a learning problem is the reduction in the number of labelled examples needed to
+reach a given accuracy when the learner also sees unlabelled inputs. It is measured by comparing two sample
+complexities for a hypothesis class $\Hcal$: the supervised one, $m_{\mathrm{SL}}(\epsilon, \delta)$, and the
+semi-supervised one, $m_{\mathrm{SSL}}(\epsilon, \delta)$, the number of labels needed when unlabelled inputs are free.
+The value is large when the target is **compatible** with the input distribution under a stated assumption, and
+bounded by the capacity of the class (a factor of 2 for thresholds on the line) when nothing is assumed
+<Cite id="balcan2010discriminative" />
+<Cite id="bendavid2008unlabeled" />.
+</Definition>
+
+## Intuition
+
+In <NoteLink to="probably-approximately-correct-learning">PAC learning</NoteLink> the number of labels a learner needs
+grows with the size of the hypothesis class $\Hcal$, through $\ln\abs{\Hcal}$ for a finite class. Labels are spent
+ruling out hypotheses. Unlabelled data can rule out hypotheses too, but only by a criterion that does not use labels:
+a hypothesis that cuts through a dense cluster, or passes close to many inputs, is judged implausible before any label
+is seen. If the criterion is right about the target, the labels have far fewer hypotheses to choose among, and fewer
+labels are needed.
+
+The criterion is a <NoteLink to="semi-supervised-assumptions">semi-supervised assumption</NoteLink>. If it is right,
+the gain can be large: in the best case, unlabelled data fix the shape of the decision regions and the labels only name
+them. If it is wrong, the criterion discards the target, and no number of labels brings it back. If no criterion is
+assumed, theory shows that knowing the input distribution exactly helps by at most a constant factor for basic classes
+on the line.
+
+## Details
+
+### Compatibility and the unlabelled error
+
+Balcan and Blum extend the PAC model with a **compatibility function** $\chi : \Hcal \times \Xcal \to [0, 1]$ that
+scores how well hypothesis $h$ fits input $\xvec$ <Cite id="balcan2010discriminative" />. A margin assumption gives
+$\chi(h, \xvec) = 1$ when $\xvec$ lies at least a distance $\gamma$ from the boundary of $h$ and 0 otherwise; a
+cluster assumption gives $\chi(h, \xvec) = 1$ when $h$ labels the whole cluster containing $\xvec$ alike. The
+**unlabelled error** of $h$ is its expected incompatibility,
+
+$$
+\mathrm{err}_{\mathrm{unl}}(h) = 1 - \expect_{\xvec \sim D}[\chi(h, \xvec)],
+$$
+
+with $D$ the input distribution. It is estimated from unlabelled inputs alone. For a tolerance $\tau \in [0, 1]$, the
+**compatible class** is
+
+$$
+\Hcal_{D, \chi}(\tau) = \set{h \in \Hcal : \mathrm{err}_{\mathrm{unl}}(h) \le \tau}.
+$$
+
+A distribution is helpful for $\chi$ when $\Hcal_{D, \chi}(\tau)$ is much smaller than $\Hcal$ for small $\tau$.
+
+### The labels needed when the target is compatible
+
+Take a finite class $\Hcal$ and assume the **doubly realisable** case: the target $c^* \in \Hcal$ has zero error and
+zero unlabelled error. The learner keeps the hypotheses that have zero empirical unlabelled error on $u$ unlabelled
+inputs and zero training error on $\ell$ labelled examples, and returns any one of them.
+
+1. A hypothesis with $\mathrm{err}_{\mathrm{unl}}(h) > \epsilon$ looks fully compatible on $u$ independent inputs with
+   probability at most $(1 - \epsilon)^u \le e^{-\epsilon u}$. By the <NoteLink to="union-bound">union bound</NoteLink>
+   over $\Hcal$, all such hypotheses are discarded with probability at least $1 - \delta/2$ once
+   $\abs{\Hcal}e^{-\epsilon u} \le \delta/2$.
+2. The survivors then lie in $\Hcal_{D, \chi}(\epsilon)$. A survivor with error above $\epsilon$ is consistent with
+   $\ell$ labelled examples with probability at most $e^{-\epsilon\ell}$, and the union bound over
+   $\Hcal_{D, \chi}(\epsilon)$ discards all of them with probability at least $1 - \delta/2$ once
+   $\abs{\Hcal_{D, \chi}(\epsilon)}e^{-\epsilon \ell} \le \delta/2$.
+
+Solving both conditions gives Balcan and Blum's Theorem 4:
+
+$$
+u \ge \frac{1}{\epsilon}\left(\ln\abs{\Hcal} + \ln\frac{2}{\delta}\right), \qquad
+\ell \ge \frac{1}{\epsilon}\left(\ln\abs{\Hcal_{D, \chi}(\epsilon)} + \ln\frac{2}{\delta}\right)
+$$
+
+suffice for every returned hypothesis to have error at most $\epsilon$ with probability at least $1 - \delta$
+<Cite id="balcan2010discriminative" />. The supervised bound for the same class is
+$\ell \ge (\ln\abs{\Hcal} + \ln(1/\delta))/\epsilon$. The unlabelled sample pays the cost of the whole class; the
+labelled sample pays only for the compatible part. The same paper extends the result to infinite classes, with growth
+functions of $\Hcal_{D, \chi}$ in place of its size, and to targets that are only partly compatible, for which the
+compatible class must be widened to tolerance $\mathrm{err}_{\mathrm{unl}}(c^*) + 2\epsilon$.
+
+### Identifiable mixtures: exponentially fewer labels
+
+Castelli and Cover studied the strongest form of the cluster assumption. The inputs come from a two-component mixture
+$p(\xvec) = \eta f_1(\xvec) + (1 - \eta) f_0(\xvec)$, one component per class, and the family of mixtures is
+**identifiable**: unlabelled data determine $\eta$, $f_0$ and $f_1$, up to which component is which. With unlimited
+unlabelled data, only one binary question remains, and a likelihood-ratio test on $n$ labelled examples answers it. The
+excess risk then falls exponentially in $n$,
+
+$$
+R(\hat h_n) - R^* \le \exp\left(n \ln\left(2\sqrt{\eta(1 - \eta)} \int \sqrt{f_0(\xvec) f_1(\xvec)}\, d\xvec\right) + o(n)\right),
+$$
+
+with $R^*$ the Bayes risk <Cite id="castelli1995exponential" /> <Cite id="mey2019improvability" />. A supervised
+learner on the same problem has an excess risk that falls polynomially in $n$. Labelled examples are exponentially
+valuable once the unlabelled data have done their part; Castelli and Cover later measured the relative value of the
+two kinds of sample when the mixing proportion $\eta$ is unknown <Cite id="castelli1996relative" />.
+
+### No assumption: a constant factor at most
+
+Ben-David, Lu and Pál asked what knowing $D$ exactly is worth when nothing links $D$ to the labels
+<Cite id="bendavid2008unlabeled" />. For thresholds $h_t(x) = \indicator[x \le t]$ on the real line in the realisable
+case, a supervised learner needs $\ln(1/\delta)/\epsilon$ labels. Any semi-supervised learner that knows an absolutely
+continuous $D$ still needs at least about $\ln(1/\delta)/(2.01\,\epsilon)$ for some target. Knowing the whole input
+distribution saves at most a factor of 2. A learner of Kääriäinen achieves it by returning the threshold that splits the
+interval of consistent thresholds into two halves of equal probability under $D$. The authors conjectured a
+constant-factor limit for every class. Darnstädt, Simon and Szörényi proved a limit that depends on the class: for a
+finite class containing both constant functions the gap is at most $O(\ln\abs{\Hcal})$, and a class of finite
+<NoteLink to="vapnik-chervonenkis-dimension">VC dimension</NoteLink> has a similar bound, but for classes of infinite VC
+dimension the gap can be arbitrarily large <Cite id="darnstadt2013unlabeled" />. Without an assumption tying labels to
+$D$, the value of unlabelled data is bounded by the capacity of the class.
+
+### Finite samples under the cluster assumption
+
+Singh, Nowak and Zhu make the cluster assumption quantitative in $d$ dimensions <Cite id="singh2008unlabeled" />. The
+classes are unions of regions separated by a margin $\gamma$. With $m$ unlabelled inputs, the regions can be resolved
+when $\gamma$ is larger than a scale of order $(\ln^2 m / m)^{1/d}$.
+<NoteLink to="semi-supervised-learning">Semi-supervised learning</NoteLink> can beat every supervised learner when the
+margin is resolvable from the unlabelled data but too small to be found from the labelled data alone. When the margin is
+large, labelled data find it unaided; when it is smaller than the unlabelled data can resolve, neither finds it.
+Unlabelled data help in a window of margins, and the window moves with $m$.
+
+## Worked example
+
+Take inputs on a grid of 1000 points in $[0, 1]$. The class $\Hcal$ is the unions of at most 5 intervals of grid
+points, each union fixed by at most 10 endpoints chosen among 1001 positions, so
+$\abs{\Hcal} \approx \binom{1001}{10}$ and
+
+$$
+\ln\abs{\Hcal} \approx \sum_{k=992}^{1001} \ln k - \ln 10! = 69.04 - 15.10 = 53.94 .
+$$
+
+Take $\epsilon = 0.05$ and $\delta = 0.05$, so $1/\epsilon = 20$.
+
+**Supervised.** In the realisable case, $\ell \ge 20(53.94 + \ln 20) = 20(53.94 + 3.00) = 1138.7$, so 1139 labels
+suffice.
+
+**Semi-supervised, compatible target.** Suppose $D$ puts probability $0.1$ on each of 10 clusters separated by empty
+gaps, and the target labels every cluster alike. Use the cluster compatibility: $\chi(h, x) = 1$ when $h$ gives the
+whole cluster of $x$ one label. A hypothesis that splits a cluster has unlabelled error at least $0.1 > \epsilon$, so
+$\Hcal_{D, \chi}(\epsilon)$ holds only hypotheses that split no cluster. Up to differences on the empty gaps, these
+are labellings of the 10 clusters, at most $2^{10} = 1024$ of them, and $\ln 1024 = 6.93$. Theorem 4 gives
+
+$$
+\ell \ge 20\left(6.93 + \ln 40\right) = 20(6.93 + 3.69) = 212.4,
+\qquad
+u \ge 20\left(53.94 + 3.69\right) = 1152.5 .
+$$
+
+So 213 labels and 1153 unlabelled inputs suffice, against 1139 labels without the unlabelled data: about 5.3 times
+fewer labels. The bound uses the cluster structure only through the count 1024; the true requirement is lower, since
+one label per cluster would name all of them.
+
+**Uniform inputs.** If $D$ is uniform on $[0, 1]$, the inputs form no clusters, and a cluster compatibility removes no
+hypothesis. Ben-David, Lu and Pál's result for thresholds says that in this case even the exact $D$ is worth at most a
+halving of the labels.
+
+**The figure.** The same contrast appears on the real line with a threshold learner. The supervised learner returns the
+midpoint of the interval of thresholds with the fewest training errors. The semi-supervised learner restricts itself to
+the troughs of a <NoteLink to="kernel-density-estimation">kernel density estimate</NoteLink> of the unlabelled inputs
+(its compatible class) and picks the trough with the fewest training errors. With two Gaussian classes
+$\Gauss(\mp 2, 1)$, separation $s = 4$, the Bayes risk is $\Phi(-2) = 0.0228$. Averaged over 100 draws with $u = 200$,
+the supervised risk falls from $0.050$ at one label per class to $0.027$ at 64, and the semi-supervised risk is $0.024$
+from one label per class on. For these two classes the mixture bound of Castelli and Cover has rate
+$2\sqrt{\eta(1-\eta)}\int\sqrt{f_0 f_1} = e^{-s^2/8} = e^{-2}$, so the excess risk of the mixture learner falls like
+$e^{-2n}$. With uniform inputs and true boundary $t^* = 0.3$, the troughs of the estimate are noise and miss $t^*$: the
+supervised risk falls from $0.124$ to $0.004$, and the semi-supervised risk stays between $0.14$ and $0.17$ however many
+labels it gets.
+
+<ThresholdCurves />
+
+## Assumptions
+
+- **Compatibility of the target.** All the gains above assume $\mathrm{err}_{\mathrm{unl}}(c^*)$ is zero or small. The
+  assumption is about the labels, so unlabelled data cannot check it.
+- **Same distribution.** Unlabelled and labelled inputs come from the same $D$; otherwise $\Hcal_{D, \chi}$ is
+  computed for the wrong distribution.
+- **Enough unlabelled data.** The labelled bound holds only once $u$ is large enough to estimate the unlabelled error
+  of every hypothesis, which costs $\ln\abs{\Hcal}/\epsilon$ inputs. In the mixture result the unlabelled sample is
+  infinite; with finite $u$, the estimated components carry an error that the labels cannot remove, and the figure
+  with $u = 20$ shows the semi-supervised learner losing its advantage.
+
+## Pitfalls
+
+- **Reading the bounds as predictions.** The bounds are worst-case sufficient conditions. A five-fold smaller bound is
+  not a five-fold smaller error; experiments with a tuned supervised baseline are the test (see
+  <NoteLink to="evaluating-semi-supervised-learning">evaluating semi-supervised learning</NoteLink>).
+- **An incompatible target is fatal, not neutral.** The compatible class excludes the target, so the learner converges
+  to the best compatible hypothesis, whose error does not shrink with more labels. This is the uniform panel of the
+  figure and the subject of <NoteLink to="when-semi-supervised-learning-fails">when semi-supervised learning
+  fails</NoteLink>.
+- **Constant factors still matter.** A factor of 2 in labels is a factor of 2 in annotation cost. The worst-case
+  results bound the gain without assumptions; they do not say the gain is worthless.
+- **Capacity and the gap.** The largest gaps proved without assumptions use classes of infinite VC dimension
+  <Cite id="darnstadt2013unlabeled" />. For the finite-capacity models used in practice, large gains come from
+  assumptions, which is why every practical method is designed around one (<NoteLink
+  to="semi-supervised-assumptions">semi-supervised assumptions</NoteLink>).

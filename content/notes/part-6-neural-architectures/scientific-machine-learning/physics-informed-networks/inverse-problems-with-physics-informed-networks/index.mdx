@@ -1,0 +1,182 @@
+---
+title: 'Inverse problems with physics-informed networks'
+kind: technique
+summary: 'An unknown coefficient of the equation, such as a viscosity, damping or diffusivity, becomes a trainable parameter next to the network weights and is fitted from sparse noisy observations. Identifiability, noise and where data are observed decide whether recovery works.'
+tags: [scientific-machine-learning, differential-equations, worked-example]
+aliases: ['PINN parameter identification', 'inverse PINN', 'coefficient recovery', 'parameter identification with PINNs']
+requires: [physics-informed-neural-networks]
+related: [physics-informed-network-for-burgers-equation, physics-informed-network-for-the-heat-equation, sparse-identification-of-nonlinear-dynamics, universal-differential-equations, tikhonov-regularisation, loss-balancing-for-physics-informed-networks]
+references: [raissi2019, raissi2017discovery, karniadakis2021]
+status: draft
+updated: 2026-10-17
+---
+
+import { RecoverDiffusivity } from './RecoverDiffusivity'
+
+<Definition>
+In an **inverse problem** a differential equation $\mathcal{N}_{\boldsymbol{\lambda}}[u] = 0$ is known up to a vector of
+coefficients $\boldsymbol{\lambda}$, and observations $y_l \approx u(\xvec_l)$ of its solution are given. A
+<NoteLink to="physics-informed-neural-networks">physics-informed network</NoteLink> solves it by making
+$\boldsymbol{\lambda}$ trainable next to the network's parameters $\thetavec$ and minimising one loss: the mean squared
+residual $\mathcal{N}_{\boldsymbol{\lambda}}[u_{\thetavec}]$ at collocation points plus the mean squared misfit to the
+observations and to any known conditions <Cite id="raissi2019" />. The fit returns an estimate of the coefficients and
+a solution consistent with them.
+</Definition>
+
+## Problem
+
+A coefficient of a physical law is often what an experiment is for: the viscosity of a fluid, the damping of a
+structure, the diffusivity of a material. The solution is observed at a few places and times, with noise, and the
+coefficient is not observed at all. The classical approach nests two loops. An outer optimiser proposes a value of the
+coefficient; an inner solver computes the solution for that value; the misfit to the data scores the proposal. Every
+outer step costs a full forward solve, and the gradient of the misfit with respect to the coefficient needs either
+<Gloss name="finite-difference">finite differences</Gloss> over solves or an adjoint equation derived for the problem.
+
+A physics-informed network removes the inner loop. The network represents the solution, the coefficient is one more
+parameter, and one gradient method fits both together. The same code solves the forward problem when the coefficient is
+fixed and the inverse problem when it is free.
+
+## Mechanism
+
+Take an equation with coefficients $\boldsymbol{\lambda}$, collocation points $\xvec_i$, $i = 1, \dots, N_r$, and
+observations $(\xvec_l, y_l)$, $l = 1, \dots, N_d$. The loss is
+
+$$
+L(\thetavec, \boldsymbol{\lambda}) = \frac{1}{N_r}\sum_{i=1}^{N_r} \mathcal{N}_{\boldsymbol{\lambda}}[u_{\thetavec}](\xvec_i)^2
+  + \frac{\lambda_d}{N_d}\sum_{l=1}^{N_d} \paren{u_{\thetavec}(\xvec_l) - y_l}^2 + L_{\text{conditions}}(\thetavec),
+$$
+
+where $L_{\text{conditions}}$ holds the misfits to the initial and boundary values that are known, and $\lambda_d$
+weights the data. The data term pins the network to the observations. The residual term forces the network, between
+the observations, to be a solution of the equation for the current $\boldsymbol{\lambda}$. The two are compatible only
+near the true coefficients, so minimising both moves $\boldsymbol{\lambda}$ there.
+
+**The coefficient's gradient.** For a residual linear in a coefficient, $r = u_t - \kappa u_{xx}$ for the
+<NoteLink to="heat-equation">heat equation</NoteLink>, the derivative of the residual term is
+
+$$
+\frac{\partial L_r}{\partial \kappa} = -\frac{2}{N_r} \sum_{i=1}^{N_r} r_i \, u_{xx}(\xvec_i).
+$$
+
+It is the correlation of the residual with the coefficient's own term: $\kappa$ grows when the residual is positive
+where $u_{xx}$ is positive, the signature of too little diffusion. For a fixed network the residual term is a
+least-squares problem in $\kappa$ with minimiser
+
+$$
+\kappa^\star = \frac{\sum_i u_t(\xvec_i)\, u_{xx}(\xvec_i)}{\sum_i u_{xx}(\xvec_i)^2}.
+$$
+
+**Positivity and scale.** A diffusivity or a viscosity must be positive and may be orders of magnitude from 1. Writing
+$\kappa = e^{s}$ and training $s$ keeps it positive and makes a step in $s$ a relative change in $\kappa$. Raissi et al.
+fitted $\nu$ in <NoteLink to="physics-informed-network-for-burgers-equation">Burgers' equation</NoteLink> this way
+<Cite id="raissi2017discovery" />.
+
+**Identifiability.** A coefficient is identifiable from the data when changing it changes the observable solution. The
+sensitivity $\partial u / \partial \kappa$ at the observation points measures it. With Gaussian noise of standard
+deviation $\sigma$ and the rest of the problem known, the best possible <NoteLink to="standard-error">standard
+error</NoteLink> of $\kappa$ is $\sigma / \sqrt{\sum_l (\partial u(\xvec_l) / \partial \kappa)^2}$, the Cramér-Rao
+bound. For the heat equation's solution $u = e^{-\kappa \pi^2 t} \sin \pi x$, the sensitivity is $-\pi^2 t \, u$: zero
+at $t = 0$ and growing with time. Observations confined to early times identify $\kappa$ poorly, however many there are.
+
+**Unknown conditions.** When the initial profile or the boundary values are unknown too, their terms leave the loss and
+the observations must determine them. The equation then constrains the network only as far as the data reach.
+
+## Worked example
+
+Suppose the network has been trained for a while and has, at three collocation points, the input derivatives
+
+| point | $u_{xx}$ | $u_t$ |
+| --- | --- | --- |
+| 1 | $-6.0$ | $-0.62$ |
+| 2 | $-8.0$ | $-0.78$ |
+| 3 | $-3.0$ | $-0.31$ |
+
+The best coefficient for these derivatives is
+
+$$
+\kappa^\star = \frac{(-0.62)(-6.0) + (-0.78)(-8.0) + (-0.31)(-3.0)}{6.0^2 + 8.0^2 + 3.0^2}
+  = \frac{3.72 + 6.24 + 0.93}{36 + 64 + 9} = \frac{10.89}{109} = 0.0999 .
+$$
+
+A current estimate of $\kappa = 0.5$ gives residuals $r = u_t - 0.5\, u_{xx} = 2.38, 3.22, 1.19$, all positive where
+$u_{xx}$ is negative. The gradient $\partial L_r / \partial \kappa = -\tfrac{2}{3}(2.38 \times (-6.0) + 3.22 \times
+(-8.0)
++ 1.19 \times (-3.0)) = 29.1$ is positive, so a gradient step lowers $\kappa$ towards $\kappa^\star$.
+
+The denominator $\sum u_{xx}^2 = 109$ is the coefficient's leverage. If the three points sat where the solution is
+nearly straight, with $u_{xx} \approx 0$, the denominator would vanish and every value of $\kappa$ would fit the
+residual equally well: the coefficient would not be identifiable from those points.
+
+## Simulation
+
+The figure recovers $\kappa$ in the heat equation $u_t = \kappa u_{xx}$ on $[-1, 1] \times [0, 1]$ from
+$u(x, 0) = \sin \pi x$ with zero ends and true $\kappa = 0.1$. The network has two
+<NoteLink to="multilayer-perceptron">hidden layers</NoteLink> of 12 hyperbolic tangent units, the residual uses 64
+collocation points, the coefficient starts at 0.5 and is trained as $\kappa = e^s$, and training is 300
+<NoteLink to="adam">Adam</NoteLink> steps at <Gloss name="learning-rate">learning rate</Gloss> 0.01, then 200
+<Gloss name="l-bfgs" /> steps, about a second and a half.
+
+<RecoverDiffusivity />
+
+With the figure's first data seed, the estimates end as follows. The last column is the Cramér-Rao standard error for
+the same observation points and $\sigma = 0.01$. The column before it repeats the run with a longer budget: two
+hidden layers of 20 units, 128 points, 1000 Adam steps at learning rate 0.005 and 300 L-BFGS steps.
+
+| Observations | Noise $\sigma$ | Data up to $t$ | Initial profile | Estimated $\kappa$ | Longer run | Noise-limited standard error |
+| --- | --- | --- | --- | --- | --- | --- |
+| 50 | 0.01 | 1 | known | 0.0996 | 0.1005 | 0.0008 |
+| 50 | 0.1 | 1 | known | 0.1006 | 0.1030 | |
+| 50 | 0.3 | 1 | known | 0.1086 | 0.1071 | |
+| 10 | 0.01 | 1 | known | 0.0947 | 0.0982 | |
+| 50 | 0.01 | 0.3 | known | 0.0598 | 0.0981 | 0.0017 |
+| 50 | 0.01 | 0.05 | known | 0.0235 | 0.0508 | 0.0086 |
+| 50 | 0.01 | 1 | unknown | 0.0960 | 0.1006 | |
+| 50 | 0.01 | 0.05 | unknown | 0.0314 | 0.0466 | |
+
+With data across the whole time interval the estimate is within 9% of the truth even at 30% noise, because the
+equation averages the noise over the whole solution. With data only up to $t = 0.05$ the estimate is a quarter of the
+truth in the short run and half in the longer one. The noise allows a standard error of 0.0086 there, so even the
+longer run's estimate is almost six standard errors off: the failure is not noise but leverage. Over the first 0.05 time
+units the solution decays by $1 - e^{-0.1 \pi^2 \times 0.05} \approx 5\%$, and small errors of the network's fit move
+$\kappa$ far. The window $t \le 0.3$ is enough with the longer budget and not with the short one: the less leverage
+the data give, the more accurately the network must fit before the coefficient settles. A wrong coefficient gives a
+wrong solution everywhere past the data; the longer run's error against the exact solution is 24% with $t \le 0.05$.
+
+For Burgers' equation $u_t + \lambda_1 u u_x - \lambda_2 u_{xx} = 0$, with 2000 observations scattered over the whole
+domain and a network of 9 layers of 20 units, Raissi et al. recovered $\lambda_1 = 0.99915$ and
+$\lambda_2 = 0.0031794$ against the true $1$ and $0.0031831$ from clean data, and $\lambda_2 = 0.0032098$ with 1%
+noise, an error of 0.8% <Cite id="raissi2017discovery" />.
+
+## Cost
+
+An inverse problem costs about what the forward problem costs: the coefficients add a handful of parameters to
+thousands of weights, and their gradients come from the same backward pass. Observations add a data term, which needs
+no input derivatives. The nested classical approach costs one forward solve per outer iteration and, for gradients,
+one adjoint solve per iteration as well; it is faster when the forward solver is fast and the coefficients few, and
+slower when each solve is expensive.
+
+## Trade-offs
+
+- **One loop against two.** The joint fit avoids nested solves and adjoint derivations. It gives a point estimate with
+  no error bar, where a Bayesian treatment of the classical problem gives a posterior. Bayesian physics-informed
+  networks and ensembles add uncertainty at extra cost <Cite id="karniadakis2021" />.
+- **Weight of the data.** A large $\lambda_d$ fits the noise and lets the residual absorb it into
+  $\boldsymbol{\lambda}$; a small one lets the network solve the equation for a wrong coefficient. The
+  <NoteLink to="loss-balancing-for-physics-informed-networks">loss-balancing</NoteLink> schemes apply.
+- **Fixed form against discovered form.** Fitting coefficients assumes the form of the equation. When the form is
+  unknown, <NoteLink to="sparse-identification-of-nonlinear-dynamics">sparse identification</NoteLink> chooses terms
+  from a library and <NoteLink to="universal-differential-equations">universal differential equations</NoteLink>
+  learn a missing term as a network.
+
+## Pitfalls
+
+- **Unidentifiable coefficients.** Two coefficients that enter the solution only through their product, or a
+  coefficient whose term is near zero where the data are, cannot be separated by any amount of training. The
+  sensitivity of the observations to each coefficient, checked before training, shows it.
+- **Data only where the coefficient does not act.** Early-time data for a decay rate, or smooth-region data for a
+  viscosity that only shapes a front, give the estimate no leverage, as the table's $t \le 0.05$ rows show.
+- **A wrong equation fitted well.** The fit returns the coefficient that best explains the data with the assumed
+  equation. A missing term is absorbed into the coefficients that exist, and the estimate is then biased however low the
+  loss.
+- **Reading the loss as confidence.** A small loss means the network, the equation and the data agree. It does not
+  bound the coefficient's error; the sensitivity and the noise do.

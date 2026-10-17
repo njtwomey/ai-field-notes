@@ -1,0 +1,159 @@
+---
+title: 'Principal neighbourhood aggregation'
+kind: concept
+summary: 'Principal neighbourhood aggregation combines several aggregators (mean, max, min, standard deviation) with degree scalers such as $\log(d+1)/\delta$. One aggregator cannot separate all multisets of real features; several, scaled by degree, separate more of them.'
+tags: [graph-neural-networks, expressivity, worked-example]
+aliases: ['PNA', 'multiple aggregators', 'degree scalers', 'degree-scaled aggregation']
+requires: [graph-isomorphism-network]
+related: [message-passing-neural-network, deep-sets, expressive-power-of-message-passing, molecular-property-prediction-with-graph-networks]
+references: [corso2020pna, rampasek2022gps]
+status: draft
+updated: 2026-10-17
+---
+
+import { AggregatorSeparation } from './AggregatorSeparation'
+
+<Definition>
+Principal neighbourhood aggregation (<Gloss name="pna" form="short" />) is a <Gloss name="gnn">message passing</Gloss>
+layer that summarises the multiset of messages arriving at node $v$ by four statistics, the mean $\mu$, the standard
+deviation $\sigma$, the maximum and the minimum, and multiplies each by three functions of the node's degree $d_v$,
+
+$$
+S(d_v, \alpha) = \paren{\frac{\log(d_v + 1)}{\delta}}^{\alpha}, \qquad \alpha \in \set{0, 1, -1},
+$$
+
+the identity, amplification and attenuation scalers, where $\delta$ is the mean of $\log(d + 1)$ over the training
+graphs' nodes. The twelve results are concatenated and mapped back to the hidden width by a learned update
+<Cite id="corso2020pna" />.
+</Definition>
+
+## Intuition
+
+The <NoteLink to="graph-isomorphism-network">graph isomorphism network</NoteLink> shows that a sum followed by an
+<Gloss name="mlp" /> can identify any multiset of neighbour features, provided the features come from a countable set
+such as atom types. The proof places each possible feature in its own "digit" of a sum. Hidden vectors inside a network
+are real-valued, and the neighbourhoods a layer must tell apart differ by small amounts. A single sum of real numbers
+cannot keep every multiset apart: $\mset{-1, 1}$ and $\mset{-2, 2}$ both sum to 0, and so do infinitely many other
+pairs.
+
+A distribution of real numbers is described by several statistics, not one. Mean and spread, together with the extremes,
+already tell apart many neighbourhoods that any single statistic confuses. PNA applies this idea to message passing: it
+keeps several aggregators side by side and lets the update learn which to use.
+
+The mean and the standard deviation do not change when every neighbour is duplicated, so they lose the number of
+neighbours. Sum keeps it, because a sum is a mean times the degree. PNA restores the degree with a separate factor, and
+uses the logarithm of the degree, so that a node with 1,000 neighbours is not weighted 1,000 times more than a node with
+one.
+
+PNA keeps the message passing template of GIN and changes the aggregation: four statistics instead of one sum, and an
+explicit, logarithmic dependence on degree instead of the implicit, linear one of the sum.
+
+## Details
+
+### Why one aggregator is not enough
+
+Corso et al. prove that separating all multisets of $n$ real numbers needs at least $n$ continuous aggregators
+<Cite id="corso2020pna" />. The reason is dimension. Multisets of $n$ reals correspond to sorted tuples $x_1 \le \dots
+\le x_n$, a region of $\reals^n$ with $n$ free coordinates. A continuous map from that region into $\reals^{k}$ with
+$k < n$ cannot be one-to-one. The $n$ moments of the multiset are $n$ aggregators that do separate all such multisets.
+
+Neighbourhoods in real graphs have many more than four members, so four aggregators do not achieve injectivity either.
+They cover the most common differences: location (mean), spread (standard deviation) and range (maximum and minimum).
+Higher normalised moments $\sqrt[k]{\expect[(X - \mu)^k]}$ can be added for graphs with large degrees.
+
+### The aggregators
+
+For node $v$ with neighbour messages $x_u$, $u \in \Ncal(v)$, and $d_v = \abs{\Ncal(v)}$:
+
+$$
+\mu_v = \frac{1}{d_v}\sum_{u \in \Ncal(v)} x_u, \quad
+\sigma_v = \sqrt{\mathrm{ReLU}\paren{\frac{1}{d_v}\sum_{u \in \Ncal(v)} x_u^2 - \mu_v^2} + \varepsilon}, \quad
+\max_{u \in \Ncal(v)} x_u, \quad \min_{u \in \Ncal(v)} x_u.
+$$
+
+Each is applied to every feature separately. The <Gloss name="relu" /> removes small negative values that rounding
+produces, and the constant $\varepsilon > 0$ keeps the square root differentiable at zero variance
+<Cite id="corso2020pna" />.
+
+### The degree scalers
+
+The sum aggregator equals the mean times the degree: $\sum_u x_u = d_v\,\mu_v$. Any scaler that is an injective
+function of $d_v$ restores the information about multiset size that the mean drops, so a mean times an injective scaler
+is as discriminative as a sum on countable features <Cite id="corso2020pna" />. The linear scaler $d_v$ has a cost: a
+layer multiplies its input by the degree, and $L$ layers by roughly $d^L$, which makes trained networks sensitive to
+graphs with larger degrees than the training set. The logarithm grows slowly, and $\delta$ normalises it so that a node
+of typical degree gets a factor near 1.
+
+Amplification ($\alpha = 1$) emphasises high-degree nodes, attenuation ($\alpha = -1$) emphasises low-degree nodes, and
+the identity ($\alpha = 0$) leaves the aggregate as it is. The combined aggregator is the tensor product of the three
+scalers with the four aggregators, giving twelve blocks of $F$ features each.
+
+### The layer
+
+PNA sits inside the general message passing network <Cite id="corso2020pna" />:
+
+$$
+\hvec_v' = U\paren{\hvec_v,\ \bigoplus_{u \in \Ncal(v)} M(\hvec_v, \evec_{uv}, \hvec_u)},
+$$
+
+with $\bigoplus$ the twelve scaled aggregates, $M$ a message network and $U$ an update that maps the concatenation of
+size $13F$ (the node's own vector and twelve aggregates) back to $F$. Corso et al. found a linear $M$ and $U$ sufficient
+on their benchmarks, and split the features into towers, each with its own aggregation, to keep the cost down.
+
+PNA is still a message passing network, so it is still bounded by colour refinement (<Gloss name="wl" form="short" />).
+Its gain is within the bound: it reaches more of the separations that colour refinement allows when features are
+continuous.
+
+### Practice
+
+PNA is a standard strong baseline for molecular graphs. In the GPS study of <NoteLink to="graph-transformer">graph
+transformers</NoteLink>, a plain PNA generally outperformed GINE and
+<NoteLink to="gated-and-edge-conditioned-message-passing">GatedGCN</NoteLink> as the local message passing module,
+before positional and structural encodings were added <Cite id="rampasek2022gps" />.
+
+## Worked example
+
+**Equal mean, different spread.** Node $a$ has neighbour features $\mset{-1, 1}$ and node $b$ has $\mset{-2, 2}$.
+
+- Mean: $(-1 + 1)/2 = 0$ and $(-2 + 2)/2 = 0$. Equal.
+- Sum: 0 and 0. Equal.
+- Maximum: 1 and 2. Different.
+- Minimum: $-1$ and $-2$. Different.
+- Standard deviation: $\sqrt{(1 + 1)/2 - 0} = 1$ and $\sqrt{(4 + 4)/2 - 0} = 2$. Different.
+
+A GIN layer on real-valued hidden vectors would rely on its MLP to have made these sums differ; PNA separates them
+directly with three of its four statistics.
+
+**Equal statistics, different degree.** Node $a$ has $\mset{1, 1}$ and node $b$ has $\mset{1}$.
+
+- Mean 1 and 1, maximum 1 and 1, minimum 1 and 1, standard deviation 0 and 0. All four aggregators tie.
+- The amplification scaler with $\delta = 1$ multiplies the mean by $\log 3 = 1.099$ for $a$ and by $\log 2 = 0.693$ for
+  $b$. The scaled means differ.
+- The attenuation scaler gives $1/\log 3 = 0.910$ and $1/\log 2 = 1.443$.
+
+**Computing $\delta$.** A training set whose nodes have degrees $1, 1, 2, 2, 3$ has
+$\delta = (\log 2 + \log 2 + \log 3 + \log 3 + \log 4)/5 = (0.693 + 0.693 + 1.099 + 1.099 + 1.386)/5 = 0.994$. A node of
+degree 2 then gets an amplification factor $1.099/0.994 = 1.105$, close to 1.
+
+The figure lets you drag the neighbour features of two nodes and shows each aggregator's value.
+
+<AggregatorSeparation />
+
+## Assumptions
+
+- **Continuous features.** The motivation is real-valued hidden vectors. With few, discrete features, a sum with an MLP
+  already separates the multisets.
+- **Representative degrees.** $\delta$ comes from the training graphs. Test graphs with very different degree
+  distributions shift every scaled aggregate.
+- **Neighbourhood statistics matter.** The extra aggregators help where neighbourhoods differ in spread or range, as
+  with atom features in molecules or signal values on meshes.
+
+## Pitfalls
+
+- **Width and cost.** Twelve aggregates per feature make the update's input 13 times wider than the hidden width. The
+  layer costs several times a GIN layer in memory and parameters; towers reduce it.
+- **Zero variance.** Without $\varepsilon$, the gradient of $\sigma$ is infinite where all neighbours agree, which is
+  common for leaf nodes and for constant input features.
+- **Degree zero.** The scalers are defined for $d > 0$. Isolated nodes need a convention, such as zero aggregates.
+- **No escape from the bound.** Multiple aggregators do not separate the 6-cycle from two triangles, or any other pair
+  that colour refinement ties; see <NoteLink to="expressive-power-of-message-passing" />.

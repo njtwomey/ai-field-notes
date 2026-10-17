@@ -1,0 +1,228 @@
+---
+title: 'Boolean rule learning'
+kind: technique
+summary: 'Boolean rule learning fits a formula in disjunctive or conjunctive normal form by integer programming, minimising error under a complexity budget. Column generation adds a clause only when it improves the linear relaxation, which keeps the search tractable and bounds the gap.'
+tags: [logic, rule-learning, optimisation, worked-example]
+aliases: ['BRCG', 'Boolean decision rules via column generation', 'DNF learning', 'CNF learning', 'rule set by integer programming']
+requires: [decision-lists-and-rule-sets, linear-programming]
+related:
+  [
+    certifiably-optimal-rule-lists,
+    association-rule-classification,
+    sequential-covering,
+    ripper,
+    propositional-and-first-order-logic-for-learning,
+    intrinsically-interpretable-models,
+  ]
+references: [dash2018brcg, wang2017brs, lakkaraju2016ids, angelino2018, cohen1995]
+status: draft
+updated: 2026-10-17
+---
+
+import { ColumnGeneration } from './ColumnGeneration'
+
+<Definition>
+**Boolean rule learning** fits a classifier written as a formula in <Gloss name="dnf">disjunctive normal form</Gloss>,
+an OR of **clauses** each of which is an AND of binary features, or in conjunctive normal form, an AND of ORs. A
+two-class DNF rule set predicts positive when any clause holds. <Gloss name="brcg" /> states the fit as an integer
+program that minimises a training loss under a budget on the total size of the clauses, and solves its linear relaxation
+by **column generation**, creating a clause only when the relaxation's dual prices show that it can lower the objective
+<Cite id="dash2018brcg" />.
+</Definition>
+
+## Problem
+
+A two-class <NoteLink to="decision-lists-and-rule-sets">rule set</NoteLink> is a DNF formula: "predict high risk if
+(fewer than 5 accounts) or (at least 7 accounts and debt above 1000)". Its rules can be read in any order, which a user
+study found easier than accounting for the negated rules above each line of a decision list
+<Cite id="lakkaraju2016ids" />. <NoteLink to="sequential-covering">Sequential covering</NoteLink> and
+<NoteLink to="ripper">RIPPER</NoteLink> learn such sets greedily, one rule at a time, with no stated objective and no
+measure of how far the result is from the best set <Cite id="cohen1995" />. Methods that do optimise an objective, such
+as Bayesian rule sets and interpretable decision sets, first mine a pool of candidate rules and then choose among them,
+so a good clause outside the pool is never considered <Cite id="wang2017brs" /> <Cite id="lakkaraju2016ids" />.
+
+The number of possible clauses is exponential in the number of binary features, so no method can list them all on
+realistic data. Column generation, a standard device of large-scale <Gloss name="lp">linear programming</Gloss>, works
+with a small set of clauses and finds missing improving ones by solving a pricing problem. It keeps the optimisation and
+the certificate of <NoteLink to="certifiably-optimal-rule-lists">certifiably optimal rule lists</NoteLink> and changes
+the model, an unordered set instead of a list, and the source of candidates, generated on demand instead of pre-mined.
+
+## Mechanism
+
+### Binary features
+
+Every input is turned into binary features. A categorical attribute gives one indicator per level and the negation of
+each, $X_j = x$ and $X_j \ne x$. A numeric attribute gives threshold comparisons and their negations, $X_j \le t$ and
+$X_j > t$, at a few quantiles such as the deciles <Cite id="dash2018brcg" />. A clause is a set of these features, and a
+row satisfies it when every feature in it is 1.
+
+### The master integer program
+
+Let $\Pcal$ and $\Zcal$ be the training rows with label 1 and 0, $\Kcal$ the set of all clauses, and $\Kcal_i$ the
+clauses that row $i$ satisfies. A binary variable $w_k$ selects clause $k$, and $\xi_i \ge 0$ marks a positive row that
+no selected clause covers. The **Hamming loss** counts each uncovered positive once and each negative once per selected
+clause that covers it, the number of clauses one would have to add or remove to classify every row correctly. The master
+integer program is <Cite id="dash2018brcg" />
+
+$$
+\begin{aligned}
+z_{\text{MIP}} = \min_{\xi, w} \quad & \sum_{i \in \Pcal} \xi_i + \sum_{i \in \Zcal}\sum_{k \in \Kcal_i} w_k \\
+\text{subject to} \quad & \xi_i + \sum_{k \in \Kcal_i} w_k \ge 1, \quad \xi_i \ge 0, \qquad i \in \Pcal, \\
+& \sum_{k \in \Kcal} c_k w_k \le C, \\
+& w_k \in \{0, 1\}, \qquad k \in \Kcal.
+\end{aligned}
+$$
+
+The **complexity** of clause $k$ is $c_k = 1 + \abs{k}$, one plus its number of features, and $C$ is the budget. The
+Hamming loss is linear in $w$, which the 0-1 error is not, and it is an upper bound on the 0-1 error. The two agree when
+no negative row is covered by two selected clauses. A CNF formula is learned with the same program after negating the
+labels and the features, by De Morgan's laws.
+
+### Column generation
+
+The **master LP** drops the integrality of $w$. It still has one column per clause. Column generation solves it over a
+small set of clauses, the **restricted master LP**, and adds clauses one at a time.
+
+1. Solve the restricted master LP. It starts feasible with no clauses at all: $\xi_i = 1$ for every positive row.
+2. Read the dual prices: $\mu_i \ge 0$ for the covering constraint of positive row $i$, $\lambda \ge 0$ for the budget.
+3. **Pricing.** The reduced cost of a clause not yet in the LP is its objective coefficient minus the dual prices of the
+   constraints it enters:
+
+   $$
+   \bar c = \sum_{i \in \Zcal} \delta_i - \sum_{i \in \Pcal} \mu_i \delta_i + \lambda c,
+   $$
+
+   where $\delta_i = 1$ when row $i$ satisfies the clause. A clause with $\bar c < 0$ would lower the LP objective if it
+   were added. Dash et al. find the clause of least reduced cost by a second integer program over which features to
+   include <Cite id="dash2018brcg" />.
+4. If the least reduced cost $z_{\text{CG}}$ is negative, add that clause and return to step 1. Otherwise the restricted
+   LP is optimal for the full master LP.
+
+The reduced cost reads naturally. A clause pays one unit for each negative it covers and earns $\mu_i$ for each positive
+it covers, where $\mu_i$ is the current marginal value of covering row $i$; it also pays $\lambda$ per unit of
+complexity, the current marginal value of the budget.
+
+### Bounds and the final rule set
+
+Every rule set within the budget is feasible for the master LP, and the Hamming loss is an integer, so
+$\lceil z_{\text{MLP}} \rceil \le z_{\text{MIP}}$. Column generation need not run to the end to give a bound. At any
+iteration,
+
+$$
+z_{\text{MIP}} \ge \Big\lceil z_{\text{RMLP}} + \tfrac{C}{2}\, z_{\text{CG}} \Big\rceil,
+$$
+
+because every clause has $c_k \ge 2$, so a rule set within the budget has at most $C/2$ clauses, each lowering the
+objective by at most $\abs{z_{\text{CG}}}$ <Cite id="dash2018brcg" />. The rule set itself comes from solving the
+**restricted master integer program**, the master program over the generated clauses only, with an off-the-shelf
+solver. Its Hamming loss minus the bound is a certificate of how far it can be from optimal; when the two meet, the rule
+set is optimal.
+
+<Derivation title="The bound from an unfinished column generation">
+Let $(\mu, \lambda)$ be optimal duals of the restricted master LP, so $z_{\text{RMLP}} = \sum_{i \in \Pcal} \mu_i -
+\lambda C$ by strong duality, and $\mu_i \le 1$, since the reduced cost $1 - \mu_i$ of $\xi_i$ is non-negative at the
+optimum. For any feasible point $(\xi, w)$ of the full master LP, write each clause's objective coefficient as its
+reduced cost plus its dual terms: $\sum_{i \in \Zcal} \delta_{ik} = \bar c_k + \sum_{i \in \Pcal} \mu_i \delta_{ik} -
+\lambda c_k$. Substituting into the objective gives
+
+$$
+\sum_{i \in \Pcal} \xi_i + \sum_k \Big(\bar c_k + \sum_{i \in \Pcal}\mu_i \delta_{ik} - \lambda c_k\Big) w_k
+= \sum_k \bar c_k w_k + \sum_{i \in \Pcal} \mu_i \Big(\xi_i + \sum_k \delta_{ik} w_k\Big) + \sum_{i \in \Pcal}(1 - \mu_i)\xi_i
+- \lambda \sum_k c_k w_k.
+$$
+
+The covering constraints make the second sum at least $\sum_i \mu_i$, the third sum is non-negative, and the budget
+makes the last term at least $-\lambda C$. Every $\bar c_k \ge z_{\text{CG}}$ (clauses already in the restricted LP have
+$\bar c_k \ge 0 \ge z_{\text{CG}}$), and $\sum_k w_k \le \frac12 \sum_k c_k w_k \le C/2$. With $z_{\text{CG}} \le 0$ the
+first sum is at least $\frac{C}{2} z_{\text{CG}}$. Hence the objective is at least $z_{\text{RMLP}} + \frac{C}{2}
+z_{\text{CG}}$ for every feasible point, in particular for every rule set within the budget, and rounding up is valid
+because the Hamming loss is an integer.
+</Derivation>
+
+### Larger data
+
+The pricing integer program grows with the number of rows times the number of features. For data sets with more than a
+few thousand rows or a few hundred binary features, Dash et al. stop the pricing solver at a time limit, continue with a
+greedy beam search over clauses of up to five features, and for the largest data price on random samples of rows and
+features <Cite id="dash2018brcg" />. The optimality certificate is then lost, but every clause still lowers the correct
+objective.
+
+## Worked example
+
+Use the Titanic data with "survived" as the positive label: 711 positives and 1490 negatives. The binary features are
+the four class levels, their four negations, the two sexes and the two ages. Identical rows are merged into 24 groups
+with counts, and each count multiplies its row's terms in the objective. Take $C = 6$ and clauses of at most three
+features.
+
+**Iteration 0.** No clause exists, so every positive is uncovered: $\xi_i = 1$ and $z_{\text{RMLP}} = 711$. Each
+covering constraint is tight and costs one unit per positive row, so $\mu_i = 1$ per row; the budget is unused, so
+$\lambda = 0$. The reduced cost of a clause is then the negatives it covers minus the positives it covers. The best
+clause is $\text{class} \ne \text{3rd} \wedge \text{sex} = \text{female}$: it covers 254 survivors and 20 deaths, so
+$\bar c = 20 - 254 = -234$. It joins.
+
+**Iteration 1.** With that clause at weight 1, the LP objective is $711 - 254 + 20 = 477$. Pricing proposes
+$\text{class} = \text{crew} \wedge \text{sex} = \text{female}$ at $\bar c = -17$, which the LP then leaves at weight 0:
+its rows are already covered by the first clause, and the duals were degenerate.
+
+**Iterations 2 to 4.** The clause $\text{class} \ne \text{3rd} \wedge \text{class} \ne \text{crew} \wedge \text{age} =
+\text{child}$ joins next. It costs 4 against the remaining budget of 3, so the LP uses it at weight 0.75 and the
+objective falls to 465; the budget is now binding and $\lambda = 4$. Pricing then finds the cheaper
+$\text{class} \ne \text{3rd} \wedge \text{age} = \text{child}$ at $\bar c = -4$, which covers the same 30 surviving
+first- and second-class children with complexity 3, and the objective falls to 461. In iteration 4 one more clause,
+second-class women, joins at weight 0.
+
+**Iteration 5.** No clause has negative reduced cost, so the LP is optimal at 461, and the bound is
+$\lceil 461 + 3 \times 0 \rceil = 461$. The restricted integer program selects
+
+$$
+(\text{class} \ne \text{3rd} \wedge \text{sex} = \text{female}) \vee (\text{class} \ne \text{3rd} \wedge \text{age} = \text{child}),
+$$
+
+"survived if not in third class and a woman or a child". No death is covered twice, so its Hamming loss equals its 0-1
+error, 461 people. Loss and bound meet: no rule set within the budget does better. The same 461 errors are the minimum
+that <NoteLink to="certifiably-optimal-rule-lists">CORELS</NoteLink> certifies over rule lists of these attributes.
+
+**A tighter budget.** With $C = 4$ a rule set holds one clause of up to three features or two single-feature
+clauses. The LP optimum is $471.67$, a fractional mixture of
+clauses, so the bound is 472, while the best rule set, the first clause alone, makes 477 errors. The gap of 5 is the
+integrality gap of the relaxation.
+
+The figure replays the iterations. On the planted data, 400 rows of six fair binary features labelled by
+$(x_1 \wedge x_2) \vee (x_3 \wedge \neg x_4)$ with 10% of labels flipped, the method recovers the planted formula at
+$C = 6$, and its 44 errors are exactly the flipped labels.
+
+<ColumnGeneration />
+
+## Cost
+
+Each iteration solves one linear program, cheap at these sizes, and one pricing problem, an integer program that is
+NP-hard in general. Dash et al. call data sets with fewer than a couple of thousand rows and a few hundred binary
+features small; on those the full framework runs to provable optimality <Cite id="dash2018brcg" />. Larger data sets
+need the time limits, heuristics and sampling described above, and the final restricted integer program is solved by a
+branch-and-bound solver. Merging identical rows, as in the example, shrinks every program when the features are few.
+
+## Trade-offs
+
+- **Against greedy covering.** The rule set optimises a stated objective and comes with a bound. On 16 data sets, the
+  column-generation method dominated the accuracy-complexity trade-off of three other optimisation-based rule-set
+  learners on 8, and when tuned for accuracy alone it was competitive with RIPPER, sometimes with much simpler rules
+  <Cite id="dash2018brcg" />.
+- **Against rule lists.** A DNF set needs no order, and each rule can be read alone. A
+  <NoteLink to="decision-lists-and-rule-sets">decision list</NoteLink> can be exponentially shorter for some concepts,
+  and CORELS optimises 0-1 error directly rather than a Hamming upper bound <Cite id="angelino2018" />.
+- **Against pre-mined candidates.** Generating clauses from dual prices avoids a mining threshold that might exclude
+  the best clause. Pre-mining is simpler to implement and needs no integer-programming solver.
+- **Budget against penalty.** A complexity budget $C$ states the readable size directly. A penalty on complexity in
+  the objective is an equivalent alternative, and both can be combined <Cite id="dash2018brcg" />.
+
+## Pitfalls
+
+- **Hamming loss is not 0-1 error.** A negative covered by two clauses counts twice. Rule sets with overlapping clauses
+  are penalised more than their 0-1 error warrants.
+- **Binarisation limits the rules.** Thresholds exist only at the chosen quantiles, and a categorical attribute with
+  many levels gives many features.
+- **Optimal on the training data.** The certificate concerns training loss. Choose $C$ by
+  <NoteLink to="cross-validation">cross-validation</NoteLink> or by the size a reader can audit.
+- **Degenerate iterations.** Clauses with negative reduced cost can enter at weight zero, as in iteration 1 of the
+  example. The LP objective then stalls for a few iterations without the method being stuck.
+- **Ties.** Several rule sets can share the optimal loss; the certificate covers the loss, not the choice of set.
